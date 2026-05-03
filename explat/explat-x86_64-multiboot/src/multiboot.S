@@ -48,8 +48,7 @@ entry32:
     movw    %ax, %ss
 
     # Enable PAE, PGE in CR4
-    movl    %cr4, %eax
-    orl     $0xa0, %eax
+    movl    ${cr4}, %eax
     movl    %eax, %cr4
 
     # Load the boot pagetable
@@ -58,13 +57,12 @@ entry32:
 
     # Enable LME, NXE in EFER
     movl    $0xC0000080, %ecx
-    rdmsr
-    orl     $0x900, %eax
+    xorl    %edx, %edx
+    movl    ${efer}, %eax
     wrmsr
 
     # Enable PE, MP, NE, WP, PG in CR0
-    movl    %cr0, %eax
-    orl     $0x80010023, %eax
+    movl    ${cr0}, %eax
     movl    %eax, %cr0
 
     # Jump to long mode
@@ -124,5 +122,5 @@ boot_pt_pdpt:
 .section .bss
 .balign 4096
 boot_stack:
-    .space 4096 * 16
+    .space 4096 * 16    # 64 KiB stack
 boot_stack_top:

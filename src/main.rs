@@ -3,7 +3,7 @@
 
 use explat_x86_64_multiboot as _;
 
-const HELLO_MESSAGE: &str = "\n\nHello, EcraOS!\nA Derivative of the ArceOS project.\n";
+const HELLO_MESSAGE: &str = "\n\nHello, ecraOS!\n\necraOS is a derivative of the ArceOS project.\n";
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
