@@ -1,41 +1,16 @@
 #![no_std]
 #![no_main]
 
-use core::arch::global_asm;
+use explat_x86_64_multiboot as _;
 
-mod plat_multiboot;
+const HELLO_MESSAGE: &str = "\n\nHello, EcraOS!\nA Derivative of the ArceOS project.\n";
 
 #[unsafe(no_mangle)]
-fn main() {
-    unsafe {
-        core::arch::asm!(
-            "
-    mov     $0x3F8, %dx                     # The serial port COM1
-    mov     $message, %esi                  # The message to print
-    mov     $(message_end - message), %ecx  # The length of the message
-
-    rep outsb
-
-    mov     $0x604, %dx
-    mov     $0x2000, %ax
-    out     %ax, (%dx)
-
-    hlt",
-            options(att_syntax)
-        );
-    }
+pub extern "C" fn kernel_main() -> ! {
+    explat::init::init_early();
+    explat::debug_console::write_str(HELLO_MESSAGE);
+    explat::power::poweroff()
 }
-
-global_asm!(
-    r#"
-.section .rodata.boot
-.type message, @object
-message:
-    .asciz  "\nHello, EcraOS!\n"
-message_end:
-"#,
-    options(att_syntax)
-);
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

@@ -13,6 +13,7 @@ SECTIONS {
         _etext = .;
     }
 
+    /* Read-only data sections */
     _srodata = .;
     .rodata : ALIGN(4K) {
         *(.rodata .rodata.*)
@@ -29,13 +30,21 @@ SECTIONS {
     . = ALIGN(4K);
     _erodata = .;
 
-    .data : {
+    /* Data sections */
+    .data : ALIGN(4K) {
+        _sdata = .;
         *(.data .data.*)
     }
+    . = ALIGN(4K);
+    _edata = .;
 
-    .bss : {
+    /* BSS sections */
+    .bss : ALIGN(4K) {
+        _sbss = .;
         *(.bss)
     }
+    . = ALIGN(4K);
+    _ebss = .;
 
     _ekernel = .;
 
