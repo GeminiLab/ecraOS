@@ -56,6 +56,16 @@ name = "explat"
 version = "0.1.0"
 dependencies = [
  "crate_interface",
+ "explat-macros",
+]
+
+[[package]]
+name = "explat-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

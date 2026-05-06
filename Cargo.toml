@@ -13,4 +13,5 @@ members = [
     ".",
     "explat/explat",
     "explat/explat-x86_64-multiboot",
+    "explat/explat-macros",
 ]
