@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 crate_interface = "0.3"
 explat-macros = { path = "../explat-macros" }
+heapless = "0.9"

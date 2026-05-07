@@ -6,7 +6,7 @@ use core::fmt::Write;
 use crate::crate_interface::def_interface;
 
 /// Low-level debug console operations implemented by the platform.
-/// 
+///
 /// Methods in this trait may be unavailable before [`init_early`](crate::init::InitIf::init_early)
 /// is called.
 #[def_interface(gen_caller)]
@@ -38,7 +38,14 @@ impl Write for DebugConsole {
 
 /// Write formatted content to the debug console.
 pub fn write_fmt(args: core::fmt::Arguments) {
-    Write::write_fmt(&mut DebugConsole, args).unwrap();
+    // SAFETY: `write_fmt` returns `Err` iff `write_str` returns `Err`, which is
+    // impossible for `DebugConsole`.
+    //
+    // Also, panicking here is logically incorrect, because panic handler will
+    // use debug console to print the panic message.
+    unsafe {
+        Write::write_fmt(&mut DebugConsole, args).unwrap_unchecked();
+    }
 }
 
 /// Prints formatted text to the debug console (no trailing newline).

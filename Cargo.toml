@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 explat = { path = "explat/explat" }
-explat-x86_64-multiboot = { path = "explat/explat-x86_64-multiboot" }
 
 [workspace]
 resolver = "3"
