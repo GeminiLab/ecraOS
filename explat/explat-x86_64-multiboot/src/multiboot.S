@@ -25,11 +25,6 @@ multiboot_header:
     .long   _ebss                   # BSS end
     .long   _start                  # Entry point
 
-# ---- Page tables at fixed low physical addresses (identity map first 16 MiB with 2 MiB pages) ----
-.set PML4,  0x1000
-.set PDPT,  0x2000
-.set PD,    0x3000
-
 .code32
 .global entry32
 entry32:

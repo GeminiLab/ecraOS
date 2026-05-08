@@ -8,7 +8,7 @@ PLAT="$ROOT/target/x86_64-unknown-none/debug/libexplat_x86_64_multiboot.rlib"
 KERNEL="$ROOT/target/x86_64-unknown-none/debug/ecraos"
 
 cargo clean
-cargo build -p explat-x86_64-multiboot --target x86_64-unknown-none
+RUSTFLAGS="-C relocation-model=static" cargo build -p explat-x86_64-multiboot --target x86_64-unknown-none
 RUSTFLAGS="-C link-arg=-Tlink.ld --cfg link_with_explat_impl --extern explat_impl=$PLAT -C relocation-model=static" cargo build -p ecraos --target x86_64-unknown-none
 
 TIMEOUT_SEC="${TIMEOUT_SEC:-8}"
