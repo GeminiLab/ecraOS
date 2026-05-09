@@ -3,8 +3,9 @@ ENTRY(_start)
 
 SECTIONS {
     . = BASE_ADDRESS;
-    _skernel = .;
+    _sloader = .;
 
+    /* Text sections */
     .text : ALIGN(4K) {
         _stext = .;
         *(.text.boot)
@@ -30,26 +31,34 @@ SECTIONS {
     . = ALIGN(4K);
     _erodata = .;
 
+    /* Kernel payload section */
+    .kernel : ALIGN(4K) {
+        _skernel = .;
+        __exboot_kernel_entry = .;
+        *(.kernel)
+        . = ALIGN(4K);
+        _ekernel = .;
+    }
+
     /* Data sections */
     .data : ALIGN(4K) {
         _sdata = .;
         *(.data .data.*)
+        . = ALIGN(4K);
+        _edata = .;
     }
-    . = ALIGN(4K);
-    _edata = .;
 
     /* BSS sections */
     .bss : ALIGN(4K) {
         _sbss = .;
-        *(.bss)
+        *(.bss .bss.*)
+        . = ALIGN(4K);
+        _ebss = .;
     }
-    . = ALIGN(4K);
-    _ebss = .;
 
-    _ekernel = .;
+    _eloader = .;
 
     /DISCARD/ : {
-        *(.comment)
-        *(.eh_frame*)
+        *(.comment) *(.eh_frame*) *(.debug*)
     }
 }

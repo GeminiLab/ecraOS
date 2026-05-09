@@ -1,11 +1,12 @@
-//! Multiboot 1 boot: assembly sets CR0/CR4/EFER, identity-maps low memory, enters long mode,
-//! then calls `rust_entry64_bsp` with Multiboot registers still in the low halves of the
-//! first two argument registers per the x86-64 System V ABI.
+//! Multiboot 1 boot module for x86-64.
+
+#![no_std]
 
 use core::arch::global_asm;
 
-use explat::call_kernel_entry;
 use x86_64::registers::control::{Cr0Flags, Cr4Flags, EferFlags};
+
+use exboot::BootArg;
 
 /// `CR0` value applied by boot code: protected mode, paging, write protect, FP-related bits.
 const CR0: u64 = Cr0Flags::PROTECTED_MODE_ENABLE.bits()
@@ -29,6 +30,8 @@ global_asm!(
     efer = const EFER,
 );
 
+use exboot::call_kernel_entry;
+
 /// First Rust code on the bootstrap processor after the `global_asm!` boot path: jumps to the
 /// portable kernel entry with `hart_id == 0`.
 ///
@@ -37,5 +40,5 @@ global_asm!(
 /// [`explat::init::InitIf::init_early`].
 #[unsafe(no_mangle)]
 fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
-    call_kernel_entry!(0, arg1 as _)
+    call_kernel_entry!(0, BootArg::Multiboot(arg1 as _))
 }

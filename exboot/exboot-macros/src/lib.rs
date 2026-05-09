@@ -3,21 +3,16 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{FnArg, Ident, ItemFn, PatType, ReturnType, Type, parse_macro_input};
+use syn::{Ident, ItemFn, parse_macro_input};
 
 /// Exported symbol name for the kernel entry (`export_name` / `extern "Rust"`).
-const fn kernel_entry_name() -> &'static str {
-    "__explat_kernel_entry"
+const fn kernel_entry_export_name() -> &'static str {
+    "__exboot_kernel_entry"
 }
 
-/// Builds the `syn` identifier for the exported kernel entry symbol (`__explat_kernel_entry`).
-fn kernel_entry_ident() -> Ident {
-    format_ident!("{}", kernel_entry_name())
-}
-
-/// Loose structural equality check comparing the pretty-printed [`Type`] to `expected`.
-fn type_equals_to(ty: &Type, expected: &str) -> bool {
-    quote! { #ty }.to_string() == expected
+/// Builds the `syn` identifier for the exported kernel entry symbol (`__exboot_kernel_entry`).
+fn kernel_entry_export_ident() -> Ident {
+    format_ident!("{}", kernel_entry_export_name())
 }
 
 /// Marks a function as the kernel entry function, which will be called by the
@@ -36,39 +31,28 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     let kernel_entry = parse_macro_input!(input as ItemFn);
-
-    if let ReturnType::Type(_, tyr) = &kernel_entry.sig.output
-        && type_equals_to(tyr, "!")
-        && let &[
-            FnArg::Typed(PatType { ty: tya1, .. }),
-            FnArg::Typed(PatType { ty: tya2, .. }),
-        ] = kernel_entry
-            .sig
-            .inputs
-            .iter()
-            .collect::<Vec<_>>()
-            .as_slice()
-        && type_equals_to(tya1, "usize")
-        && type_equals_to(tya2, "usize")
-    {
-        let kernel_entry_name = kernel_entry_name();
-
-        return quote! {
-            #[unsafe(export_name = #kernel_entry_name)]
-            #kernel_entry
-        }
-        .into();
-    }
+    let kernel_entry_name = kernel_entry.sig.ident.clone();
+    let kernel_entry_export_name = kernel_entry_export_name();
 
     quote! {
-        compile_error!("kernel_entry function must have signature `fn(hard_id: usize, arg: usize) -> !`");
-    }.into()
+        #[unsafe(export_name = #kernel_entry_export_name)]
+        #[unsafe(link_section = ".text.kernel_entry")]
+        #kernel_entry
+
+        #[doc(hidden)]
+        #[allow(clippy::unused_unit)]
+        const KERNEL_ENTRY_SIGNATURE_GUARD: () = {
+            let _kernel_entry_must_match_signature: ::exboot::KernelEntryType = #kernel_entry_name;
+            ()
+        };
+    }
+    .into()
 }
 
 /// Calls the kernel entry function marked by [`kernel_entry`]. Two arguments
 /// should be passed to the function: `hart_id` (Hardware Thread ID of the
 /// bootstrap processor) and `arg` (the architecture-and-platform-specific
-/// argument that will later be passed to the `InitIf::init_early` method.
+/// argument that will later be passed to the `InitIf::init_early` method).
 ///
 /// The kernel entry function should be called by the platform crate with the
 /// following conditions met:
@@ -81,12 +65,12 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn call_kernel_entry(input: TokenStream) -> TokenStream {
     let input = TokenStream2::from(input);
-    let kernel_entry_ident = kernel_entry_ident();
+    let kernel_entry_ident = kernel_entry_export_ident();
 
     quote! {
         {
             unsafe extern "Rust" {
-                fn #kernel_entry_ident(hart_id: usize, arg: usize) -> !;
+                fn #kernel_entry_ident(hart_id: usize, arg: ::exboot::BootArg) -> !;
             }
 
             unsafe {

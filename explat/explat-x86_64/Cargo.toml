@@ -1,0 +1,10 @@
+[package]
+name = "explat-x86_64"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+explat = { path = "../explat" }
+kspin = "0.2"
+multiboot = "0.8"
+uart_16550 = "0.4"  # later versions cannot be used because of the lack of const constructors

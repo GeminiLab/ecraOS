@@ -1,5 +1,5 @@
-//! x86_64 Multiboot 1 platform support: boot entry in [`multiboot`], COM1 debug console,
-//! [`explat`] trait implementations, and ACPI-style shutdown for QEMU.
+//! x86_64 Multiboot 1 platform support: COM1 debug console, [`explat`] trait
+//! implementations, and ACPI-style shutdown for QEMU.
 
 #![no_std]
 
@@ -7,8 +7,6 @@
 pub mod debug_console;
 /// [`explat::init::InitIf`] bridge into this crate's early setup.
 pub mod init;
-/// Multiboot assembly entry, long-mode bring-up, and hand-off to the portable kernel entry.
-pub mod multiboot;
 /// [`explat::power::PowerIf`] using the QEMU `0x604` PM port.
 pub mod power;
 

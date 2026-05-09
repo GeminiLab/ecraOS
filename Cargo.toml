@@ -1,16 +1,11 @@
-[package]
-name = "ecraos"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-explat = { path = "explat/explat" }
-
 [workspace]
 resolver = "3"
 members = [
-    ".",
+    "ecraos",
     "explat/explat",
-    "explat/explat-x86_64-multiboot",
-    "explat/explat-macros",
+    "explat/explat-x86_64",
+    "ecraos-loader",
+    "exboot/exboot",
+    "exboot/exboot-macros",
+    "exboot/exboot-multiboot-x86_64",
 ]

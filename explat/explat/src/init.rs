@@ -1,5 +1,6 @@
 //! Initialization hooks: early and later platform bring-up.
 
+pub use exboot::BootArg;
 use heapless::Vec as HeaplessVec;
 
 use crate::crate_interface::def_interface;
@@ -38,7 +39,7 @@ pub trait InitIf {
     /// - Initialize the debug console.
     /// - Collect memory information.
     ///
-    fn init_early(arg: usize) -> EarlyInitResult;
-    /// Later platform initialization.
+    fn init_early(arg: BootArg) -> EarlyInitResult;
+    /// Later platform initialization. Yet to be implemented.
     fn init_later();
 }

@@ -20,7 +20,7 @@ multiboot_header:
     .long   MULTIBOOT_FLAGS         # Flags
     .long   MULTIBOOT_CHECKSUM      # Checksum
     .long   multiboot_header        # Header address
-    .long   _skernel                # Load start
+    .long   _sloader                # Load start
     .long   _edata                  # Load end
     .long   _ebss                   # BSS end
     .long   _start                  # Entry point

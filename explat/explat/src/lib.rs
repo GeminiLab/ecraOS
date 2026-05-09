@@ -10,6 +10,3 @@ pub mod power;
 pub mod crate_interface {
     pub use crate_interface::*;
 }
-
-/// Re-export of macros from the `explat-macros` crate.
-pub use explat_macros::*;

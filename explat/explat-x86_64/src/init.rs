@@ -2,7 +2,7 @@
 
 use explat::{
     crate_interface,
-    init::{EarlyInitResult, EarlyMemoryRegion, EarlyMemoryRegions, InitIf},
+    init::{BootArg, EarlyInitResult, EarlyMemoryRegion, EarlyMemoryRegions, InitIf},
 };
 use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
 
@@ -30,25 +30,25 @@ pub struct InitImpl;
 
 #[crate_interface::impl_interface]
 impl InitIf for InitImpl {
-    fn init_early(arg: usize) -> EarlyInitResult {
+    fn init_early(arg: BootArg) -> EarlyInitResult {
         crate::init_early();
 
         let mut memory_regions = EarlyMemoryRegions::new();
+        let BootArg::Multiboot(arg) = arg else {
+            return EarlyInitResult { memory_regions };
+        };
         let mut mem = MultibootMem;
         let info = unsafe { Multiboot::from_ptr(arg as _, &mut mem).unwrap() };
 
         if let Some(multiboot_memory_regions) = info.memory_regions() {
             for memory_region in multiboot_memory_regions {
                 if memory_region.memory_type() == MemoryType::Available {
-                    if memory_regions
-                        .push(EarlyMemoryRegion {
-                            start: memory_region.base_address() as _,
-                            size: memory_region.length() as _,
-                        })
-                        .is_err()
-                    {
+                    let Ok(_) = memory_regions.push(EarlyMemoryRegion {
+                        start: memory_region.base_address() as _,
+                        size: memory_region.length() as _,
+                    }) else {
                         break;
-                    }
+                    };
                 }
             }
         }

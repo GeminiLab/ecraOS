@@ -53,20 +53,23 @@ dependencies = [
 name = "ecraos"
 version = "0.1.0"
 dependencies = [
+ "exboot",
  "explat",
 ]
 
 [[package]]
-name = "explat"
+name = "ecraos-loader"
+version = "0.1.0"
+
+[[package]]
+name = "exboot"
 version = "0.1.0"
 dependencies = [
- "crate_interface",
- "explat-macros",
- "heapless",
+ "exboot-macros",
 ]
 
 [[package]]
-name = "explat-macros"
+name = "exboot-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -75,14 +78,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "explat-x86_64-multiboot"
+name = "exboot-multiboot-x86_64"
+version = "0.1.0"
+dependencies = [
+ "exboot",
+ "x86_64",
+]
+
+[[package]]
+name = "explat"
+version = "0.1.0"
+dependencies = [
+ "crate_interface",
+ "exboot",
+ "heapless",
+]
+
+[[package]]
+name = "explat-x86_64"
 version = "0.1.0"
 dependencies = [
  "explat",
  "kspin",
  "multiboot",
  "uart_16550",
- "x86_64",
 ]
 
 [[package]]
