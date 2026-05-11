@@ -7,4 +7,6 @@ edition = "2024"
 explat = { path = "../explat" }
 kspin = "0.2"
 multiboot = "0.8"
+raw-cpuid = "11.6"
 uart_16550 = "0.4"  # later versions cannot be used because of the lack of const constructors
+x86_64 = "0.15.4"

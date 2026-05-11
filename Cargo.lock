@@ -55,6 +55,7 @@ version = "0.1.0"
 dependencies = [
  "exboot",
  "explat",
+ "memory_addr",
 ]
 
 [[package]]
@@ -101,7 +102,9 @@ dependencies = [
  "explat",
  "kspin",
  "multiboot",
+ "raw-cpuid 11.6.0",
  "uart_16550",
+ "x86_64",
 ]
 
 [[package]]
@@ -144,6 +147,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "memory_addr"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f0625c50adb5f6aaf47f05cae3c4dbc13a74c659241b06c4576f3d7e1da940"
+
+[[package]]
 name = "multiboot"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -183,6 +192,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c297679cb867470fa8c9f67dbba74a78d78e3e98d7cf2b08d6d71540f797332"
 dependencies = [
  "bitflags 1.3.2",
+]
+
+[[package]]
+name = "raw-cpuid"
+version = "11.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
+dependencies = [
+ "bitflags 2.11.1",
 ]
 
 [[package]]
@@ -239,7 +257,7 @@ checksum = "2781db97787217ad2a2845c396a5efe286f87467a5810836db6d74926e94a385"
 dependencies = [
  "bit_field",
  "bitflags 1.3.2",
- "raw-cpuid",
+ "raw-cpuid 10.7.0",
 ]
 
 [[package]]

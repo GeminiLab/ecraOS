@@ -2,8 +2,10 @@
 
 use crate::kernel_entry;
 
-/// Get the runtime (and current) address of a symbol, with architecture-specific
-/// PC-relative addressing instructions.
+/// Gets the runtime (and current) address of a symbol, with
+/// architecture-specific PC-relative addressing instructions.
+///
+/// It's safe to use this macro even when relocation is not performed.
 #[macro_export]
 macro_rules! get_symbol_addr {
     ($symbol:expr) => {{
@@ -165,3 +167,5 @@ pub unsafe fn relocate_me() {
         }
     }
 }
+
+pub mod sections;
