@@ -7,5 +7,5 @@ members = [
     "ecraos-loader",
     "exboot/exboot",
     "exboot/exboot-macros",
-    "exboot/exboot-multiboot-x86_64",
+    "exboot/exboot-multiboot-x86_64", "expt", "size-disp",
 ]

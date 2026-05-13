@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "aarch64-cpu"
+version = "11.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44171e22925ec72b63d86747bc3655c7849a5b8d865c980222128839f45ac034"
+dependencies = [
+ "tock-registers",
+]
+
+[[package]]
 name = "bit_field"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -19,6 +28,12 @@ name = "bitflags"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
+
+[[package]]
+name = "bitmaps"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d084b0137aaa901caf9f1e8b21daa6aa24d41cd806e111335541eff9683bd6"
 
 [[package]]
 name = "byteorder"
@@ -53,9 +68,12 @@ dependencies = [
 name = "ecraos"
 version = "0.1.0"
 dependencies = [
+ "bitmaps",
  "exboot",
  "explat",
+ "expt",
  "memory_addr",
+ "size-disp",
 ]
 
 [[package]]
@@ -105,6 +123,14 @@ dependencies = [
  "raw-cpuid 11.6.0",
  "uart_16550",
  "x86_64",
+]
+
+[[package]]
+name = "expt"
+version = "0.1.0"
+dependencies = [
+ "memory_addr",
+ "page_table_entry",
 ]
 
 [[package]]
@@ -162,6 +188,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "page_table_entry"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e9a63b9b86d32f64c3874a90936939281d045ef1751d0aca3d82d5e4e06b2ef"
+dependencies = [
+ "aarch64-cpu",
+ "bitflags 2.11.1",
+ "memory_addr",
+ "x86_64",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +248,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "size-disp"
+version = "0.1.0"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -225,6 +267,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tock-registers"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2d250f87fb3fb6f225c907cf54381509f47b40b74b1d1f12d2dccbc915bdfe"
 
 [[package]]
 name = "uart_16550"

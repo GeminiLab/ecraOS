@@ -167,5 +167,3 @@ pub unsafe fn relocate_me() {
         }
     }
 }
-
-pub mod sections;

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitmaps = { version = "3.2.1", default-features = false }
 exboot = { path = "../exboot/exboot" }
 explat = { path = "../explat/explat" }
+expt = { path = "../expt" }
 memory_addr = "0.4"
+size-disp = { path = "../size-disp" }

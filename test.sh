@@ -5,31 +5,37 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 TARGET="x86_64-unknown-none"
+PROFILE="${PROFILE:-debug}"
+if [ "$PROFILE" = "debug" ]; then
+  PROFILE_ARG=""
+else
+  PROFILE_ARG="--profile $PROFILE"
+fi
 
-PLAT="$ROOT/target/$TARGET/debug/libexplat_x86_64.rlib"
-KERNEL="$ROOT/target/$TARGET/debug/ecraos"
-KERNEL_STRIPPED="$ROOT/target/$TARGET/debug/ecraos.bin"
-BOOT="$ROOT/target/$TARGET/debug/libexboot_multiboot_x86_64.rlib"
-LOADER="$ROOT/target/$TARGET/debug/ecraos-loader"
-LOADER_STRIPPED="$ROOT/target/$TARGET/debug/ecraos-loader.bin"
+PLAT="$ROOT/target/$TARGET/$PROFILE/libexplat_x86_64.rlib"
+KERNEL="$ROOT/target/$TARGET/$PROFILE/ecraos"
+KERNEL_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos.bin"
+BOOT="$ROOT/target/$TARGET/$PROFILE/libexboot_multiboot_x86_64.rlib"
+LOADER="$ROOT/target/$TARGET/$PROFILE/ecraos-loader"
+LOADER_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos-loader.bin"
 
 echo "Cleaning up..." >&2
 cargo clean
 
 echo "Building explat-x86_64..." >&2
-RUSTFLAGS="-C relocation-model=pie" cargo build -p explat-x86_64 --target $TARGET
+RUSTFLAGS="-C relocation-model=pie" cargo build -p explat-x86_64 --target $TARGET $PROFILE_ARG
 
 echo "Building ecraos..." >&2
-RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld --cfg building_ecraos --extern explat_impl=$PLAT" cargo build -p ecraos --target $TARGET
+RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld --cfg building_ecraos --extern explat_impl=$PLAT" cargo build -p ecraos --target $TARGET $PROFILE_ARG
 
 echo "Stripping ecraos..." >&2
 rust-objcopy "$KERNEL" --strip-all -O binary "$KERNEL_STRIPPED"
 
 echo "Building exboot-multiboot-x86_64..." >&2
-RUSTFLAGS="-C relocation-model=static" cargo build -p exboot-multiboot-x86_64 --target $TARGET
+RUSTFLAGS="-C relocation-model=static" cargo build -p exboot-multiboot-x86_64 --target $TARGET $PROFILE_ARG
 
 echo "Building ecraos-loader..." >&2
-KERNEL_BIN="$KERNEL_STRIPPED" RUSTFLAGS="-C relocation-model=static -C link-arg=-Tecraos-loader/link.ld --cfg building_ecraos_loader --extern exboot_impl=$BOOT" cargo build -p ecraos-loader --target $TARGET
+KERNEL_BIN="$KERNEL_STRIPPED" RUSTFLAGS="-C relocation-model=static -C link-arg=-Tecraos-loader/link.ld --cfg building_ecraos_loader --extern exboot_impl=$BOOT" cargo build -p ecraos-loader --target $TARGET $PROFILE_ARG
 
 echo "Stripping ecraos-loader..." >&2
 rust-objcopy "$LOADER" --strip-all -O binary "$LOADER_STRIPPED"

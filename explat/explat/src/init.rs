@@ -1,7 +1,5 @@
 //! Initialization hooks: early and later platform bring-up.
 
-use core::num::NonZero;
-
 use heapless::Vec as HeaplessVec;
 
 pub use exboot::BootArg;
@@ -28,14 +26,11 @@ pub enum VAHalfStatus {
     /// This half of the virtual address space is supported, but currently
     /// disabled. At most `max_va_bits` bits are supported **in this half** of
     /// the virtual address space.
-    Disabled { max_bits: NonZero<u32> },
+    Disabled { max_bits: u32 },
     /// This half of the virtual address space is enabled. `current_va_bits`
     /// bits are currently enabled, while at most `max_va_bits` bits are
     /// supported, **in this half** of the virtual address space.
-    Enabled {
-        current_bits: NonZero<u32>,
-        max_bits: NonZero<u32>,
-    },
+    Enabled { current_bits: u32, max_bits: u32 },
 }
 
 /// The memory information collected during early platform initialization.

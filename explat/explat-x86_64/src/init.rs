@@ -1,7 +1,5 @@
 //! [`explat::init::InitIf`] implementation for this platform.
 
-use core::num::NonZero;
-
 use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
 use raw_cpuid::CpuId;
 use x86_64::registers::control::{Cr4, Cr4Flags};
@@ -44,13 +42,12 @@ fn get_multiboot_memory_regions(multiboot_arg: BootArg) -> EarlyMemoryRegions {
     if let Some(multiboot_memory_regions) = info.memory_regions() {
         for memory_region in multiboot_memory_regions {
             if memory_region.memory_type() == MemoryType::Available {
-                if memory_regions
-                    .push(EarlyMemoryRegion {
-                        start: memory_region.base_address() as _,
-                        size: memory_region.length() as _,
-                    })
-                    .is_err()
-                {
+                let push_result = memory_regions.push(EarlyMemoryRegion {
+                    start: memory_region.base_address() as _,
+                    size: memory_region.length() as _,
+                });
+
+                if push_result.is_err() {
                     break;
                 }
             }
@@ -61,8 +58,8 @@ fn get_multiboot_memory_regions(multiboot_arg: BootArg) -> EarlyMemoryRegions {
 }
 
 fn get_virtual_address_space_status() -> VAHalfStatus {
-    const LA57_HALF_BITS: NonZero<u32> = NonZero::new(56).unwrap();
-    const LA48_HALF_BITS: NonZero<u32> = NonZero::new(47).unwrap();
+    const LA57_HALF_BITS: u32 = 56;
+    const LA48_HALF_BITS: u32 = 47;
 
     let la57_supported = CpuId::new()
         .get_extended_feature_info()

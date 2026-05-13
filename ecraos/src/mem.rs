@@ -1,18 +1,38 @@
-use core::num::NonZero;
+use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange, va};
 
 use explat::init::{EarlyMemoryInfo, VAHalfStatus};
-use memory_addr::{VirtAddrRange, va};
+use expt::{
+    PageTable, X86Level4PageTableMeta,
+    pte::{MappingFlags, x86_64::X64PTE},
+};
+use size_disp::SizeDisplay;
 
-use crate::{AutoSize, reloc::sections};
+use crate::early_println;
+
+mod early;
+pub mod reloc;
+pub mod sections;
+
+use early::EARLY_PAGE_ALLOCATOR_SIZE;
 
 pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
+    print_kernel_location();
     print_early_mem_info(&memory_info);
 
-    let upper_bits = get_va_upper_bits(&memory_info).get();
+    let early_allocator_range =
+        find_early_page_allocator_range(&memory_info).expect("No early page allocator range found");
+    early_println!(
+        "Early page allocator range: {:x}, {}\n",
+        early_allocator_range,
+        early_allocator_range.size().size_display_wide()
+    );
+    early::init_early_page_allocator(early_allocator_range.start);
+
+    let upper_bits = get_va_upper_bits(&memory_info);
     let upper_start = va!((1usize << upper_bits).wrapping_neg());
 
-    explat::dbcn_println!("Virtual address space:");
-    explat::dbcn_println!("  Upper half start    : {:#x}", upper_start);
+    early_println!("Virtual address space:");
+    early_println!("  Upper half start    : {:#x}", upper_start);
 
     // Top level memory areas:
     // - 1st half: direct mapping area
@@ -23,16 +43,92 @@ pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
     let quater_size = 1usize << (upper_bits - 2);
     let direct_mapping_range = VirtAddrRange::from_start_size(upper_start, quater_size * 2);
     let vmalloc_range = VirtAddrRange::from_start_size(upper_start + quater_size * 2, quater_size);
-    explat::dbcn_println!(
+    early_println!(
         "  Direct mapping area : {:x}, {}",
         direct_mapping_range,
-        AutoSize(direct_mapping_range.size())
+        direct_mapping_range.size().size_display_wide()
     );
-    explat::dbcn_println!(
+    early_println!(
         "  Vmalloc area        : {:x}, {}",
         vmalloc_range,
-        AutoSize(vmalloc_range.size())
+        vmalloc_range.size().size_display_wide()
     );
+
+    let offset = direct_mapping_range.start;
+
+    let mut early_page_table =
+        PageTable::<X86Level4PageTableMeta, X64PTE>::new_alloc::<early::EarlyPagingHandler>()
+            .unwrap();
+    early_println!("Early page table: {:x}", early_page_table.base_paddr());
+
+    let flags: MappingFlags = MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE;
+    for memory_region in &memory_info.memory_regions {
+        let paddr = memory_region.start.into();
+        let vaddr_low = memory_region.start.into();
+        let vaddr_high = offset + memory_region.start;
+        let size = memory_region.size;
+
+        early_page_table.map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, flags).unwrap();
+        early_page_table
+            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, flags)    
+            .unwrap();
+    }
+
+    unsafe {
+        core::arch::asm!(
+            "mov cr3, rax",
+            in("rax") early_page_table.base_paddr().as_usize()
+        );
+    }
+
+    unsafe {
+        core::arch::asm!(
+            "lea rax, [rip + 2f]",
+            "add rax, {}",
+            "jmp rax",
+            "2:",
+            in(reg) offset.as_usize(),
+            out("rax") _,
+        )
+    }
+
+    unsafe {
+        reloc::relocate_me();
+    }
+
+    print_kernel_location();
+
+    let (a, b) = early::destroy_early_page_allocator();
+    early_println!("Early page allocator destroyed: {:?}, {:x}", a, b);
+}
+
+fn find_early_page_allocator_range(memory_info: &EarlyMemoryInfo) -> Option<PhysAddrRange> {
+    let kernel_range = sections::kernel_range();
+    let kernel_range = PhysAddrRange::new(
+        kernel_range.start.as_usize().into(),
+        kernel_range.end.as_usize().into(),
+    );
+
+    for region in (&memory_info.memory_regions).into_iter().rev() {
+        let start_aligned = PhysAddr::from(region.start).align_up(EARLY_PAGE_ALLOCATOR_SIZE);
+        let end_aligned =
+            PhysAddr::from(region.start + region.size).align_down(EARLY_PAGE_ALLOCATOR_SIZE);
+        let mut range = PhysAddrRange::from_start_size(
+            end_aligned - EARLY_PAGE_ALLOCATOR_SIZE,
+            EARLY_PAGE_ALLOCATOR_SIZE,
+        );
+
+        while range.start >= start_aligned {
+            if !range.overlaps(kernel_range) {
+                return Some(range);
+            }
+
+            range.start -= EARLY_PAGE_ALLOCATOR_SIZE;
+            range.end -= EARLY_PAGE_ALLOCATOR_SIZE;
+        }
+    }
+
+    None
 }
 
 fn print_early_mem_info(memory_info: &EarlyMemoryInfo) {
@@ -43,7 +139,7 @@ fn print_early_mem_info(memory_info: &EarlyMemoryInfo) {
             "    {:<#010x} - {:<#010x}, {}",
             region.start,
             region.start + region.size,
-            AutoSize(region.size),
+            region.size.size_display_wide(),
         );
     }
 
@@ -71,7 +167,7 @@ fn print_early_mem_info(memory_info: &EarlyMemoryInfo) {
     explat::dbcn_println!();
 }
 
-fn get_va_upper_bits(memory_info: &EarlyMemoryInfo) -> NonZero<u32> {
+fn get_va_upper_bits(memory_info: &EarlyMemoryInfo) -> u32 {
     if sections::kernel_range().start.as_usize() & (1 << (usize::BITS - 1)) != 0 {
         unimplemented!(
             "Booting directly in the upper half of the virtual address space is not supported yet"
@@ -99,4 +195,22 @@ fn get_va_upper_bits(memory_info: &EarlyMemoryInfo) -> NonZero<u32> {
             current_bits
         }
     }
+}
+
+pub fn print_kernel_location() {
+    early_println!("Kernel location at: {:#x}", sections::kernel_range());
+    for (name, range) in sections::all_sections() {
+        early_println!("  {:<10}: {:#x} ({})", name, range, range.size().size_display_wide(),);
+    }
+
+    early_println!();
+}
+
+pub fn clear_bss() {
+    let bss_range = sections::bss();
+    let bss_slice = unsafe {
+        core::slice::from_raw_parts_mut(bss_range.start.as_mut_ptr(), bss_range.size())
+    };
+
+    bss_slice.fill(0);
 }
