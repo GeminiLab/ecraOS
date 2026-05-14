@@ -54,9 +54,32 @@ pub fn kernel_entry(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
     early_println!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
     early_println!("Kernel entry on hart_id: {:#x}, arg: {:x?}\n", hart_id, arg);
 
+    let rsp: usize;
+    unsafe {
+        core::arch::asm!(
+            "mov {rsp}, rsp",
+            rsp = out(reg) rsp,
+            options(nomem, preserves_flags),
+        );
+    }
+    early_println!("rsp before init_vmm: {:#x}", rsp);
     mem::init_vmm(init_result.memory_info, arg.boot_stack);
 
     early_println!("\n\nHello, vmm!\n\n");
+
+    let rip: usize;
+    let rsp: usize;
+    unsafe {
+        core::arch::asm!(
+            "lea {rip}, [rip] ",
+            "mov {rsp}, rsp",
+            rip = out(reg) rip,
+            rsp = out(reg) rsp,
+            options(nomem, preserves_flags),
+        );
+    }
+
+    early_println!("rip: {:#x}, rsp: {:#x}", rip, rsp);
 
     // `init_vmm` removed the identity map for RAM and reloaded CR3 to flush the
     // TLB, so a load at a fixed low VA (e.g. `0x205000`) would now #PF:
@@ -67,6 +90,27 @@ pub fn kernel_entry(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
     let low_ptr = low_va.as_ptr();
     let u: u8 = unsafe { low_ptr.read() };
     early_println!("Read value @ {:p}: {:#x}", low_ptr, u);
+
+    explat::power::poweroff()
+}
+
+pub fn kernel_entry_2(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
+    early_println!("Kernel entry 2 on hart_id: {:#x}, arg: {:x?}\n", hart_id, arg);
+
+    let rsp: usize;
+    let rip: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "lea {rip}, [rip] ",
+            "mov {rsp}, rsp",
+            rip = out(reg) rip,
+            rsp = out(reg) rsp,
+            options(nomem, preserves_flags),
+        );
+    }
+
+    early_println!("rip: {:#x}, rsp: {:#x}", rip, rsp);
 
     explat::power::poweroff()
 }

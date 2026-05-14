@@ -112,26 +112,28 @@ pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
     // We are in the direct mapping area now. However, there are still pointers
     // to the identity map in the stack. We need to fix them. It's still ok to
     // use the old pointers here because the identity map is still valid.
-    const USIZE_WIDTH: usize = size_of::<usize>();
-    let mut boot_stack_ptr = VirtAddr::from(boot_stack.start.as_usize()).align_up(USIZE_WIDTH);
-    let boot_stack_top = VirtAddr::from(boot_stack.end.as_usize()).align_down(USIZE_WIDTH);
+    let current_rsp: usize = {
+        let rsp: usize;
+        unsafe {
+            core::arch::asm!(
+                "mov {rsp}, rsp",
+                rsp = out(reg) rsp,
+                options(nomem, preserves_flags),
+            );
+        }
+        rsp - offset.as_usize()
+    };
+
+    let boot_stack_top = VirtAddr::from(boot_stack.end.as_usize());
 
     early_println!(
         "Fixing boot stack pointers... [{:#x}, {:#x})",
-        boot_stack_ptr,
+        current_rsp,
         boot_stack_top
     );
 
-    while boot_stack_ptr < boot_stack_top {
-        let ptr = boot_stack_ptr.as_mut_ptr_of::<usize>();
-
-        unsafe {
-            if identical_kernel_range.contains((*ptr).into()) {
-                *ptr += offset.as_usize();
-            }
-        }
-
-        boot_stack_ptr += USIZE_WIDTH;
+    unsafe {
+        patch_pointers_on_stack(VirtAddrRange::new(current_rsp.into(), boot_stack_top), identical_kernel_range, offset.into());
     }
 
     early_println!("Boot stack pointers fixed");
@@ -141,6 +143,8 @@ pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
     for memory_region in &memory_info.memory_regions {
         let vaddr_low = memory_region.start.into();
         let size = memory_region.size;
+
+        early_println!("Unmapping memory region: {:#x} - {:#x}", vaddr_low, vaddr_low + size);
 
         early_page_table
             .unmap::<early::NotVeryEarlyPagingHandler>(vaddr_low, size)
@@ -159,6 +163,31 @@ pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
 
     let (a, b) = early::destroy_early_page_allocator();
     early_println!("Early page allocator destroyed: {:?}, {:x}", a, b);
+}
+
+/// Search for pointers on the stack in `search_range` that point to
+/// `match_range`, and patch them with `offset`.
+/// 
+/// # Safety
+/// 
+/// The caller must ensure that the `search_range` does not overlap with the
+/// stack range this function may use.
+unsafe fn patch_pointers_on_stack(search_range: VirtAddrRange, match_range: VirtAddrRange, offset: usize) {
+    const USIZE_WIDTH: usize = size_of::<usize>();
+    let mut search_addr = search_range.start.align_up(USIZE_WIDTH);
+    let search_end = search_range.end.align_down(USIZE_WIDTH);
+
+    while search_addr < search_end {
+        let search_ptr = search_addr.as_mut_ptr_of::<usize>();
+
+        unsafe {
+            if match_range.contains((*search_ptr).into()) {
+                *search_ptr += offset;
+            }
+        }
+
+        search_addr = search_addr + USIZE_WIDTH;
+    }
 }
 
 fn find_early_page_allocator_range(memory_info: &EarlyMemoryInfo) -> Option<PhysAddrRange> {
