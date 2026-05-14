@@ -17,7 +17,8 @@ impl Display for SizeDisplayWide {
         let size = self.0;
 
         if size < 1000 {
-            write!(f, "{size:>6.2}   B")
+            let size_f64 = size as f64;
+            write!(f, "{size_f64:>6.2}   B")
         } else if size < 1000 * KIB {
             let size_kib = size as f64 / KIB as f64;
             write!(f, "{size_kib:>6.2} KiB")

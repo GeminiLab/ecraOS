@@ -85,6 +85,7 @@ name = "exboot"
 version = "0.1.0"
 dependencies = [
  "exboot-macros",
+ "memory_addr",
 ]
 
 [[package]]

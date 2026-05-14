@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 exboot-macros = { path = "../exboot-macros" }
+memory_addr = "0.4"

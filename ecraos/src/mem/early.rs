@@ -1,10 +1,17 @@
-use core::{cell::UnsafeCell, mem};
+use core::{
+    cell::UnsafeCell,
+    mem,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use bitmaps::Bitmap;
-use memory_addr::{PhysAddr, VirtAddr, align_up};
+use memory_addr::{MemoryAddr, PhysAddr, VirtAddr, align_up};
 
 use expt::PagingHandler;
 
+use crate::early_println;
+
+/// Early paging handler used before the virtual address space is ready.
 pub struct EarlyPagingHandler;
 
 impl PagingHandler for EarlyPagingHandler {
@@ -20,6 +27,36 @@ impl PagingHandler for EarlyPagingHandler {
 
     fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
         addr.as_usize().into()
+    }
+}
+
+/// Early paging handler used when unmapping the identity map after switching to
+/// the direct map area.
+///
+/// It's basically the same as the [`EarlyPagingHandler`], but it will
+/// translate the physical addresses to virtual addresses using an offset.
+pub struct NotVeryEarlyPagingHandler;
+
+static VA_OFFSET: AtomicUsize = AtomicUsize::new(0);
+
+impl NotVeryEarlyPagingHandler {
+    pub fn set_offset(base: VirtAddr) {
+        VA_OFFSET.store(base.as_usize(), Ordering::Relaxed);
+    }
+}
+
+impl PagingHandler for NotVeryEarlyPagingHandler {
+    fn alloc_frames(bytes_required: usize) -> Option<PhysAddr> {
+        EarlyPagingHandler::alloc_frames(bytes_required)
+    }
+
+    fn dealloc_frames(addr: PhysAddr, bytes_allocated: usize) {
+        EarlyPagingHandler::dealloc_frames(addr, bytes_allocated);
+    }
+
+    fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
+        let offset = VA_OFFSET.load(Ordering::Relaxed);
+        VirtAddr::from_usize(addr.into()) + offset
     }
 }
 
@@ -158,6 +195,12 @@ impl EarlyPageAllocator {
         // SAFETY: The caller promises it.
         let (bitmap, base_paddr) = unsafe { self.assert_inited() };
 
+        early_println!(
+            "dealloc_pages: addr = {:x}, bytes_allocated = {}",
+            addr,
+            bytes_allocated
+        );
+
         let start_index = (addr - base_paddr) / PAGE_SIZE;
         let pages_allocated = align_up(bytes_allocated, PAGE_SIZE) / PAGE_SIZE;
 
@@ -167,7 +210,8 @@ impl EarlyPageAllocator {
     }
 
     /// Asserts that the early page allocator is initialized and returns a
-    /// mutable reference to the bitmap and the base physical address.
+    /// mutable reference to the bitmap and the base physical address. Panics if
+    /// the early page allocator is not initialized or has been destroyed.
     ///
     /// # Safety
     ///

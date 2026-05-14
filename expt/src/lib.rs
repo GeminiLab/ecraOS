@@ -216,7 +216,10 @@ where
         }
     }
 
-    fn table_of_mut_non_const<'a, H: PagingHandler>(paddr: PhysAddr, level: usize) -> &'a mut [PTE] {
+    fn table_of_mut_non_const<'a, H: PagingHandler>(
+        paddr: PhysAddr,
+        level: usize,
+    ) -> &'a mut [PTE] {
         let entry_count = M::LEVEL_TABLE_SIZE[level];
 
         unsafe {
@@ -315,7 +318,11 @@ where
     /// overlaps with a huge page, the page is split into smaller pages.
     ///
     /// The range is aligned to the page size of the lowest level.
-    fn iter_pages_in_range<F, H: PagingHandler>(&mut self, range: AddrRange<M::VirtAddr>, mut f: F) -> PagingResult
+    fn iter_pages_in_range<F, H: PagingHandler>(
+        &mut self,
+        range: AddrRange<M::VirtAddr>,
+        mut f: F,
+    ) -> PagingResult
     where
         F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult,
     {
@@ -326,7 +333,8 @@ where
             for level in (0..M::LEVELS).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
                 if start_vaddr.is_aligned(page_size) && (start_vaddr + page_size) <= end_vaddr {
-                    let (entry, index) = self.get_page_entry_mut::<H>(start_vaddr, level, true, true)?;
+                    let (entry, index) =
+                        self.get_page_entry_mut::<H>(start_vaddr, level, true, true)?;
                     f(level, index, start_vaddr, entry)?;
                     start_vaddr = start_vaddr + page_size;
                     break;

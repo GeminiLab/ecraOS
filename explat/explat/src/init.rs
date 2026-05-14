@@ -2,7 +2,7 @@
 
 use heapless::Vec as HeaplessVec;
 
-pub use exboot::BootArg;
+pub use exboot::PlatformArg;
 
 use crate::crate_interface::def_interface;
 
@@ -72,7 +72,7 @@ pub trait InitIf {
     /// - Initialize the debug console.
     /// - Collect memory information.
     ///
-    fn init_early(arg: BootArg) -> EarlyInitResult;
+    fn init_early(arg: PlatformArg) -> EarlyInitResult;
     /// Later platform initialization. Yet to be implemented.
     fn init_later();
 }

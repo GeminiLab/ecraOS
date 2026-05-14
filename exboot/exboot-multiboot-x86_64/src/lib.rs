@@ -6,7 +6,7 @@ use core::arch::global_asm;
 
 use x86_64::registers::control::{Cr0Flags, Cr4Flags, EferFlags};
 
-use exboot::BootArg;
+use exboot::{ExbootArg, PhysAddr, PhysAddrRange, PlatformArg};
 
 /// `CR0` value applied by boot code: protected mode, paging, write protect, FP-related bits.
 const CR0: u64 = Cr0Flags::PROTECTED_MODE_ENABLE.bits()
@@ -40,5 +40,21 @@ use exboot::call_kernel_entry;
 /// [`explat::init::InitIf::init_early`].
 #[unsafe(no_mangle)]
 fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
-    call_kernel_entry!(0, BootArg::Multiboot(arg1 as _))
+    unsafe extern "C" {
+        fn boot_stack();
+        fn boot_stack_top();
+    }
+
+    let boot_stack = boot_stack as *const () as usize;
+    let boot_stack_top = boot_stack_top as *const () as usize;
+
+    let boot_arg = ExbootArg {
+        // SAFETY: We know it's valid because the linker script ensures it.
+        boot_stack: unsafe {
+            PhysAddrRange::new_unchecked(boot_stack.into(), boot_stack_top.into())
+        },
+        plat_arg: PlatformArg::Multiboot(PhysAddr::from_usize(arg1 as _)),
+    };
+
+    call_kernel_entry!(0, &boot_arg)
 }

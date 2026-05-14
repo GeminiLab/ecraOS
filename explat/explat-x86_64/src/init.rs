@@ -7,8 +7,8 @@ use x86_64::registers::control::{Cr4, Cr4Flags};
 use explat::{
     crate_interface,
     init::{
-        BootArg, EarlyInitResult, EarlyMemoryInfo, EarlyMemoryRegion, EarlyMemoryRegions, InitIf,
-        VAHalfStatus,
+        EarlyInitResult, EarlyMemoryInfo, EarlyMemoryRegion, EarlyMemoryRegions, InitIf,
+        PlatformArg, VAHalfStatus,
     },
 };
 
@@ -31,13 +31,13 @@ impl MemoryManagement for MultibootMem {
     unsafe fn deallocate(&mut self, _addr: PAddr) {}
 }
 
-fn get_multiboot_memory_regions(multiboot_arg: BootArg) -> EarlyMemoryRegions {
+fn get_multiboot_memory_regions(multiboot_arg: PlatformArg) -> EarlyMemoryRegions {
     let mut memory_regions = EarlyMemoryRegions::new();
     let mut mem = MultibootMem;
-    let BootArg::Multiboot(arg) = multiboot_arg else {
+    let PlatformArg::Multiboot(arg) = multiboot_arg else {
         return memory_regions;
     };
-    let info = unsafe { Multiboot::from_ptr(arg as _, &mut mem).unwrap() };
+    let info = unsafe { Multiboot::from_ptr(arg.as_usize() as _, &mut mem).unwrap() };
 
     if let Some(multiboot_memory_regions) = info.memory_regions() {
         for memory_region in multiboot_memory_regions {
@@ -89,7 +89,7 @@ pub struct InitImpl;
 
 #[crate_interface::impl_interface]
 impl InitIf for InitImpl {
-    fn init_early(arg: BootArg) -> EarlyInitResult {
+    fn init_early(arg: PlatformArg) -> EarlyInitResult {
         crate::init_early();
 
         let memory_regions = get_multiboot_memory_regions(arg);

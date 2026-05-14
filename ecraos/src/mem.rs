@@ -1,4 +1,4 @@
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange, va};
+use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange, va};
 
 use explat::init::{EarlyMemoryInfo, VAHalfStatus};
 use expt::{
@@ -15,10 +15,14 @@ pub mod sections;
 
 use early::EARLY_PAGE_ALLOCATOR_SIZE;
 
-pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
+pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
+    let identical_kernel_range = sections::kernel_range();
+
+    // Print kernel location and early memory info before initializing the vmm.
     print_kernel_location();
     print_early_mem_info(&memory_info);
 
+    // find
     let early_allocator_range =
         find_early_page_allocator_range(&memory_info).expect("No early page allocator range found");
     early_println!(
@@ -68,9 +72,11 @@ pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
         let vaddr_high = offset + memory_region.start;
         let size = memory_region.size;
 
-        early_page_table.map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, flags).unwrap();
         early_page_table
-            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, flags)    
+            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, flags)
+            .unwrap();
+        early_page_table
+            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, flags)
             .unwrap();
     }
 
@@ -81,13 +87,18 @@ pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
         );
     }
 
+    // Move RIP and RSP into the direct-mapped high range. The boot stack stays
+    // at the same physical addresses; only the virtual addresses change.
     unsafe {
+        let off = offset.as_usize();
         core::arch::asm!(
+            "lea rax, [rsp + {off}]",
+            "mov rsp, rax",
             "lea rax, [rip + 2f]",
-            "add rax, {}",
+            "add rax, {off}",
             "jmp rax",
             "2:",
-            in(reg) offset.as_usize(),
+            off = in(reg) off,
             out("rax") _,
         )
     }
@@ -97,6 +108,54 @@ pub fn init_mem_early(memory_info: EarlyMemoryInfo) {
     }
 
     print_kernel_location();
+
+    // We are in the direct mapping area now. However, there are still pointers
+    // to the identity map in the stack. We need to fix them. It's still ok to
+    // use the old pointers here because the identity map is still valid.
+    const USIZE_WIDTH: usize = size_of::<usize>();
+    let mut boot_stack_ptr = VirtAddr::from(boot_stack.start.as_usize()).align_up(USIZE_WIDTH);
+    let boot_stack_top = VirtAddr::from(boot_stack.end.as_usize()).align_down(USIZE_WIDTH);
+
+    early_println!(
+        "Fixing boot stack pointers... [{:#x}, {:#x})",
+        boot_stack_ptr,
+        boot_stack_top
+    );
+
+    while boot_stack_ptr < boot_stack_top {
+        let ptr = boot_stack_ptr.as_mut_ptr_of::<usize>();
+
+        unsafe {
+            if identical_kernel_range.contains((*ptr).into()) {
+                *ptr += offset.as_usize();
+            }
+        }
+
+        boot_stack_ptr += USIZE_WIDTH;
+    }
+
+    early_println!("Boot stack pointers fixed");
+
+    // Page-table walks must use the direct map; identity map is about to go away.
+    early::NotVeryEarlyPagingHandler::set_offset(offset);
+    for memory_region in &memory_info.memory_regions {
+        let vaddr_low = memory_region.start.into();
+        let size = memory_region.size;
+
+        early_page_table
+            .unmap::<early::NotVeryEarlyPagingHandler>(vaddr_low, size)
+            .unwrap();
+    }
+
+    // flush TLBs
+    unsafe {
+        core::arch::asm!(
+            "mov {tmp}, cr3",
+            "mov cr3, {tmp}",
+            tmp = out(reg) _,
+            options(nostack),
+        );
+    }
 
     let (a, b) = early::destroy_early_page_allocator();
     early_println!("Early page allocator destroyed: {:?}, {:x}", a, b);
@@ -200,7 +259,12 @@ fn get_va_upper_bits(memory_info: &EarlyMemoryInfo) -> u32 {
 pub fn print_kernel_location() {
     early_println!("Kernel location at: {:#x}", sections::kernel_range());
     for (name, range) in sections::all_sections() {
-        early_println!("  {:<10}: {:#x} ({})", name, range, range.size().size_display_wide(),);
+        early_println!(
+            "  {:<10}: {:#x} ({})",
+            name,
+            range,
+            range.size().size_display_wide(),
+        );
     }
 
     early_println!();
@@ -208,9 +272,8 @@ pub fn print_kernel_location() {
 
 pub fn clear_bss() {
     let bss_range = sections::bss();
-    let bss_slice = unsafe {
-        core::slice::from_raw_parts_mut(bss_range.start.as_mut_ptr(), bss_range.size())
-    };
+    let bss_slice =
+        unsafe { core::slice::from_raw_parts_mut(bss_range.start.as_mut_ptr(), bss_range.size()) };
 
     bss_slice.fill(0);
 }
