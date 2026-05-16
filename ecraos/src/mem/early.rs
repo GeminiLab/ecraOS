@@ -201,7 +201,7 @@ impl EarlyPageAllocator {
 /// buddy allocator.
 static mut EARLY_ALLOCATOR_RANGE: Option<PhysAddrRange> = None;
 
-/// Stores the early allocator range for later retrieval.
+/// Stores the early allocator physical range for later retrieval.
 ///
 /// Called once during boot before the early allocator is destroyed.
 pub fn set_early_allocator_range(range: PhysAddrRange) {
@@ -210,7 +210,7 @@ pub fn set_early_allocator_range(range: PhysAddrRange) {
     }
 }
 
-/// Returns the early allocator range that was stored previously.
+/// Retrieves the early allocator physical range stored by [`set_early_allocator_range`].
 ///
 /// Panics if [`set_early_allocator_range`] has not been called yet.
 pub fn early_allocator_range() -> PhysAddrRange {

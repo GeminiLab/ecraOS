@@ -6,15 +6,18 @@
 //!
 //! Cross-CPU frees go through the lock-free [`SlabPageHeader::remote_free`] path.
 
-use crate::cache::{CacheDeallocResult, SlabCache};
-use crate::error::{AllocError, AllocResult};
-use crate::page::SlabPageHeader;
-use crate::size_class::SizeClass;
+use crate::{
+    cache::{CacheDeallocResult, SlabCache},
+    error::{AllocError, AllocResult},
+    page::SlabPageHeader,
+    size_class::SizeClass,
+};
 
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
 use kspin::SpinNoIrq;
+use memory_addr::VirtAddr;
 
 /// Result of a slab allocation attempt.
 pub enum SlabAllocResult {
@@ -44,8 +47,6 @@ pub enum SlabPoolDeallocResult {
     /// The slab page at `base` became empty and should be returned to the buddy.
     FreeSlab { base: VirtAddr, pages: usize },
 }
-
-use memory_addr::VirtAddr;
 
 /// Object-safe slab interface used by integrators.
 pub trait SlabTrait: Sync {

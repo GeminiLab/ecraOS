@@ -19,6 +19,10 @@
 #[cfg(building_ecraos)]
 extern crate explat_impl;
 
+/// The Rust standard allocator interface.
+///
+/// Required for `alloc` crate types (`Box`, `Vec`, `String`, etc.) to be
+/// available in the kernel.
 extern crate alloc;
 
 mod mem;

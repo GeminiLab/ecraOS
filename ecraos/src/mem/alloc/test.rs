@@ -51,6 +51,7 @@ pub fn run() {
     let boxed = Box::new(42u32);
     assert!(*boxed == 42);
     kprintln!("  Box::new(42u32): OK");
+    kprintln!("  Box::new(42u32): {:p}", Box::as_ref(&boxed) as *const _);
     drop(boxed);
 
     // 7. Multiple alloc/free without panic.

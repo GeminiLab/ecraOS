@@ -5,8 +5,7 @@
 //! - **full**: no objects free
 //! - **empty**: all objects free (at most one cached; rest returned to buddy)
 
-use crate::page::SlabPageHeader;
-use crate::size_class::SizeClass;
+use crate::{page::SlabPageHeader, size_class::SizeClass};
 
 /// Intrusive list head (address of the first `SlabPageHeader`, 0 = empty).
 #[derive(Debug, Clone, Copy)]

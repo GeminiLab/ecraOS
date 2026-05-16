@@ -4,8 +4,10 @@
 //! Local (owner-CPU) operations use a bitmap under the slab lock.
 //! Remote (cross-CPU) frees use an atomic CAS stack -- no lock required.
 
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::{
+    ptr::NonNull,
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
+};
 
 use crate::size_class::SizeClass;
 

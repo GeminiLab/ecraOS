@@ -8,8 +8,10 @@ use core::ptr;
 
 use memory_addr::{PhysAddr, PhysAddrRange, align_up, is_aligned};
 
-use crate::error::{AllocError, AllocResult};
-use crate::page_meta::{PFN_NONE, PageFlags, PageMeta, free_list_push, free_list_remove};
+use crate::{
+    error::{AllocError, AllocResult},
+    page_meta::{PFN_NONE, PageFlags, PageMeta, free_list_push, free_list_remove},
+};
 
 /// Maximum buddy order.
 ///

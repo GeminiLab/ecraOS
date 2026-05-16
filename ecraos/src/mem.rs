@@ -20,14 +20,17 @@ pub mod vmm;
 /// integration can exclude it from the buddy allocator.
 static mut BOOT_STACK_RANGE: Option<memory_addr::PhysAddrRange> = None;
 
-/// Stores the boot stack physical range for later retrieval.
+/// Saves the boot stack physical range for later retrieval.
+///
+/// Called once during [`init_vmm`] before VMM setup, so the allocator
+/// integration can later exclude this range from the buddy allocator.
 fn set_boot_stack_range(range: memory_addr::PhysAddrRange) {
     unsafe {
         core::ptr::write(core::ptr::addr_of_mut!(BOOT_STACK_RANGE), Some(range));
     }
 }
 
-/// Returns the boot stack physical range.
+/// Retrieves the boot stack physical range.
 ///
 /// Panics if [`set_boot_stack_range`] has not been called yet.
 pub fn boot_stack_range() -> memory_addr::PhysAddrRange {

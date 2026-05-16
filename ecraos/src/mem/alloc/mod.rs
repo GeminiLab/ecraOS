@@ -27,20 +27,23 @@
 
 extern crate alloc;
 
-use core::alloc::{GlobalAlloc, Layout};
-use core::mem::MaybeUninit;
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    mem::MaybeUninit,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use exbuddy::{AllocatorUsage, BuddyAllocator};
-use exslab::page::SlabPageHeader;
-use exslab::slab::{PerCpuSlab, StaticSlabPool};
-use exslab::{SlabAllocResult, SlabPoolDeallocResult, SlabPoolTrait};
+use exslab::{
+    SlabAllocResult, SlabPoolDeallocResult, SlabPoolTrait,
+    page::SlabPageHeader,
+    slab::{PerCpuSlab, StaticSlabPool},
+};
 use kspin::SpinNoIrq;
 use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
 
-use crate::kprintln;
-use crate::mem;
+use crate::{kprintln, mem};
 
 mod test;
 
