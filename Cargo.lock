@@ -147,6 +147,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "exslab"
+version = "0.1.0"
+dependencies = [
+ "kspin",
+ "memory_addr",
+]
+
+[[package]]
 name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -15,9 +15,12 @@ pub use error::{AllocError, AllocResult};
 pub mod size_class;
 pub use size_class::SizeClass;
 
-pub mod page;
 pub mod cache;
+pub mod page;
 pub mod slab;
+pub use slab::{
+    SlabAllocResult, SlabDeallocResult, SlabPoolDeallocResult, SlabPoolExt, SlabPoolTrait,
+};
 
 /// Trait for slab to request/return pages from a backend allocator.
 ///
