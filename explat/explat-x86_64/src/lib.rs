@@ -7,6 +7,8 @@
 pub mod debug_console;
 /// [`explat::init::InitIf`] bridge into this crate's early setup.
 pub mod init;
+/// [`explat::mem::MemIf`] using the Multiboot 1 memory map.
+pub mod mem;
 /// [`explat::power::PowerIf`] using the QEMU `0x604` PM port.
 pub mod power;
 

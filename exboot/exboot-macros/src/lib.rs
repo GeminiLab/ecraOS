@@ -70,7 +70,7 @@ pub fn call_kernel_entry(input: TokenStream) -> TokenStream {
     quote! {
         {
             unsafe extern "Rust" {
-                fn #kernel_entry_ident(hart_id: usize, arg: *const ::exboot::ExbootArg) -> !;
+                fn #kernel_entry_ident(hart_id: usize, arg: *const ::exboot::BootArg) -> !;
             }
 
             unsafe {

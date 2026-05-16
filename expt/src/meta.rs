@@ -1,4 +1,4 @@
-use core::ops::Add;
+use core::{fmt::LowerHex, ops::Add};
 
 use memory_addr::MemoryAddr;
 
@@ -23,7 +23,7 @@ where
 }
 
 pub trait PageTableMeta: Send + Sync {
-    type VirtAddr: MemoryAddr + Add<usize, Output = Self::VirtAddr>;
+    type VirtAddr: MemoryAddr + Add<usize, Output = Self::VirtAddr> + LowerHex;
 
     // Required constants:
     /// The number of levels in the page table.
@@ -35,18 +35,21 @@ pub trait PageTableMeta: Send + Sync {
     /// Note that `LEVEL_BITS[0]` is the number of bits handled by the last
     /// level of the page table, and `LEVEL_BITS[LEVELS - 1]` is the number of
     /// bits handled by the first level of the page table. For exmaple, 32-bit
-    /// x86 PAE page tables have [9, 9, 2], and RISC-V Sv39x4 page tables have
-    /// [9, 9, 11].
+    /// x86 PAE page tables have `[9, 9, 2]`, and RISC-V Sv39x4 page tables have
+    /// `[9, 9, 11]`.
     const LEVEL_BITS: [usize; Self::LEVELS] where [(); Self::LEVELS]: Sized;
-    /// Whether each level of the page table can be a huge page.
+
+    // Required constants with default values:
+    /// The maximum level of the page table whose entries can be a page.
     ///
-    /// `LEVEL_CAN_BE_HUGE[0]` is always ignored.
-    ///
-    /// See [`Self::LEVEL_BITS`] for more details.
-    const LEVEL_CAN_BE_PAGE: [bool; Self::LEVELS] where [(); Self::LEVELS]: Sized;
+    /// The value must satisfy `0 <= MAX_PAGE_LEVEL < LEVELS`.
+    const MAX_PAGE_LEVEL: usize = 0;
 
     // Derived constants:
-    /// The ranges of bits handled by each level of the page table.
+    /// The size of non-huge pages.
+    const PAGE_SIZE: usize = 1 << Self::PAGE_OFFSET_BITS;
+    /// The ranges of bits `(start, end)` handled by each level of the page
+    /// table. `start` is inclusive and `end` is exclusive.
     ///
     /// See [`Self::LEVEL_BITS`] for more details.
     const LEVEL_BIT_RANGES: [(usize, usize); Self::LEVELS] = {
@@ -59,6 +62,8 @@ pub trait PageTableMeta: Send + Sync {
         ranges
     } where [(); Self::LEVELS]: Sized;
     /// The number of entries in each level of the page table.
+    ///
+    /// See [`Self::LEVEL_BITS`] for more details.
     const LEVEL_TABLE_SIZE: [usize; Self::LEVELS] = {
         let mut sizes = [0; Self::LEVELS];
         let mut index = 0;

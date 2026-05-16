@@ -1,76 +1,56 @@
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange, va};
-
-use explat::init::{EarlyMemoryInfo, VAHalfStatus};
+use explat::mem::BootMemoryRegions;
 use expt::{
     PageTable, X86Level4PageTableMeta,
     pte::{MappingFlags, x86_64::X64PTE},
 };
+use memory_addr::VirtAddr;
 use size_disp::SizeDisplay;
 
-use crate::early_println;
+use crate::kprintln;
 
 mod early;
 pub mod reloc;
 pub mod sections;
+pub mod vmm;
 
-use early::EARLY_PAGE_ALLOCATOR_SIZE;
-
-pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
-    let identical_kernel_range = sections::kernel_range();
-
-    // Print kernel location and early memory info before initializing the vmm.
+pub fn init_vmm(
+    entry_with_vmm: *const exboot::KernelEntryType,
+    hart_id: usize,
+    arg: *const exboot::BootArg,
+) -> ! {
+    // Print kernel location before initializing the vmm.
     print_kernel_location();
-    print_early_mem_info(&memory_info);
 
-    // find
-    let early_allocator_range =
-        find_early_page_allocator_range(&memory_info).expect("No early page allocator range found");
-    early_println!(
-        "Early page allocator range: {:x}, {}\n",
-        early_allocator_range,
-        early_allocator_range.size().size_display_wide()
-    );
+    // Get physical memory regions from the boot argument.
+    let mem_regions = explat::mem::boot_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg })
+        .expect("Memory info unavailable");
+    print_mem_regions(&mem_regions);
+
+    // Get virtual address space status from the platform.
+    let va_status = explat::mem::virt_addr_space_status();
+
+    // Determine the layout of the virtual address space.
+    vmm::init_vmm_layout(va_status);
+
+    let virt_phys_offset = vmm::virt_phys_offset();
+
+    // Initialize the early page allocator.
+    let early_allocator_range = early::find_early_page_allocator_range(&mem_regions)
+        .expect("No early page allocator range found");
     early::init_early_page_allocator(early_allocator_range.start);
 
-    let upper_bits = get_va_upper_bits(&memory_info);
-    let upper_start = va!((1usize << upper_bits).wrapping_neg());
-
-    early_println!("Virtual address space:");
-    early_println!("  Upper half start    : {:#x}", upper_start);
-
-    // Top level memory areas:
-    // - 1st half: direct mapping area
-    // - 2nd half:
-    //   - 3rd quater: vmalloc area
-    //   - 4th quater: not used
-    // This scheme gives us at least the same size of these areas as Linux does.
-    let quater_size = 1usize << (upper_bits - 2);
-    let direct_mapping_range = VirtAddrRange::from_start_size(upper_start, quater_size * 2);
-    let vmalloc_range = VirtAddrRange::from_start_size(upper_start + quater_size * 2, quater_size);
-    early_println!(
-        "  Direct mapping area : {:x}, {}",
-        direct_mapping_range,
-        direct_mapping_range.size().size_display_wide()
-    );
-    early_println!(
-        "  Vmalloc area        : {:x}, {}",
-        vmalloc_range,
-        vmalloc_range.size().size_display_wide()
-    );
-
-    let offset = direct_mapping_range.start;
-
+    // Map the memory regions to the virtual address space.
     let mut early_page_table =
         PageTable::<X86Level4PageTableMeta, X64PTE>::new_alloc::<early::EarlyPagingHandler>()
             .unwrap();
-    early_println!("Early page table: {:x}", early_page_table.base_paddr());
+    kprintln!("Early page table: {:x}\n", early_page_table.base_paddr());
 
     let flags: MappingFlags = MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE;
-    for memory_region in &memory_info.memory_regions {
-        let paddr = memory_region.start.into();
-        let vaddr_low = memory_region.start.into();
-        let vaddr_high = offset + memory_region.start;
-        let size = memory_region.size;
+    for memory_region in &mem_regions {
+        let paddr = memory_region.range.start;
+        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+        let vaddr_high = vaddr_low + virt_phys_offset;
+        let size = memory_region.range.size();
 
         early_page_table
             .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, flags)
@@ -87,216 +67,82 @@ pub fn init_vmm(memory_info: EarlyMemoryInfo, boot_stack: PhysAddrRange) {
         );
     }
 
-    // Move RIP and RSP into the direct-mapped high range. The boot stack stays
-    // at the same physical addresses; only the virtual addresses change.
+    // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        let off = offset.as_usize();
-        core::arch::asm!(
-            "lea rax, [rsp + {off}]",
-            "mov rsp, rax",
-            "lea rax, [rip + 2f]",
-            "add rax, {off}",
-            "jmp rax",
-            "2:",
-            off = in(reg) off,
-            out("rax") _,
-        )
-    }
+        let boot_stack_top = arg.as_ref_unchecked().boot_stack.end;
+        let boot_stack_top = boot_stack_top.as_usize() + virt_phys_offset;
+        let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
+        let arg = arg.byte_add(virt_phys_offset);
 
-    unsafe {
-        reloc::relocate_me();
+        call_fn_new_stack_arg2(entry_with_vmm as _, hart_id, arg as _, boot_stack_top)
     }
+}
 
+pub fn init_vmm_later() {
     print_kernel_location();
 
-    // We are in the direct mapping area now. However, there are still pointers
-    // to the identity map in the stack. We need to fix them. It's still ok to
-    // use the old pointers here because the identity map is still valid.
-    let current_rsp: usize = {
-        let rsp: usize;
-        unsafe {
-            core::arch::asm!(
-                "mov {rsp}, rsp",
-                rsp = out(reg) rsp,
-                options(nomem, preserves_flags),
-            );
-        }
-        rsp - offset.as_usize()
-    };
-
-    let boot_stack_top = VirtAddr::from(boot_stack.end.as_usize());
-
-    early_println!(
-        "Fixing boot stack pointers... [{:#x}, {:#x})",
-        current_rsp,
-        boot_stack_top
+    let (bitmap, page_size_shift, base_paddr) = early::destroy_early_page_allocator();
+    kprintln!(
+        "Early page allocator destroyed: {:?}, {:x}, {:x}",
+        bitmap,
+        page_size_shift,
+        base_paddr
     );
+}
 
-    unsafe {
-        patch_pointers_on_stack(VirtAddrRange::new(current_rsp.into(), boot_stack_top), identical_kernel_range, offset.into());
-    }
-
-    early_println!("Boot stack pointers fixed");
-
-    // Page-table walks must use the direct map; identity map is about to go away.
-    early::NotVeryEarlyPagingHandler::set_offset(offset);
-    for memory_region in &memory_info.memory_regions {
-        let vaddr_low = memory_region.start.into();
-        let size = memory_region.size;
-
-        early_println!("Unmapping memory region: {:#x} - {:#x}", vaddr_low, vaddr_low + size);
-
-        early_page_table
-            .unmap::<early::NotVeryEarlyPagingHandler>(vaddr_low, size)
-            .unwrap();
-    }
-
-    // flush TLBs
+unsafe fn call_fn_new_stack_arg2(
+    fn_ptr: *const fn(usize, usize) -> !,
+    arg1: usize,
+    arg2: usize,
+    stack_top: usize,
+) -> ! {
     unsafe {
         core::arch::asm!(
-            "mov {tmp}, cr3",
-            "mov cr3, {tmp}",
-            tmp = out(reg) _,
-            options(nostack),
-        );
-    }
-
-    let (a, b) = early::destroy_early_page_allocator();
-    early_println!("Early page allocator destroyed: {:?}, {:x}", a, b);
-}
-
-/// Search for pointers on the stack in `search_range` that point to
-/// `match_range`, and patch them with `offset`.
-/// 
-/// # Safety
-/// 
-/// The caller must ensure that the `search_range` does not overlap with the
-/// stack range this function may use.
-unsafe fn patch_pointers_on_stack(search_range: VirtAddrRange, match_range: VirtAddrRange, offset: usize) {
-    const USIZE_WIDTH: usize = size_of::<usize>();
-    let mut search_addr = search_range.start.align_up(USIZE_WIDTH);
-    let search_end = search_range.end.align_down(USIZE_WIDTH);
-
-    while search_addr < search_end {
-        let search_ptr = search_addr.as_mut_ptr_of::<usize>();
-
-        unsafe {
-            if match_range.contains((*search_ptr).into()) {
-                *search_ptr += offset;
-            }
-        }
-
-        search_addr = search_addr + USIZE_WIDTH;
+            "mov rsp, {stack_top}",
+            "call rax",
+            stack_top = in(reg) stack_top,
+            in("rdi") arg1,
+            in("rsi") arg2,
+            in("rax") fn_ptr,
+            options(preserves_flags, noreturn),
+        )
     }
 }
 
-fn find_early_page_allocator_range(memory_info: &EarlyMemoryInfo) -> Option<PhysAddrRange> {
-    let kernel_range = sections::kernel_range();
-    let kernel_range = PhysAddrRange::new(
-        kernel_range.start.as_usize().into(),
-        kernel_range.end.as_usize().into(),
-    );
+fn print_mem_regions(mem_regions: &BootMemoryRegions) {
+    kprintln!("Physical memory regions:");
+    for region in mem_regions {
+        let start_usize = region.range.start.as_usize();
+        let end_usize = region.range.end.as_usize();
+        let size = region.range.size();
+        let ty = region.type_;
 
-    for region in (&memory_info.memory_regions).into_iter().rev() {
-        let start_aligned = PhysAddr::from(region.start).align_up(EARLY_PAGE_ALLOCATOR_SIZE);
-        let end_aligned =
-            PhysAddr::from(region.start + region.size).align_down(EARLY_PAGE_ALLOCATOR_SIZE);
-        let mut range = PhysAddrRange::from_start_size(
-            end_aligned - EARLY_PAGE_ALLOCATOR_SIZE,
-            EARLY_PAGE_ALLOCATOR_SIZE,
-        );
-
-        while range.start >= start_aligned {
-            if !range.overlaps(kernel_range) {
-                return Some(range);
-            }
-
-            range.start -= EARLY_PAGE_ALLOCATOR_SIZE;
-            range.end -= EARLY_PAGE_ALLOCATOR_SIZE;
-        }
-    }
-
-    None
-}
-
-fn print_early_mem_info(memory_info: &EarlyMemoryInfo) {
-    explat::dbcn_println!("Early memory info:");
-    explat::dbcn_println!("  Physical memory regions:");
-    for region in &memory_info.memory_regions {
-        explat::dbcn_println!(
-            "    {:<#010x} - {:<#010x}, {}",
-            region.start,
-            region.start + region.size,
-            region.size.size_display_wide(),
+        kprintln!(
+            "  {:<#010x} - {:<#010x}, {}, {:?}",
+            start_usize,
+            end_usize,
+            size.size_display_wide(),
+            ty,
         );
     }
 
-    explat::dbcn_println!("  Virtual address space:");
-    fn print_half_support(which: &str, support: VAHalfStatus) {
-        match support {
-            VAHalfStatus::NotSupported => explat::dbcn_println!("    {:<10}: Not supported", which),
-            VAHalfStatus::Disabled { max_bits } => explat::dbcn_println!(
-                "    {:<10}: Supported but disabled, max {max_bits} bits",
-                which
-            ),
-            VAHalfStatus::Enabled {
-                current_bits,
-                max_bits,
-            } => explat::dbcn_println!(
-                "    {:<10}: Supported and enabled with {current_bits} bits, max {max_bits} bits",
-                which
-            ),
-        }
-    }
-
-    print_half_support("Lower half", memory_info.va_lower_half_status);
-    print_half_support("Upper half", memory_info.va_upper_half_status);
-
-    explat::dbcn_println!();
-}
-
-fn get_va_upper_bits(memory_info: &EarlyMemoryInfo) -> u32 {
-    if sections::kernel_range().start.as_usize() & (1 << (usize::BITS - 1)) != 0 {
-        unimplemented!(
-            "Booting directly in the upper half of the virtual address space is not supported yet"
-        );
-    }
-
-    match memory_info.va_upper_half_status {
-        VAHalfStatus::NotSupported => unimplemented!(
-            "Upper half of the virtual address space is not supported, running in the lower half is not supported yet"
-        ),
-        VAHalfStatus::Disabled { .. } => unimplemented!(
-            "Upper half of the virtual address space is disabled, VA adjustment is not supported yet"
-        ),
-        VAHalfStatus::Enabled {
-            current_bits,
-            max_bits,
-        } => {
-            if current_bits != max_bits {
-                explat::dbcn_println!(
-                    "Upper half of the virtual address space is not fully enabled, VA adjustment is not supported yet"
-                );
-                explat::dbcn_println!("Using the current VA bits ({current_bits})");
-            }
-
-            current_bits
-        }
-    }
+    kprintln!();
 }
 
 pub fn print_kernel_location() {
-    early_println!("Kernel location at: {:#x}", sections::kernel_range());
-    for (name, range) in sections::all_sections() {
-        early_println!(
-            "  {:<10}: {:#x} ({})",
+    kprintln!("Kernel location at: {:#x}", sections::kernel_range());
+    for (name, range, aligned_range) in sections::all_sections() {
+        kprintln!(
+            "  {:<10}: {:#x}(..{:#x}), {} ({})",
             name,
             range,
+            aligned_range.end,
             range.size().size_display_wide(),
+            aligned_range.size().size_display_wide(),
         );
     }
 
-    early_println!();
+    kprintln!();
 }
 
 pub fn clear_bss() {

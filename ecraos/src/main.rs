@@ -21,13 +21,13 @@ extern crate explat_impl;
 
 mod mem;
 
-macro_rules! early_println {
+macro_rules! kprintln {
     ($($arg:tt)*) => {
-        explat::dbcn_println!($($arg)*);
+        explat::dbcn_println!($($arg)*)
     };
 }
 
-pub(crate) use early_println;
+pub(crate) use kprintln;
 
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
@@ -41,68 +41,52 @@ const HLINE: &str = "-----------------------------------------------------------
 ///
 /// For execution environment requirements when calling this function, see
 /// [`call_kernel_entry`](exboot::call_kernel_entry) also.
+///
+/// # Safety
+///
+/// This function is the kernel entry and should only be called by the
+/// bootloader. The bootloader should guarantee that the argument is valid.
+///
+/// This function should never be called directly.
 #[exboot::kernel_entry]
-pub fn kernel_entry(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
+pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
     mem::clear_bss();
 
     // SAFETY: The bootloader guarantees that the argument is valid.
-    let arg = unsafe { arg.as_ref_unchecked() };
+    let arg_ref = unsafe { arg.as_ref_unchecked() };
 
-    let init_result = explat::init::init_early(arg.plat_arg);
+    explat::init::init_early(arg_ref.plat_arg);
 
-    early_println!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
-    early_println!("Kernel entry on hart_id: {:#x}, arg: {:x?}\n", hart_id, arg);
+    kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
+    kprintln!(
+        "Kernel entry on hart_id: {:#x}, arg: {:x?}\n",
+        hart_id,
+        arg_ref
+    );
 
-    let rsp: usize;
-    unsafe {
-        core::arch::asm!(
-            "mov {rsp}, rsp",
-            rsp = out(reg) rsp,
-            options(nomem, preserves_flags),
-        );
-    }
-    early_println!("rsp before init_vmm: {:#x}", rsp);
-    mem::init_vmm(init_result.memory_info, arg.boot_stack);
-
-    early_println!("\n\nHello, vmm!\n\n");
-
-    let rip: usize;
-    let rsp: usize;
-    unsafe {
-        core::arch::asm!(
-            "lea {rip}, [rip] ",
-            "mov {rsp}, rsp",
-            rip = out(reg) rip,
-            rsp = out(reg) rsp,
-            options(nomem, preserves_flags),
-        );
-    }
-
-    early_println!("rip: {:#x}, rsp: {:#x}", rip, rsp);
-
-    // `init_vmm` removed the identity map for RAM and reloaded CR3 to flush the
-    // TLB, so a load at a fixed low VA (e.g. `0x205000`) would now #PF:
-    // `unsafe { core::ptr::read_volatile(0x205000 as *const u8) };`
-
-    let low_va = memory_addr::VirtAddr::from_usize(0x205000usize + 0xffff8000_00000000);
-    early_println!("Trying to access low VA: {:#x}", low_va);
-    let low_ptr = low_va.as_ptr();
-    let u: u8 = unsafe { low_ptr.read() };
-    early_println!("Read value @ {:p}: {:#x}", low_ptr, u);
-
-    explat::power::poweroff()
+    mem::init_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
 
-pub fn kernel_entry_2(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
-    early_println!("Kernel entry 2 on hart_id: {:#x}, arg: {:x?}\n", hart_id, arg);
+/// The later kernel entry function that runs after the VMM is initialized.
+///
+/// # Safety
+///
+/// This function should only be called by the [`kernel_entry`] function, via
+/// [`mem::init_vmm`], and should never be called directly.
+pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg) -> ! {
+    unsafe { mem::reloc::relocate_me() };
+
+    kprintln!("VMM enabled on hart_id: {:#x}", hart_id);
+
+    mem::init_vmm_later();
 
     let rsp: usize;
     let rip: usize;
 
     unsafe {
         core::arch::asm!(
-            "lea {rip}, [rip] ",
+            "lea {rip}, [rip]",
             "mov {rsp}, rsp",
             rip = out(reg) rip,
             rsp = out(reg) rsp,
@@ -110,7 +94,8 @@ pub fn kernel_entry_2(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
         );
     }
 
-    early_println!("rip: {:#x}, rsp: {:#x}", rip, rsp);
+    kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
+    kprintln!("\n\nHere we go!\n\n");
 
     explat::power::poweroff()
 }
@@ -118,6 +103,6 @@ pub fn kernel_entry_2(hart_id: usize, arg: *const exboot::ExbootArg) -> ! {
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    early_println!("Kernel panic: {}", info);
+    kprintln!("Kernel panic: {}", info);
     explat::power::poweroff()
 }

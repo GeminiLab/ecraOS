@@ -1,8 +1,9 @@
 //! COM1 (`0x3F8`) UART 16550 debug console with a spinlock for exclusive access.
 
-use explat::{crate_interface, debug_console::DebugConsoleIf};
 use kspin::SpinNoIrq;
 use uart_16550::SerialPort;
+
+use explat::{debug_console::DebugConsoleIf, reexport::crate_interface};
 
 /// Standard PC COM1 I/O base port.
 const COM1_BASE: u16 = 0x3f8;

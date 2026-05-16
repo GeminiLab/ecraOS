@@ -8,5 +8,5 @@ bitmaps = { version = "3.2.1", default-features = false }
 exboot = { path = "../exboot/exboot" }
 explat = { path = "../explat/explat" }
 expt = { path = "../expt" }
-memory_addr = "0.4"
+memory_addr.workspace = true
 size-disp = { path = "../size-disp" }

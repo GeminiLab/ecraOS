@@ -1,6 +1,6 @@
 //! Power-off via the QEMU ACPI PM control port (`0x604`).
 
-use explat::{crate_interface, power::PowerIf};
+use explat::{power::PowerIf, reexport::crate_interface};
 
 /// Type tag for [`crate_interface::impl_interface`] wiring to [`explat::power::PowerIf`].
 pub struct PowerImpl;

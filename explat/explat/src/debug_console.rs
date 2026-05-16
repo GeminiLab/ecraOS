@@ -3,7 +3,7 @@
 
 use core::fmt::Write;
 
-use crate::crate_interface::def_interface;
+use crate::reexport::crate_interface::def_interface;
 
 /// Low-level debug console operations implemented by the platform.
 ///

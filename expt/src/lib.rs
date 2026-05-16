@@ -3,7 +3,11 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
 
+mod arch;
 mod meta;
+pub mod pte {
+    pub use page_table_entry::*;
+}
 
 use core::marker::PhantomData;
 
@@ -12,8 +16,10 @@ use memory_addr::{AddrRange, MemoryAddr, PhysAddr, VirtAddr};
 pub use meta::PageTableMeta;
 use page_table_entry::{GenericPTE, MappingFlags};
 
-pub mod pte {
-    pub use page_table_entry::*;
+macro_rules! trace {
+    ($($arg:tt)*) => {
+        // explat::dbcn_println!($($arg)*);
+    };
 }
 
 pub struct X86Level4PageTableMeta;
@@ -24,7 +30,9 @@ impl PageTableMeta for X86Level4PageTableMeta {
     const LEVELS: usize = 4;
     const PAGE_OFFSET_BITS: usize = 12;
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
-    const LEVEL_CAN_BE_PAGE: [bool; Self::LEVELS] = [true, true, true, false];
+
+    // Max page size 1GiB, at level 2 of levels 0-3.
+    const MAX_PAGE_LEVEL: usize = 2;
 }
 
 pub struct X86Level5PageTableMeta;
@@ -35,15 +43,22 @@ impl PageTableMeta for X86Level5PageTableMeta {
     const LEVELS: usize = 5;
     const PAGE_OFFSET_BITS: usize = 12;
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
-    const LEVEL_CAN_BE_PAGE: [bool; Self::LEVELS] = [true, true, true, true, false];
+
+    // Max page size 512GiB, at level 3 of levels 0-4.
+    const MAX_PAGE_LEVEL: usize = 3;
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PagingError {
+    #[error("The page is not mapped")]
     NotMapped,
+    #[error("The page is already mapped")]
     AlreadyMapped,
+    #[error("The page is mapped to a huge page")]
     MappedToHugePage,
+    #[error("Allocation failed")]
     AllocationFailed,
+    #[error("The page cannot be a page at level {level}")]
     CannotBePage { level: usize },
 }
 
@@ -65,29 +80,18 @@ impl<M: PageTableMeta> PageTableMetaAssertions<M> {
         M::LEVELS <= 5 && M::LEVELS > 0,
         "Page table level must be no more than 5 and greater than 0"
     );
-    const CAN_BE_PAGE_ASSERTIONS: () = assert!(
-        {
-            let mut index = 1;
-            let mut result = true;
-            while index < M::LEVELS {
-                if M::LEVEL_CAN_BE_PAGE[index] && !M::LEVEL_CAN_BE_PAGE[index - 1] {
-                    result = false;
-                    break;
-                }
-                index += 1;
-            }
-            result
-        },
-        "`M::LEVEL_CAN_BE_PAGE` must be a sequence like [true, ..., true, false, ..., false]"
+    const MAX_PAGE_LEVEL_ASSERTIONS: () = assert!(
+        // 0 <= M::MAX_PAGE_LEVEL && 
+        M::MAX_PAGE_LEVEL < M::LEVELS,
+        "`M::MAX_PAGE_LEVEL` must be greater or equal than 0 and less than `M::LEVELS`"
     ) where [(); M::LEVELS]: Sized;
 
     #[doc(hidden)]
+    #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
     pub const ASSERTIONS: () = {
         let _ = Self::VA_BITS_ASSERTIONS;
         let _ = Self::LEVELS_ASSERTIONS;
-        let _ = Self::CAN_BE_PAGE_ASSERTIONS;
-
-        ()
+        let _ = Self::MAX_PAGE_LEVEL_ASSERTIONS;
     } where [(); M::LEVELS]: Sized;
 }
 
@@ -100,7 +104,13 @@ impl<M: PageTableMeta, PTE: GenericPTE> PageTable<M, PTE>
 where
     [(); M::LEVELS]: Sized,
 {
+    /// Creates a new page table at the given physical address.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the physical address is valid.
     pub unsafe fn new_at(paddr: PhysAddr) -> Self {
+        #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
         let _ = PageTableMetaAssertions::<M>::ASSERTIONS;
 
         Self {
@@ -140,7 +150,7 @@ where
     ) -> PagingResult<(&mut PTE, usize)> {
         let vaddr: usize = vaddr.into();
 
-        if !M::LEVEL_CAN_BE_PAGE[level] {
+        if level > M::MAX_PAGE_LEVEL {
             return Err(PagingError::CannotBePage { level });
         }
 
@@ -216,6 +226,9 @@ where
         }
     }
 
+    /// Gets the table at level `level` from its physical address `paddr`.
+    ///
+    /// Basically the same as [`table_of_mut`], but the level is not a constant.
     fn table_of_mut_non_const<'a, H: PagingHandler>(
         paddr: PhysAddr,
         level: usize,
@@ -250,11 +263,10 @@ where
                 let table = Self::alloc_table::<LEVEL, H>()?;
                 *entry = GenericPTE::new_table(table);
 
-                let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
                 let table = Self::table_of_mut::<LEVEL, H>(paddr);
 
-                for i in 0..entry_count {
-                    table[i] =
+                for (i, entry) in table.iter_mut().enumerate() {
+                    *entry =
                         PTE::new_page(paddr + i * M::LEVEL_PAGE_SIZE[LEVEL], flags, LEVEL != 0);
                 }
 
@@ -291,11 +303,10 @@ where
             Ok(())
         } else {
             // It points to a table, clear it recursively.
-            let sub_entry_count = M::LEVEL_TABLE_SIZE[level - 1];
             let table = Self::table_of_mut_non_const::<H>(entry.paddr(), level - 1);
 
-            for i in 0..sub_entry_count {
-                Self::clear_pte::<H>(&mut table[i], level - 1)?;
+            for entry in table.iter_mut() {
+                Self::clear_pte::<H>(entry, level - 1)?;
             }
 
             Ok(())
@@ -330,7 +341,7 @@ where
         let end_vaddr = range.end.align_up(M::LEVEL_PAGE_SIZE[0]);
 
         while start_vaddr < end_vaddr {
-            for level in (0..M::LEVELS).rev() {
+            for level in (0..=M::MAX_PAGE_LEVEL).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
                 if start_vaddr.is_aligned(page_size) && (start_vaddr + page_size) <= end_vaddr {
                     let (entry, index) =
@@ -352,12 +363,13 @@ where
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult {
+        trace!("Mapping {:#x} to {:#x}, size {:#x}", vaddr, paddr, size);
+        let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
         self.iter_pages_in_range::<_, H>(
             AddrRange::new(vaddr, vaddr + size),
             |level, _index, page_vaddr, entry| {
-                let page_vaddr: usize = page_vaddr.into();
-                let offset = page_vaddr.wrapping_sub(vaddr.into());
-                *entry = GenericPTE::new_page(paddr + offset, flags, level != 0);
+                let page_paddr = PhysAddr::from_usize(page_vaddr.wrapping_sub(offset).into());
+                *entry = GenericPTE::new_page(page_paddr, flags, level != 0);
                 Ok(())
             },
         )

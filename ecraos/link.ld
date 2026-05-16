@@ -14,8 +14,9 @@ SECTIONS {
         _stext = .;
         *(.text.kernel_entry)
         *(.text .text.*)
-        . = ALIGN(4K);
         _etext = .;
+        . = ALIGN(4K);
+        _ftext = .;
     }
 
     /* Read-only data sections */
@@ -32,15 +33,17 @@ SECTIONS {
         __init_array_end = .;
     }
 
-    . = ALIGN(4K);
     _erodata = .;
+    . = ALIGN(4K);
+    _frodata = .;
 
     /* Data sections */
     .data : ALIGN(4K) {
         _sdata = .;
         *(.data .data.*)
-        . = ALIGN(4K);
         _edata = .;
+        . = ALIGN(4K);
+        _fdata = .;
     }
 
     /* Relocation sections */
@@ -48,20 +51,25 @@ SECTIONS {
         _srela_dyn = .;
         *(.rela.dyn)
         _erela_dyn = .;
+        . = ALIGN(4K);
+        _frela_dyn = .;
     }
 
     .got : ALIGN(4K) {
         _sgot = .;
         *(.got)
         _egot = .;
+        . = ALIGN(4K);
+        _fgot = .;
     }
 
     /* BSS sections */
     .bss : ALIGN(4K) {
         _sbss = .;
         *(.bss .bss.*)
-        . = ALIGN(4K);
         _ebss = .;
+        . = ALIGN(4K);
+        _fbss = .;
     }
 
     _ekernel = .;

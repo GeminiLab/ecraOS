@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags = "2.11"
 crate_interface = "0.3"
 exboot = { path = "../../exboot/exboot" }
+memory_addr.workspace = true
 heapless = "0.9"
