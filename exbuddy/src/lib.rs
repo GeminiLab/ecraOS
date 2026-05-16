@@ -11,4 +11,4 @@ pub mod page_meta;
 pub use page_meta::{PFN_NONE, PageFlags, PageMeta};
 
 pub mod buddy;
-pub use buddy::{AllocatorUsage, BuddyAllocator, ManagedSection, MAX_ORDER};
+pub use buddy::{AllocatorUsage, BuddyAllocator, MAX_ORDER, ManagedSection};

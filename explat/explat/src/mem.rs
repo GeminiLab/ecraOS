@@ -68,8 +68,6 @@ pub const MAX_BOOT_MEM_REGIONS: usize = 48;
 /// The memory regions collected by [`boot_mem_info`].
 pub type BootMemoryRegions = HeaplessVec<BootMemoryRegion, MAX_BOOT_MEM_REGIONS>;
 
-
-
 /// The maximum number of virtual address space modes that can be supported by
 /// the platform.
 ///

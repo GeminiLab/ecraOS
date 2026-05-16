@@ -194,6 +194,29 @@ impl EarlyPageAllocator {
     }
 }
 
+/// The physical address range that was occupied by the early page allocator.
+///
+/// Set by [`set_early_allocator_range`] before the allocator is destroyed,
+/// read by the integration allocator module to exclude this range from the
+/// buddy allocator.
+static mut EARLY_ALLOCATOR_RANGE: Option<PhysAddrRange> = None;
+
+/// Stores the early allocator range for later retrieval.
+///
+/// Called once during boot before the early allocator is destroyed.
+pub fn set_early_allocator_range(range: PhysAddrRange) {
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(EARLY_ALLOCATOR_RANGE), Some(range));
+    }
+}
+
+/// Returns the early allocator range that was stored previously.
+///
+/// Panics if [`set_early_allocator_range`] has not been called yet.
+pub fn early_allocator_range() -> PhysAddrRange {
+    unsafe { (*core::ptr::addr_of!(EARLY_ALLOCATOR_RANGE)).expect("early allocator range not set") }
+}
+
 pub fn find_early_page_allocator_range(memory_info: &BootMemoryRegions) -> Option<PhysAddrRange> {
     let page_size_shift = super::vmm::page_size_shift();
     let page_size = 1usize << page_size_shift;

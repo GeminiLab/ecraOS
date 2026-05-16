@@ -8,10 +8,31 @@ use size_disp::SizeDisplay;
 
 use crate::kprintln;
 
+pub mod alloc;
 mod early;
 pub mod reloc;
 pub mod sections;
 pub mod vmm;
+
+/// The physical address range occupied by the boot stack.
+///
+/// Stored during [`init_vmm`] (before VMM setup) so that the allocator
+/// integration can exclude it from the buddy allocator.
+static mut BOOT_STACK_RANGE: Option<memory_addr::PhysAddrRange> = None;
+
+/// Stores the boot stack physical range for later retrieval.
+fn set_boot_stack_range(range: memory_addr::PhysAddrRange) {
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(BOOT_STACK_RANGE), Some(range));
+    }
+}
+
+/// Returns the boot stack physical range.
+///
+/// Panics if [`set_boot_stack_range`] has not been called yet.
+pub fn boot_stack_range() -> memory_addr::PhysAddrRange {
+    unsafe { (*core::ptr::addr_of!(BOOT_STACK_RANGE)).expect("boot stack range not set") }
+}
 
 pub fn init_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
@@ -25,6 +46,12 @@ pub fn init_vmm(
     let mem_regions = explat::mem::boot_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg })
         .expect("Memory info unavailable");
     print_mem_regions(&mem_regions);
+
+    // Store the boot stack range before VMM setup modifies the BootArg data.
+    {
+        let bs = unsafe { arg.as_ref_unchecked() }.boot_stack;
+        set_boot_stack_range(bs);
+    }
 
     // Determine the layout of the virtual address space.
     vmm::init_vmm_layout();
@@ -84,6 +111,12 @@ pub fn init_vmm_later() {
         page_size_shift,
         base_paddr
     );
+
+    // Store the early allocator range so that init_allocators can exclude it
+    // from the buddy allocator.
+    let early_range =
+        memory_addr::PhysAddrRange::from_start_size(base_paddr, 512 << page_size_shift);
+    early::set_early_allocator_range(early_range);
 }
 
 unsafe fn call_fn_new_stack_arg2(

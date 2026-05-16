@@ -19,6 +19,8 @@
 #[cfg(building_ecraos)]
 extern crate explat_impl;
 
+extern crate alloc;
+
 mod mem;
 
 macro_rules! kprintln {
@@ -80,6 +82,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
     kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
 
     mem::init_vmm_later();
+    unsafe { mem::alloc::init_allocators(_arg) };
 
     let rsp: usize;
     let rip: usize;
