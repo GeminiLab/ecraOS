@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+CLEAN="${CLEAN:-0}"
+
 TARGET="x86_64-unknown-none"
 PROFILE="${PROFILE:-debug}"
 if [ "$PROFILE" = "debug" ]; then
@@ -19,8 +21,10 @@ BOOT="$ROOT/target/$TARGET/$PROFILE/libexboot_multiboot_x86_64.rlib"
 LOADER="$ROOT/target/$TARGET/$PROFILE/ecraos-loader"
 LOADER_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos-loader.bin"
 
-echo "Cleaning up..." >&2
-cargo clean
+if [ "$CLEAN" = "1" ]; then
+  echo "Cleaning up..." >&2
+  cargo clean
+fi
 
 echo "Building explat-x86_64..." >&2
 RUSTFLAGS="-C relocation-model=pie" cargo build -p explat-x86_64 --target $TARGET $PROFILE_ARG
