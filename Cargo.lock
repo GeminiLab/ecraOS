@@ -112,6 +112,7 @@ dependencies = [
  "bitflags 2.11.1",
  "crate_interface",
  "exboot",
+ "expt",
  "heapless",
  "memory_addr",
 ]
@@ -133,7 +134,6 @@ name = "expt"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
- "explat",
  "memory_addr",
  "page_table_entry",
  "thiserror",

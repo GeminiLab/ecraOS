@@ -1,3 +1,5 @@
+//! Early (before vmm enabled) page allocator.
+
 use core::{cell::UnsafeCell, mem};
 
 use bitmaps::Bitmap;

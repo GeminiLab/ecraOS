@@ -5,8 +5,8 @@ use x86_64::registers::control::{Cr4, Cr4Flags};
 use explat::{
     init::PlatformBootArg,
     mem::{
-        BootMemoryRegion, BootMemoryRegionType, BootMemoryRegions, MemIf, VirtAddrSpaceHalfStatus,
-        VirtAddrSpaceStatus,
+        BootMemoryRegion, BootMemoryRegionType, BootMemoryRegions, MemIf, VirtAddrSpaceMode,
+        VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
     reexport::{
         crate_interface,
@@ -78,33 +78,6 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> BootMemoryReg
     memory_regions
 }
 
-fn get_virtual_address_space_status() -> VirtAddrSpaceHalfStatus {
-    const LA57_HALF_BITS: u32 = 56;
-    const LA48_HALF_BITS: u32 = 47;
-
-    let la57_supported = CpuId::new()
-        .get_extended_feature_info()
-        .map(|f| f.has_la57())
-        .unwrap_or_default();
-    let max_bits = if la57_supported {
-        LA57_HALF_BITS
-    } else {
-        LA48_HALF_BITS
-    };
-
-    let la57_enabled = Cr4::read().contains(Cr4Flags::L5_PAGING);
-    let current_bits = if la57_enabled {
-        LA57_HALF_BITS
-    } else {
-        LA48_HALF_BITS
-    };
-
-    VirtAddrSpaceHalfStatus::Enabled {
-        current_bits,
-        max_bits,
-    }
-}
-
 pub struct MemImpl;
 
 #[crate_interface::impl_interface]
@@ -113,11 +86,43 @@ impl MemIf for MemImpl {
         Some(get_multiboot_memory_regions(arg))
     }
 
-    fn virt_addr_space_status() -> VirtAddrSpaceStatus {
-        let half = get_virtual_address_space_status();
-        VirtAddrSpaceStatus {
-            lower_half: half,
-            upper_half: half,
+    fn virt_addr_space_modes() -> VirtAddrSpaceModes {
+        let mut modes = VirtAddrSpaceModes::new();
+
+        const PAGE_SHIFT: u8 = 12;
+        const LA48_VA_BITS: u8 = 48;
+        const LA57_VA_BITS: u8 = 57;
+
+        let _ = modes
+            .modes
+            .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
+                page_shift: 12,
+                va_bits: LA48_VA_BITS,
+            }));
+        modes.current_index = modes.modes.len() - 1;
+
+        let la57_supported = CpuId::new()
+            .get_extended_feature_info()
+            .map(|f| f.has_la57())
+            .unwrap_or_default();
+        if la57_supported {
+            let _ = modes
+                .modes
+                .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
+                    page_shift: PAGE_SHIFT,
+                    va_bits: LA57_VA_BITS,
+                }));
+
+            let la57_enabled = Cr4::read().contains(Cr4Flags::L5_PAGING);
+            if la57_enabled {
+                modes.current_index = modes.modes.len() - 1;
+            }
         }
+
+        modes
+    }
+
+    fn set_virt_addr_space_mode(_mode: VirtAddrSpaceMode) {
+        // TODO: Implement this
     }
 }

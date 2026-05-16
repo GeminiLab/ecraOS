@@ -8,5 +8,3 @@ cfg-if.workspace = true
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
 thiserror.workspace = true
-
-explat = { path = "../explat/explat" }

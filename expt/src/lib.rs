@@ -16,12 +16,6 @@ use memory_addr::{AddrRange, MemoryAddr, PhysAddr, VirtAddr};
 pub use meta::PageTableMeta;
 use page_table_entry::{GenericPTE, MappingFlags};
 
-macro_rules! trace {
-    ($($arg:tt)*) => {
-        // explat::dbcn_println!($($arg)*);
-    };
-}
-
 pub struct X86Level4PageTableMeta;
 
 impl PageTableMeta for X86Level4PageTableMeta {
@@ -363,7 +357,6 @@ where
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult {
-        trace!("Mapping {:#x} to {:#x}, size {:#x}", vaddr, paddr, size);
         let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
         self.iter_pages_in_range::<_, H>(
             AddrRange::new(vaddr, vaddr + size),

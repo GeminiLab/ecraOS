@@ -77,7 +77,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
-    kprintln!("VMM enabled on hart_id: {:#x}", hart_id);
+    kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
 
     mem::init_vmm_later();
 

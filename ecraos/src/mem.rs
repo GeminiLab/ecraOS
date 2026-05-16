@@ -26,12 +26,8 @@ pub fn init_vmm(
         .expect("Memory info unavailable");
     print_mem_regions(&mem_regions);
 
-    // Get virtual address space status from the platform.
-    let va_status = explat::mem::virt_addr_space_status();
-
     // Determine the layout of the virtual address space.
-    vmm::init_vmm_layout(va_status);
-
+    vmm::init_vmm_layout();
     let virt_phys_offset = vmm::virt_phys_offset();
 
     // Initialize the early page allocator.

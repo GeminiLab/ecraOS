@@ -1,15 +1,16 @@
-use core::num::NonZeroUsize;
+//! Virtual memory management.
 
+use explat::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps};
 use memory_addr::{VirtAddr, VirtAddrRange, va};
-
-use explat::mem::{VirtAddrSpaceHalfStatus, VirtAddrSpaceStatus};
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpace {
-    page_size_shift: NonZeroUsize,
+    #[expect(dead_code)]
+    mode: VirtAddrSpaceMode,
+    page_shift: u8,
     direct_mapping_range: VirtAddrRange,
     vmalloc_range: VirtAddrRange,
 }
@@ -41,6 +42,7 @@ pub fn virt_phys_offset() -> usize {
     }
 }
 
+#[expect(dead_code)]
 pub fn vmalloc_base() -> VirtAddr {
     // SAFETY: We manually ensure that the read happens only after the write.
     unsafe { read_virtual_address_space().vmalloc_range.start }
@@ -48,35 +50,25 @@ pub fn vmalloc_base() -> VirtAddr {
 
 pub fn page_size_shift() -> usize {
     // SAFETY: We manually ensure that the read happens only after the write.
-    unsafe { read_virtual_address_space().page_size_shift.get() }
+    unsafe { read_virtual_address_space().page_shift as _ }
 }
 
-pub(super) fn init_vmm_layout(va_status: VirtAddrSpaceStatus) {
-    let upper_bits = get_va_upper_bits(&va_status);
-    let upper_start = va!((1usize << upper_bits).wrapping_neg());
+pub(super) fn init_vmm_layout() {
+    let va_modes = explat::mem::virt_addr_space_modes();
 
     kprintln!("Virtual address space:");
-    fn print_half_support(which: &str, support: VirtAddrSpaceHalfStatus) {
-        match support {
-            VirtAddrSpaceHalfStatus::NotSupported => {
-                kprintln!("  {:<10}: Not supported", which)
-            }
-            VirtAddrSpaceHalfStatus::Disabled { max_bits } => kprintln!(
-                "  {:<10}: Supported but disabled, max {max_bits} bits",
-                which
-            ),
-            VirtAddrSpaceHalfStatus::Enabled {
-                current_bits,
-                max_bits,
-            } => kprintln!(
-                "  {:<10}: Supported and enabled with {current_bits} bits, max {max_bits} bits",
-                which
-            ),
-        }
+    kprintln!("  Platform virtual address space modes:");
+    for mode in &va_modes.modes {
+        kprintln!("    {}", *mode);
     }
 
-    print_half_support("Lower half", va_status.lower_half);
-    print_half_support("Upper half", va_status.upper_half);
+    let (mode, page_shift, upper_va_bits) = select_va_mode(&va_modes);
+    explat::mem::set_virt_addr_space_mode(mode);
+
+    kprintln!("  Selected virtual address space mode: {}", mode);
+
+    let upper_bits = upper_va_bits;
+    let upper_start = va!((1usize << upper_bits).wrapping_neg());
 
     kprintln!("  Upper half start    : {:#x}", upper_start);
 
@@ -105,39 +97,35 @@ pub(super) fn init_vmm_layout(va_status: VirtAddrSpaceStatus) {
     unsafe {
         VIRTUAL_ADDRESS_SPACE = Some(VirtualAddressSpace {
             // TODO: read page size from the virtual address space status
-            page_size_shift: NonZeroUsize::new(12).unwrap(),
+            mode,
+            page_shift,
             direct_mapping_range,
             vmalloc_range,
         });
     }
 }
 
-fn get_va_upper_bits(memory_info: &VirtAddrSpaceStatus) -> u32 {
-    if super::sections::kernel_range().start.as_usize() & (1 << (usize::BITS - 1)) != 0 {
-        unimplemented!(
-            "Booting directly in the upper half of the virtual address space is not supported yet"
-        );
+fn va_mode_good(mode: VirtAddrSpaceMode) -> Option<(VirtAddrSpaceMode, u8, u8)> {
+    match mode {
+        VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
+            page_shift,
+            va_bits,
+        }) => Some((mode, page_shift, va_bits - 1)),
+        _ => None,
+    }
+}
+
+fn select_va_mode(va_modes: &VirtAddrSpaceModes) -> (VirtAddrSpaceMode, u8, u8) {
+    let current = va_modes.modes[va_modes.current_index];
+    if let Some(result) = va_mode_good(current) {
+        return result;
     }
 
-    match memory_info.upper_half {
-        VirtAddrSpaceHalfStatus::NotSupported => unimplemented!(
-            "Upper half of the virtual address space is not supported, running in the lower half is not supported yet"
-        ),
-        VirtAddrSpaceHalfStatus::Disabled { .. } => unimplemented!(
-            "Upper half of the virtual address space is disabled, VA adjustment is not supported yet"
-        ),
-        VirtAddrSpaceHalfStatus::Enabled {
-            current_bits,
-            max_bits,
-        } => {
-            if current_bits != max_bits {
-                kprintln!(
-                    "Upper half of the virtual address space is not fully enabled, VA adjustment is not supported yet"
-                );
-                kprintln!("Using the current VA bits ({current_bits})");
-            }
-
-            current_bits
+    for mode in &va_modes.modes {
+        if let Some(result) = va_mode_good(*mode) {
+            return result;
         }
     }
+
+    panic!("No good virtual address space mode found");
 }

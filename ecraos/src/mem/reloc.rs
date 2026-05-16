@@ -1,4 +1,4 @@
-//! Handles the relocation of the kernel.
+//! Kernel relocation handling.
 
 use crate::kernel_entry;
 
