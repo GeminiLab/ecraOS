@@ -1,0 +1,8 @@
+[package]
+name = "exslab"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+kspin = "0.2"
+memory_addr.workspace = true
