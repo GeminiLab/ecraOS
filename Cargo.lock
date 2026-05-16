@@ -106,6 +106,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "exbuddy"
+version = "0.1.0"
+dependencies = [
+ "memory_addr",
+]
+
+[[package]]
 name = "explat"
 version = "0.1.0"
 dependencies = [
