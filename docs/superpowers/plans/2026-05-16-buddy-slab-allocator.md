@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-16-buddy-slab-allocator-design.md`
 
+### Deviations from Spec
+
+- **exbuddy does not depend on kspin.** The spec lists kspin for exbuddy, but buddy has no internal locking (locking is at the integration layer). Only `memory_addr` is needed.
+- **EcraosAllocator stores `virt_phys_offset` as a field.** The spec shows it inline in comments. Storing it as a field avoids re-reading from the VMM static on every PageProvider call.
+- **ManagedSection is re-exported** from exbuddy for use by the integration layer's diagnostics.
+
 ---
 
 ## File Structure
@@ -23,7 +29,7 @@ exbuddy/
     ├── lib.rs          # Crate root, re-exports
     ├── error.rs        # AllocError, AllocResult
     ├── page_meta.rs    # PageMeta, PageFlags, PFN_NONE, free_list ops
-    └── buddy.rs        # BuddySection, BuddyAllocator, AllocatorUsage
+    └── buddy.rs        # BuddySection, BuddyAllocator, AllocatorUsage, ManagedSection
 
 exslab/
 ├── Cargo.toml
@@ -32,9 +38,10 @@ exslab/
     ├── error.rs        # AllocError, AllocResult
     ├── size_class.rs   # SizeClass enum, SIZE_CLASS_COUNT, SLAB_MAX_SIZE
     ├── page.rs         # SlabPageHeader, SLAB_MAGIC, bitmap/remote-free ops
-    ├── cache.rs        # SlabCache (partial/full/empty lists), CacheDeallocResult
+    ├── cache.rs        # SlabCache (partial/full/empty lists), CacheDeallocResult (internal)
     └── slab.rs         # SlabAllocator, SlabAllocResult, SlabDeallocResult,
-                        # SlabPoolDeallocResult, SlabPoolTrait, PerCpuSlab, StaticSlabPool
+                        # SlabPoolDeallocResult, SlabPoolTrait, SlabTrait (internal),
+                        # PerCpuSlab, StaticSlabPool
 
 ecraos/src/mem/
 └── alloc/
@@ -46,7 +53,7 @@ ecraos/src/mem/
 
 ```
 Cargo.toml                          # Add exbuddy, exslab to workspace members
-ecraos/Cargo.toml                   # Add exbuddy, exslab dependencies
+ecraos/Cargo.toml                   # Add exbuddy, exslab, kspin dependencies
 ecraos/src/main.rs                  # Call init_allocators() in kernel_entry_with_vmm
 ecraos/src/mem.rs                   # Add alloc module declaration
 ```
@@ -106,10 +113,7 @@ Modify workspace `Cargo.toml` to add `"exbuddy"` to `workspace.members`.
 
 - [ ] **Step 6: Verify compilation**
 
-Run: `cargo check -p exbuddy`
-Expected: FAIL — `buddy.rs` not yet created. But `error.rs` and `page_meta.rs` should have no issues.
-
-Create a stub `exbuddy/src/buddy.rs` with empty structs to make it compile:
+Create a stub `exbuddy/src/buddy.rs` with empty structs:
 ```rust
 //! Buddy allocator implementation.
 
@@ -183,7 +187,7 @@ Port from reference:
 - `alloc_from_section_aligned()` — change `<const PAGE_SIZE>` to use `self.page_size`
 - `find_aligned_pfn_in_block()` — same change
 - `dealloc_pages()` → `dealloc_frames()`: takes `PhysAddr addr`, converts to virtual for section lookup
-- `dealloc_in_section()` — same logic, no PAGE_SIZE generic needed (uses section's page_size implicitly through PFN math... actually, PFN math uses `section.heap_start` and `page_size` — pass page_size as parameter)
+- `dealloc_in_section()` — same logic, pass `page_size` as parameter for PFN math
 - `find_section_by_addr()` / `find_section_by_addr_mut()` — convert PhysAddr input to virtual for comparison
 
 Add convenience wrappers:
@@ -300,7 +304,7 @@ pub mod page;
 pub mod cache;
 pub mod slab;
 
-use memory_addr::{PhysAddr, VirtAddr};
+use memory_addr::VirtAddr;
 
 use crate::error::AllocResult;
 
@@ -385,6 +389,9 @@ Modify:
 - `dealloc_object::<PAGE_SIZE>()` → `dealloc_object(page_size: usize, obj_addr: usize)`
 - `add_slab()` — unchanged (doesn't reference PAGE_SIZE directly)
 
+Define internal result type:
+- `CacheDeallocResult` — `Done` | `FreeSlab { base: usize, pages: usize }` (internal, uses raw usize for addresses within the slab module. Not in the spec; kept internal to cache.rs.)
+
 - [ ] **Step 2: Implement SlabAllocator, result types, PerCpuSlab, StaticSlabPool, SlabPoolTrait**
 
 Port from `refs/buddy-slab-allocator/src/slab/mod.rs`. Key changes:
@@ -393,13 +400,16 @@ Port from `refs/buddy-slab-allocator/src/slab/mod.rs`. Key changes:
 - `PerCpuSlab` stores `page_size: usize`, wraps `SpinNoIrq<SlabAllocator>`
 - `StaticSlabPool<const N: usize>` stores `page_size: usize`
 
+**`SlabTrait`** is an internal trait (not re-exported publicly from lib.rs). It provides the object-safe interface that `SlabPoolTrait` uses to dispatch to per-CPU slabs. Defined in `slab.rs`, used only within the crate.
+
+**`SlabPoolTrait`** is the public trait that the integration layer uses. It is exported from lib.rs.
+
 Define result types per spec:
 - `SlabAllocResult` — `Allocated(NonNull<u8>)` | `NeedsSlab { size_class, pages }`
 - `SlabDeallocResult` — `Done` | `FreeSlab { base: VirtAddr, pages: usize }`
 - `SlabPoolDeallocResult` — `Done` | `RemoteQueued` | `FreeSlab { base: VirtAddr, pages: usize }`
-- `CacheDeallocResult` — `Done` | `FreeSlab { base: usize, pages: usize }` (internal, uses raw usize)
 
-Note: `SlabPoolTrait` and `SlabPoolExt` should be defined here with VirtAddr in result types (conversion from internal usize to VirtAddr happens at this boundary).
+Note: The spec's `SlabAllocator::add_slab` signature includes `owner_cpu: u16`. This differs from the reference. The plan uses the spec's signature: `add_slab(&mut self, size_class: SizeClass, base: VirtAddr, bytes: usize, owner_cpu: u16)`.
 
 - [ ] **Step 3: Verify compilation**
 
@@ -420,7 +430,7 @@ git commit -m "feat(exslab): implement SlabCache, SlabAllocator, PerCpuSlab, and
 **Files:**
 - Modify: `Cargo.toml` — ensure workspace members include exbuddy, exslab (already done in Tasks 1, 5)
 - Modify: `ecraos/Cargo.toml` — add exbuddy, exslab, kspin dependencies
-- Modify: `ecraos/src/mem.rs` — add `mod alloc;`
+- Modify: `ecraos/src/mem.rs` — add `pub mod alloc;`
 - Create: `ecraos/src/mem/alloc/mod.rs`
 
 - [ ] **Step 1: Update ecraos/Cargo.toml**
@@ -440,33 +450,56 @@ In `ecraos/src/mem.rs`, add `pub mod alloc;` after the existing module declarati
 
 This file contains:
 - `EcraosAllocator` struct (holds `buddy: SpinNoIrq<BuddyAllocator>`, `slab_pool: &'static StaticSlabPool<1>`, `virt_phys_offset: usize`)
-- `PageProvider` impl for `EcraosAllocator` (converts PhysAddr ↔ VirtAddr via stored offset)
-- `unsafe impl GlobalAlloc for EcraosAllocator` (routes small→slab, large→buddy, respects lock ordering)
+- `PageProvider` impl for `EcraosAllocator` (converts PhysAddr ↔ VirtAddr via stored `virt_phys_offset`)
+- `unsafe impl GlobalAlloc for EcraosAllocator` (routes small→slab, large→buddy, respects lock ordering from spec)
 - `#[global_allocator]` static
-- `init_allocators()` function (called from `kernel_entry_with_vmm`)
+- `init_allocators(boot_arg: *const exboot::BootArg)` function
 - Public interface functions: `alloc_frame()`, `alloc_frames()`, `alloc_frames_at()`, `dealloc_frames()`, `dealloc_frame()`, `usage()`
 
-`init_allocators()` flow:
-1. Get boot memory regions from `explat::mem::boot_mem_regions()`
-2. Read `page_size = 1 << vmm::page_size_shift()` and `virt_phys_offset = vmm::virt_phys_offset()`
-3. Init BuddyAllocator with first usable region
-4. Add remaining usable regions, excluding kernel range and early allocator range
-5. Create StaticSlabPool with 1 CPU (cpu_id=0)
-6. Set global allocator
+**`#[global_allocator]` pattern — use a single static with Option:**
 
-For the `#[global_allocator]` static, use a pattern like:
 ```rust
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static ALLOCATOR_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+// The allocator itself, behind Option. Initialized once during boot.
+// Safety: only accessed after ALLOCATOR_INITIALIZED is true.
 static mut ECRAOS_ALLOCATOR: Option<EcraosAllocator> = None;
 
-#[global_allocator]
-static mut GLOBAL_ALLOCATOR: &dyn GlobalAlloc = &PanickingAllocator;
-```
-Or use a simpler approach: a single static with `Sync` unsafe impl, initialized at boot.
+// Panic allocator used before initialization.
+struct PanickingAllocator;
 
-Since this is `#![no_std]` kernel without lazy static, the practical approach is:
-- Declare `static mut ALLOCATOR: EcraosAllocator` with `MaybeUninit` or `Option`
-- After init, the GlobalAlloc impl reads from this static
-- Use a separate `AtomicBool` for "initialized" check
+unsafe impl GlobalAlloc for PanickingAllocator {
+    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 { panic!("allocator not initialized") }
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) { panic!("allocator not initialized") }
+}
+
+static PANICKING: PanickingAllocator = PanickingAllocator;
+
+#[global_allocator]
+static mut GLOBAL_ALLOCATOR: &dyn GlobalAlloc = &PANICKING;
+
+// Called once during boot to switch to the real allocator.
+unsafe fn set_global_allocator(alloc: EcraosAllocator) {
+    ECRAOS_ALLOCATOR = Some(alloc);
+    GLOBAL_ALLOCATOR = ECRAOS_ALLOCATOR.as_ref().unwrap();
+    ALLOCATOR_INITIALIZED.store(true, Ordering::Release);
+}
+```
+
+**`init_allocators(boot_arg)` flow:**
+
+The function takes `boot_arg: *const exboot::BootArg` so it can call `explat::mem::boot_mem_regions()`.
+
+1. Get boot memory regions: `let mem_regions = explat::mem::boot_mem_regions(unsafe { boot_arg.as_ref_unchecked().plat_arg }).expect("...");`
+2. Read `page_size = 1usize << vmm::page_size_shift()` and `virt_phys_offset = vmm::virt_phys_offset()`
+3. Init `BuddyAllocator` inside `SpinNoIrq` with first usable region
+4. Add remaining usable regions, excluding:
+   - **Kernel image range**: `sections::kernel_range()` returns `VirtAddrRange`. Convert to physical: `PhysAddrRange::new(start - virt_phys_offset, end - virt_phys_offset)`
+   - **Early allocator range**: `destroy_early_page_allocator()` returns `(Bitmap, page_size_shift, base_paddr)`. Compute the range as `PhysAddrRange::from_start_size(base_paddr, EARLY_PAGE_ALLOCATOR_PAGES << page_size_shift)` — use the same constant `EARLY_PAGE_ALLOCATOR_PAGES = 512` from `early.rs`
+5. Create `StaticSlabPool` with 1 CPU (cpu_id=0, `current_cpu_id` = `|| 0`)
+6. Call `set_global_allocator(EcraosAllocator { buddy, slab_pool, virt_phys_offset })`
 
 - [ ] **Step 4: Verify compilation**
 
@@ -486,14 +519,16 @@ git commit -m "feat(ecraos): integrate exbuddy and exslab with GlobalAlloc imple
 
 **Files:**
 - Modify: `ecraos/src/main.rs` — call `mem::alloc::init_allocators()` after `init_vmm_later()`
-- Create: `ecraos/src/mem/alloc/test.rs` — test module
+- Create: `ecraos/src/mem/alloc/test.rs` — test module stub
 
 - [ ] **Step 1: Call init_allocators in kernel_entry_with_vmm**
 
-In `ecraos/src/main.rs`, in `kernel_entry_with_vmm()`, after `mem::init_vmm_later()`:
+In `ecraos/src/main.rs`, in `kernel_entry_with_vmm()`, after `mem::init_vmm_later()`, pass the boot arg:
 ```rust
-mem::alloc::init_allocators();
+mem::alloc::init_allocators(_arg);
 ```
+
+Note: `_arg` is already available as a parameter to `kernel_entry_with_vmm`. It's currently unused (`_arg: *const exboot::BootArg`) but was used earlier during `init_vmm`. At this point VMM is enabled and the pointer has been relocated, so it's valid.
 
 - [ ] **Step 2: Create test module stub**
 
@@ -522,69 +557,103 @@ git commit -m "feat(ecraos): wire up allocator initialization in kernel boot flo
 
 - [ ] **Step 1: Implement buddy allocator tests**
 
-In `test.rs`, implement `run()` with these tests using `kprintln!` for output:
+In `test.rs`, implement `run()` with these tests using `kprintln!` for output. Import `page_size` and helper functions from `super::*`.
 
 ```rust
-// 1. alloc_frame — check alignment and range
-let frame1 = alloc_frame().expect("alloc_frame failed");
-assert!(frame1.as_usize() % page_size == 0);
-kprintln!("  alloc_frame: OK ({:#x})", frame1);
+use super::*;
+use crate::kprintln;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::alloc::Layout;
+use memory_addr::MemoryAddr;
 
-// 2. alloc_frames(4, page_size)
-let frames4 = alloc_frames(4, page_size).expect("alloc_frames(4) failed");
-kprintln!("  alloc_frames(4): OK ({:#x})", frames4);
+pub fn run() {
+    let page_size = 1usize << crate::mem::vmm::page_size_shift();
 
-// 3. dealloc and realloc
-dealloc_frame(frame1);
-let frame1_again = alloc_frame().expect("alloc_frame after dealloc failed");
-kprintln!("  dealloc/realloc: OK ({:#x} -> {:#x})", frame1, frame1_again);
+    kprintln!("=== Allocator smoke tests ===\n");
 
-// 4. usage
-let usage = usage();
-kprintln!("  usage: total={}, used={}", usage.total_pages, usage.used_pages);
-assert!(usage.total_pages > 0);
-assert!(usage.used_pages > 0);
+    // 1. alloc_frame — check alignment
+    let frame1 = alloc_frame().expect("alloc_frame failed");
+    assert!(frame1.as_usize() % page_size == 0);
+    kprintln!("  alloc_frame: OK ({:#x})", frame1);
+
+    // 2. alloc_frames(4, page_size) — multi-page allocation
+    let frames4 = alloc_frames(4, page_size).expect("alloc_frames(4) failed");
+    assert!(frames4.as_usize() % (4 * page_size) == 0);
+    kprintln!("  alloc_frames(4): OK ({:#x})", frames4);
+
+    // 3. alloc_frames_at — allocate at specific address
+    let target_paddr = frame1; // Use a known-allocated address (dealloc first)
+    dealloc_frame(frame1);
+    let at_result = unsafe { alloc_frames_at(target_paddr, 1).expect("alloc_frames_at failed") };
+    assert_eq!(at_result, target_paddr);
+    kprintln!("  alloc_frames_at: OK ({:#x})", at_result);
+
+    // 4. dealloc and realloc — verify reuse
+    dealloc_frames(frames4, 4);
+    dealloc_frame(at_result);
+    let frame2 = alloc_frame().expect("alloc_frame after dealloc failed");
+    kprintln!("  dealloc/realloc: OK ({:#x})", frame2);
+    dealloc_frame(frame2);
+
+    // 5. usage — check statistics
+    let u = usage();
+    kprintln!("  usage: total={}, used={}", u.total_pages, u.used_pages);
+    assert!(u.total_pages > 0);
+    assert!(u.used_pages > 0);
 ```
-
-Note: Use the public API from `super::*` (alloc_frame, alloc_frames, etc.) not the buddy directly.
 
 - [ ] **Step 2: Implement slab/GlobalAlloc tests**
 
 ```rust
-// 5. Box::new (small object, slab path)
-let boxed = Box::new(42u32);
-assert!(*boxed == 42);
-kprintln!("  Box::new(42u32): OK");
-drop(boxed);
+    // 6. Box::new (small object, slab path)
+    let boxed = Box::new(42u32);
+    assert!(*boxed == 42);
+    kprintln!("  Box::new(42u32): OK");
+    drop(boxed);
 
-// 6. Vec<u8>
-let mut vec: Vec<u8> = Vec::new();
-for i in 0..100 { vec.push(i); }
-assert!(vec.len() == 100);
-kprintln!("  Vec<u8> push 100: OK");
-drop(vec);
+    // 7. Multiple alloc/free without panic
+    for i in 0..10 {
+        let b = Box::new(i);
+        assert!(*b == i);
+        drop(b);
+    }
+    kprintln!("  Multiple alloc/free (10x): OK");
 
-// 7. Large allocation (>2048, buddy path)
-let large = alloc::alloc::alloc(Layout::from_size_align(4096, 4096).unwrap());
-assert!(!large.is_null());
-alloc::alloc::dealloc(large, Layout::from_size_align(4096, 4096).unwrap());
-kprintln!("  Large alloc (4096): OK");
+    // 8. Vec<u8>
+    let mut vec: Vec<u8> = Vec::new();
+    for i in 0..100 { vec.push(i); }
+    assert!(vec.len() == 100);
+    kprintln!("  Vec<u8> push 100: OK");
+    drop(vec);
 
-// 8. String
-let s = String::from("hello ecraOS");
-assert!(s == "hello ecraOS");
-kprintln!("  String: OK ({})", s);
-drop(s);
+    // 9. Large allocation (>2048, buddy path)
+    let large = alloc::alloc::alloc(Layout::from_size_align(4096, 4096).unwrap());
+    assert!(!large.is_null());
+    alloc::alloc::dealloc(large, Layout::from_size_align(4096, 4096).unwrap());
+    kprintln!("  Large alloc (4096): OK");
 
-// 9. Loop test (leak check)
-let usage_before = usage();
-for _ in 0..100 {
-    let b = Box::new([0u8; 64]);
-    drop(b);
+    // 10. String
+    let s = String::from("hello ecraOS");
+    assert!(s == "hello ecraOS");
+    kprintln!("  String: OK ({})", s);
+    drop(s);
+
+    // 11. Loop test (leak check)
+    let usage_before = usage();
+    for _ in 0..100 {
+        let b = Box::new([0u8; 64]);
+        drop(b);
+    }
+    let usage_after = usage();
+    kprintln!("  Loop 100x: before={}, after={}", usage_before.used_pages, usage_after.used_pages);
+
+    kprintln!("\n=== All allocator tests passed ===\n");
 }
-let usage_after = usage();
-kprintln!("  Loop 100x: before={}, after={}", usage_before.used_pages, usage_after.used_pages);
 ```
+
+Note: Add `extern crate alloc;` at the top of `ecraos/src/main.rs` to enable `alloc::boxed::Box` etc.
 
 - [ ] **Step 3: Build and run**
 
