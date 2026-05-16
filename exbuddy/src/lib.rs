@@ -8,7 +8,7 @@ pub mod error;
 pub use error::{AllocError, AllocResult};
 
 pub mod page_meta;
-pub use page_meta::{PageFlags, PageMeta, PFN_NONE};
+pub use page_meta::{PFN_NONE, PageFlags, PageMeta};
 
 pub mod buddy;
-pub use buddy::{AllocatorUsage, BuddyAllocator, ManagedSection};
+pub use buddy::{AllocatorUsage, BuddyAllocator, ManagedSection, MAX_ORDER};
