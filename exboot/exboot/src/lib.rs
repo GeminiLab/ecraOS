@@ -19,7 +19,11 @@ pub enum PlatformBootArg {
 /// The argument provided by the `exboot` during boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootArg {
-    pub boot_stack: PhysAddrRange,
+    /// The physical address range occupied by the loader.
+    ///
+    /// This covers the loader's `.text`, `.rodata`, `.data` (including boot
+    /// stack), but excludes the kernel payload section.
+    pub loader_range: PhysAddrRange,
     pub plat_arg: PlatformBootArg,
 }
 

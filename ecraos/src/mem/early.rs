@@ -5,7 +5,7 @@ use core::{cell::UnsafeCell, mem};
 use bitmaps::Bitmap;
 use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, align_up};
 
-use explat::mem::{BootMemoryRegionType, BootMemoryRegions};
+use explat::mem::{MemoryRegionFlags, MemoryRegions};
 use expt::PagingHandler;
 use size_disp::SizeDisplay;
 
@@ -217,7 +217,7 @@ pub fn early_allocator_range() -> PhysAddrRange {
     unsafe { (*core::ptr::addr_of!(EARLY_ALLOCATOR_RANGE)).expect("early allocator range not set") }
 }
 
-pub fn find_early_page_allocator_range(memory_info: &BootMemoryRegions) -> Option<PhysAddrRange> {
+pub fn find_early_page_allocator_range(memory_info: &MemoryRegions) -> Option<PhysAddrRange> {
     let page_size_shift = super::vmm::page_size_shift();
     let page_size = 1usize << page_size_shift;
     let total_size = EARLY_PAGE_ALLOCATOR_PAGES << page_size_shift;
@@ -229,7 +229,7 @@ pub fn find_early_page_allocator_range(memory_info: &BootMemoryRegions) -> Optio
     );
 
     for region in memory_info.into_iter().rev() {
-        if region.type_ != BootMemoryRegionType::Usable {
+        if !region.flags.contains(MemoryRegionFlags::FREE) {
             continue;
         }
 

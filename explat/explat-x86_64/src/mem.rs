@@ -5,8 +5,8 @@ use x86_64::registers::control::{Cr4, Cr4Flags};
 use explat::{
     init::PlatformBootArg,
     mem::{
-        BootMemoryRegion, BootMemoryRegionType, BootMemoryRegions, MemIf, VirtAddrSpaceMode,
-        VirtAddrSpaceModes, VirtAddrSpaceProps,
+        DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_FLAGS, MemIf, MemoryRegion, MemoryRegionFlags,
+        MemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
     reexport::{
         crate_interface,
@@ -33,8 +33,8 @@ impl MemoryManagement for MultibootMem {
     unsafe fn deallocate(&mut self, _addr: PAddr) {}
 }
 
-fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> BootMemoryRegions {
-    let mut memory_regions = BootMemoryRegions::new();
+fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> MemoryRegions {
+    let mut memory_regions = MemoryRegions::new();
     let mut mem = MultibootMem;
     let PlatformBootArg::Multiboot(arg) = multiboot_arg else {
         return memory_regions;
@@ -50,23 +50,23 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> BootMemoryReg
                 memory_region.length() as _,
             );
 
-            let region_type = match memory_region.memory_type() {
+            let flags: MemoryRegionFlags = match memory_region.memory_type() {
                 MemoryType::Available => {
                     if region.start.as_usize() < LOW_MEMORY_END {
-                        BootMemoryRegionType::BootService
+                        DEFAULT_RESERVED_FLAGS
                     } else {
-                        BootMemoryRegionType::Usable
+                        DEFAULT_RAM_FLAGS
                     }
                 }
-                MemoryType::Reserved => BootMemoryRegionType::Reserved,
-                MemoryType::ACPI => BootMemoryRegionType::Reserved,
-                MemoryType::NVS => BootMemoryRegionType::Reserved,
+                MemoryType::Reserved => DEFAULT_RESERVED_FLAGS,
+                MemoryType::ACPI => DEFAULT_RESERVED_FLAGS,
+                MemoryType::NVS => DEFAULT_RESERVED_FLAGS,
                 MemoryType::Defect => continue,
             };
 
-            let push_result = memory_regions.push(BootMemoryRegion {
+            let push_result = memory_regions.push(MemoryRegion {
                 range: region,
-                type_: region_type,
+                flags,
             });
 
             if push_result.is_err() {
@@ -82,7 +82,7 @@ pub struct MemImpl;
 
 #[crate_interface::impl_interface]
 impl MemIf for MemImpl {
-    fn boot_mem_regions(arg: PlatformBootArg) -> Option<BootMemoryRegions> {
+    fn boot_mem_regions(arg: PlatformBootArg) -> Option<MemoryRegions> {
         Some(get_multiboot_memory_regions(arg))
     }
 

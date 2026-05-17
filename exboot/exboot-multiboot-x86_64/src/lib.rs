@@ -40,16 +40,16 @@ use exboot::call_kernel_entry;
 #[unsafe(no_mangle)]
 fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
     unsafe extern "C" {
-        fn _sbootstack();
-        fn _ebootstack();
+        fn _sloader();
+        fn _skernel();
     }
 
-    let sbootstack = _sbootstack as *const () as usize;
-    let ebootstack = _ebootstack as *const () as usize;
+    let sloader = _sloader as *const () as usize;
+    let skernel = _skernel as *const () as usize;
 
     let boot_arg = BootArg {
         // SAFETY: We know it's valid because the linker script ensures it.
-        boot_stack: unsafe { PhysAddrRange::new_unchecked(sbootstack.into(), ebootstack.into()) },
+        loader_range: unsafe { PhysAddrRange::new_unchecked(sloader.into(), skernel.into()) },
         plat_arg: PlatformBootArg::Multiboot(PhysAddr::from_usize(arg1 as _)),
     };
 

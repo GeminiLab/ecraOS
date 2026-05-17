@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use explat::mem::BootMemoryRegions;
+use explat::mem::MemoryRegions;
 use expt::{
     PageTable, X86Level4PageTableMeta,
     pte::{MappingFlags, x86_64::X64PTE},
@@ -16,38 +16,38 @@ pub mod reloc;
 pub mod sections;
 pub mod vmm;
 
-/// The physical address range occupied by the boot stack.
+/// The physical address range occupied by the loader.
 ///
 /// Stored during [`init_vmm`] (before VMM setup) so that the allocator
 /// integration can exclude it from the buddy allocator.
-static mut BOOT_STACK_RANGE: Option<memory_addr::PhysAddrRange> = None;
+static mut LOADER_RANGE: Option<memory_addr::PhysAddrRange> = None;
 
 /// Saved boot memory regions.
 ///
 /// Stored during [`init_vmm`] (before VMM setup) because the multiboot
 /// info may become inaccessible after VMM setup (the `paddr_to_slice`
 /// callback in the platform layer assumes identity mapping).
-static mut SAVED_MEM_REGIONS: MaybeUninit<BootMemoryRegions> = MaybeUninit::uninit();
+static mut SAVED_MEM_REGIONS: MaybeUninit<MemoryRegions> = MaybeUninit::uninit();
 
-/// Saves the boot stack physical range for later retrieval.
+/// Saves the loader physical range for later retrieval.
 ///
 /// Called once during [`init_vmm`] before VMM setup, so the allocator
 /// integration can later exclude this range from the buddy allocator.
-fn set_boot_stack_range(range: memory_addr::PhysAddrRange) {
+fn set_loader_range(range: memory_addr::PhysAddrRange) {
     unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(BOOT_STACK_RANGE), Some(range));
+        core::ptr::write(core::ptr::addr_of_mut!(LOADER_RANGE), Some(range));
     }
 }
 
-/// Retrieves the boot stack physical range.
+/// Retrieves the loader physical range.
 ///
-/// Panics if [`set_boot_stack_range`] has not been called yet.
-pub fn boot_stack_range() -> memory_addr::PhysAddrRange {
-    unsafe { (*core::ptr::addr_of!(BOOT_STACK_RANGE)).expect("boot stack range not set") }
+/// Panics if [`set_loader_range`] has not been called yet.
+pub fn loader_range() -> memory_addr::PhysAddrRange {
+    unsafe { (*core::ptr::addr_of!(LOADER_RANGE)).expect("loader range not set") }
 }
 
 /// Saves boot memory regions for later retrieval by [`saved_mem_regions`].
-fn set_saved_mem_regions(regions: BootMemoryRegions) {
+fn set_saved_mem_regions(regions: MemoryRegions) {
     unsafe {
         (*core::ptr::addr_of_mut!(SAVED_MEM_REGIONS)).write(regions);
     }
@@ -56,7 +56,7 @@ fn set_saved_mem_regions(regions: BootMemoryRegions) {
 /// Retrieves the boot memory regions saved during [`init_vmm`].
 ///
 /// Panics if [`set_saved_mem_regions`] has not been called yet.
-pub fn saved_mem_regions() -> &'static BootMemoryRegions {
+pub fn saved_mem_regions() -> &'static MemoryRegions {
     unsafe { (*core::ptr::addr_of!(SAVED_MEM_REGIONS)).assume_init_ref() }
 }
 
@@ -78,10 +78,10 @@ pub fn init_vmm(
     // identity mapping).
     set_saved_mem_regions(mem_regions.clone());
 
-    // Store the boot stack range before VMM setup modifies the BootArg data.
+    // Store the loader range before VMM setup modifies the BootArg data.
     {
-        let bs = unsafe { arg.as_ref_unchecked() }.boot_stack;
-        set_boot_stack_range(bs);
+        let lr = unsafe { arg.as_ref_unchecked() }.loader_range;
+        set_loader_range(lr);
     }
 
     // Determine the layout of the virtual address space.
@@ -123,8 +123,8 @@ pub fn init_vmm(
 
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        let boot_stack_top = arg.as_ref_unchecked().boot_stack.end;
-        let boot_stack_top = boot_stack_top.as_usize() + virt_phys_offset;
+        let loader_range_top = arg.as_ref_unchecked().loader_range.end;
+        let boot_stack_top = loader_range_top.as_usize() + virt_phys_offset;
         let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
         let arg = arg.byte_add(virt_phys_offset);
 
@@ -169,20 +169,20 @@ unsafe fn call_fn_new_stack_arg2(
     }
 }
 
-fn print_mem_regions(mem_regions: &BootMemoryRegions) {
+fn print_mem_regions(mem_regions: &MemoryRegions) {
     kprintln!("Physical memory regions:");
     for region in mem_regions {
         let start_usize = region.range.start.as_usize();
         let end_usize = region.range.end.as_usize();
         let size = region.range.size();
-        let ty = region.type_;
+        let flags = region.flags;
 
         kprintln!(
             "  {:<#010x} - {:<#010x}, {}, {:?}",
             start_usize,
             end_usize,
             size.size_display_wide(),
-            ty,
+            flags,
         );
     }
 

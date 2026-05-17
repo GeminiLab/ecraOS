@@ -280,17 +280,17 @@ pub unsafe fn init_allocators(_boot_arg: *const exboot::BootArg) {
     let early_range = mem::early::early_allocator_range();
 
     // The boot stack is still in use (kernel runs on it), so it must be excluded.
-    let boot_stack_range = mem::boot_stack_range();
+    let loader_range = mem::loader_range();
 
     kprintln!("Initializing allocators ...");
 
-    // Excluded physical ranges (kernel image + early allocator + boot stack).
-    let excluded = [kernel_phys_range, early_range, boot_stack_range];
+    // Excluded physical ranges (kernel image + early allocator + loader).
+    let excluded = [kernel_phys_range, early_range, loader_range];
 
     // Collect usable sub-regions, carving out excluded ranges.
     let mut first = true;
     for region in mem_regions {
-        if !matches!(region.type_, explat::mem::BootMemoryRegionType::Usable) {
+        if !region.flags.contains(explat::mem::MemoryRegionFlags::FREE) {
             continue;
         }
 

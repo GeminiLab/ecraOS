@@ -6,67 +6,54 @@ use exboot::{PhysAddrRange, PlatformBootArg};
 
 use crate::reexport::crate_interface::def_interface;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootMemoryRegionType {
-    /// The memory region is a reserved region.
-    Reserved,
-    /// The memory region is a usable region.
-    Usable,
-    /// The memory region is used for boot services.
-    BootService,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct MemoryRegionFlags: usize {
+        /// Readable.
+        const READ         = 1 << 0;
+        /// Writable.
+        const WRITE        = 1 << 1;
+        /// Executable.
+        const EXECUTE      = 1 << 2;
+        /// Device memory (e.g., MMIO regions).
+        const DEVICE       = 1 << 4;
+        /// Uncachable memory (e.g., framebuffer).
+        const UNCACHED     = 1 << 5;
+        /// Reserved memory, do not use for allocation.
+        const RESERVED     = 1 << 6;
+        /// Free memory for allocation.
+        const FREE         = 1 << 7;
+        /// Memory region used for boot services.
+        const BOOT_SERVICE = 1 << 8;
+    }
 }
 
-// bitflags::bitflags! {
-//     /// The flags of a physical memory region.
-//     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//     pub struct BootMemoryRegionFlags: usize {
-//         /// Readable.
-//         const READ          = 1 << 0;
-//         /// Writable.
-//         const WRITE         = 1 << 1;
-//         /// Executable.
-//         const EXECUTE       = 1 << 2;
-//         /// Device memory. (e.g., MMIO regions)
-//         const DEVICE        = 1 << 4;
-//         /// Uncachable memory. (e.g., framebuffer)
-//         const UNCACHED      = 1 << 5;
-//         /// Reserved memory, do not use for allocation.
-//         const RESERVED      = 1 << 6;
-//         /// Free memory for allocation.
-//         const FREE          = 1 << 7;
-//         /// Memory region used for boot services.
-//         const BOOT_SERVICE  = 1 << 8;
-//     }
-// }
+/// The default flags for a normal RAM region (readable, writable and free).
+pub const DEFAULT_RAM_FLAGS: MemoryRegionFlags = MemoryRegionFlags::READ
+    .union(MemoryRegionFlags::WRITE)
+    .union(MemoryRegionFlags::FREE);
 
-// /// The default flags for a normal memory region (readable, writable and allocatable).
-// pub const DEFAULT_RAM_FLAGS: BootMemoryRegionFlags = BootMemoryRegionFlags::READ
-//     .union(BootMemoryRegionFlags::WRITE)
-//     .union(BootMemoryRegionFlags::FREE);
+/// The default flags for a reserved memory region (readable, writable, and
+/// reserved).
+pub const DEFAULT_RESERVED_FLAGS: MemoryRegionFlags = MemoryRegionFlags::READ
+    .union(MemoryRegionFlags::WRITE)
+    .union(MemoryRegionFlags::RESERVED);
 
-// /// The default flags for a reserved memory region (readable, writable, and reserved).
-// pub const DEFAULT_RESERVED_FLAGS: BootMemoryRegionFlags = BootMemoryRegionFlags::READ
-//     .union(BootMemoryRegionFlags::WRITE)
-//     .union(BootMemoryRegionFlags::RESERVED);
-
-// /// The default flags for a MMIO region (readable, writable, device, and reserved).
-// pub const DEFAULT_MMIO_FLAGS: BootMemoryRegionFlags = BootMemoryRegionFlags::READ
-//     .union(BootMemoryRegionFlags::WRITE)
-//     .union(BootMemoryRegionFlags::DEVICE)
-//     .union(BootMemoryRegionFlags::RESERVED);
-
+/// A physical memory region with associated flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BootMemoryRegion {
+pub struct MemoryRegion {
+    /// The physical address range of the region.
     pub range: PhysAddrRange,
-    pub type_: BootMemoryRegionType,
+    /// The flags describing the properties of the region.
+    pub flags: MemoryRegionFlags,
 }
 
 /// The maximum number of memory regions that can be collected by
-/// [`boot_mem_info`].
+/// [`boot_mem_regions`].
 pub const MAX_BOOT_MEM_REGIONS: usize = 48;
 
-/// The memory regions collected by [`boot_mem_info`].
-pub type BootMemoryRegions = HeaplessVec<BootMemoryRegion, MAX_BOOT_MEM_REGIONS>;
+/// The memory regions collected by [`boot_mem_regions`].
+pub type MemoryRegions = HeaplessVec<MemoryRegion, MAX_BOOT_MEM_REGIONS>;
 
 /// The maximum number of virtual address space modes that can be supported by
 /// the platform.
@@ -211,7 +198,7 @@ impl VirtAddrSpaceModes {
 #[def_interface(gen_caller)]
 pub trait MemIf {
     /// Collect the memory regions from the platform boot argument.
-    fn boot_mem_regions(arg: PlatformBootArg) -> Option<BootMemoryRegions>;
+    fn boot_mem_regions(arg: PlatformBootArg) -> Option<MemoryRegions>;
 
     /// Get the supported and current virtual address space modes.
     fn virt_addr_space_modes() -> VirtAddrSpaceModes;
