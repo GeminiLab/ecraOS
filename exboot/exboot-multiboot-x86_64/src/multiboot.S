@@ -21,7 +21,7 @@ multiboot_header:
     .long   MULTIBOOT_CHECKSUM      # Checksum
     .long   multiboot_header        # Header address
     .long   _sloader                # Load start
-    .long   _edata                  # Load end
+    .long   _ekernel                # Load end
     .long   _ebss                   # BSS end
     .long   _start                  # Entry point
 
