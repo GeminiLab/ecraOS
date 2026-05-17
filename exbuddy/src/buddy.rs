@@ -843,6 +843,45 @@ impl BuddyAllocator {
         }
     }
 
+    /// Checks whether the intrusive buddy metadata for a region would overlap
+    /// the given check range.
+    ///
+    /// Returns `true` if adding `region` with the given `page_size` would place
+    /// metadata in `[section_start, managed_heap_start)` that overlaps
+    /// `check_range`.
+    ///
+    /// This does NOT modify the allocator state.
+    pub fn check_metadata_overlap(
+        &self,
+        region: PhysAddrRange,
+        page_size: usize,
+        check_range: PhysAddrRange,
+    ) -> bool {
+        if self.page_size == 0 {
+            return false;
+        }
+
+        let region_start_virt = self.phys_to_virt(region.start.as_usize());
+        let region_size = region.size();
+
+        let Some((normalized_start, normalized_size)) =
+            normalize_region(region_start_virt, region_size, page_size)
+        else {
+            return false;
+        };
+
+        let Some(layout) =
+            BuddySection::compute_region_layout(normalized_start, normalized_size, page_size)
+        else {
+            return false;
+        };
+
+        let check_start_virt = self.phys_to_virt(check_range.start.as_usize());
+        let check_end_virt = self.phys_to_virt(check_range.end.as_usize());
+
+        layout.managed_heap_start > check_start_virt && layout.section_start < check_end_virt
+    }
+
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
