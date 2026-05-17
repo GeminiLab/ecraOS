@@ -4,8 +4,8 @@
 
 use core::arch::global_asm;
 
-use x86_64::registers::control::{Cr0Flags, Cr4Flags, EferFlags};
 use exboot::{BootArg, PhysAddr, PhysAddrRange, PlatformBootArg};
+use x86_64::registers::control::{Cr0Flags, Cr4Flags, EferFlags};
 
 /// `CR0` value applied by boot code: protected mode, paging, write protect, FP-related bits.
 const CR0: u64 = Cr0Flags::PROTECTED_MODE_ENABLE.bits()
@@ -49,9 +49,7 @@ fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
 
     let boot_arg = BootArg {
         // SAFETY: We know it's valid because the linker script ensures it.
-        boot_stack: unsafe {
-            PhysAddrRange::new_unchecked(sbootstack.into(), ebootstack.into())
-        },
+        boot_stack: unsafe { PhysAddrRange::new_unchecked(sbootstack.into(), ebootstack.into()) },
         plat_arg: PlatformBootArg::Multiboot(PhysAddr::from_usize(arg1 as _)),
     };
 

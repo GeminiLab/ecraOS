@@ -259,10 +259,12 @@ static GLOBAL_ALLOCATOR: EcraosGlobalAlloc = EcraosGlobalAlloc;
 /// [`mem::init_vmm_later`] has been called (so the early allocator range is
 /// available). The caller must ensure that no other CPU is concurrently
 /// accessing memory.
-pub unsafe fn init_allocators(boot_arg: *const exboot::BootArg) {
-    let mem_regions =
-        unsafe { explat::mem::boot_mem_regions(boot_arg.as_ref_unchecked().plat_arg) }
-            .expect("memory info unavailable in init_allocators");
+pub unsafe fn init_allocators(_boot_arg: *const exboot::BootArg) {
+    // Use the memory regions saved during init_vmm (before VMM setup).
+    // Calling boot_mem_regions again here would fail because the multiboot
+    // info's paddr_to_slice callback assumes identity mapping, which may
+    // not work after VMM setup.
+    let mem_regions = mem::saved_mem_regions();
 
     let page_size = 1usize << mem::vmm::page_size_shift();
     let vpo = mem::vmm::virt_phys_offset();
@@ -287,7 +289,7 @@ pub unsafe fn init_allocators(boot_arg: *const exboot::BootArg) {
 
     // Collect usable sub-regions, carving out excluded ranges.
     let mut first = true;
-    for region in &mem_regions {
+    for region in mem_regions {
         if !matches!(region.type_, explat::mem::BootMemoryRegionType::Usable) {
             continue;
         }

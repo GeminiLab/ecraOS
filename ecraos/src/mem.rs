@@ -1,3 +1,5 @@
+use core::mem::MaybeUninit;
+
 use explat::mem::BootMemoryRegions;
 use expt::{
     PageTable, X86Level4PageTableMeta,
@@ -20,6 +22,13 @@ pub mod vmm;
 /// integration can exclude it from the buddy allocator.
 static mut BOOT_STACK_RANGE: Option<memory_addr::PhysAddrRange> = None;
 
+/// Saved boot memory regions.
+///
+/// Stored during [`init_vmm`] (before VMM setup) because the multiboot
+/// info may become inaccessible after VMM setup (the `paddr_to_slice`
+/// callback in the platform layer assumes identity mapping).
+static mut SAVED_MEM_REGIONS: MaybeUninit<BootMemoryRegions> = MaybeUninit::uninit();
+
 /// Saves the boot stack physical range for later retrieval.
 ///
 /// Called once during [`init_vmm`] before VMM setup, so the allocator
@@ -37,6 +46,20 @@ pub fn boot_stack_range() -> memory_addr::PhysAddrRange {
     unsafe { (*core::ptr::addr_of!(BOOT_STACK_RANGE)).expect("boot stack range not set") }
 }
 
+/// Saves boot memory regions for later retrieval by [`saved_mem_regions`].
+fn set_saved_mem_regions(regions: BootMemoryRegions) {
+    unsafe {
+        (*core::ptr::addr_of_mut!(SAVED_MEM_REGIONS)).write(regions);
+    }
+}
+
+/// Retrieves the boot memory regions saved during [`init_vmm`].
+///
+/// Panics if [`set_saved_mem_regions`] has not been called yet.
+pub fn saved_mem_regions() -> &'static BootMemoryRegions {
+    unsafe { (*core::ptr::addr_of!(SAVED_MEM_REGIONS)).assume_init_ref() }
+}
+
 pub fn init_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
@@ -49,6 +72,11 @@ pub fn init_vmm(
     let mem_regions = explat::mem::boot_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg })
         .expect("Memory info unavailable");
     print_mem_regions(&mem_regions);
+
+    // Save memory regions for later use (after VMM setup the multiboot
+    // info may become inaccessible because paddr_to_slice assumes
+    // identity mapping).
+    set_saved_mem_regions(mem_regions.clone());
 
     // Store the boot stack range before VMM setup modifies the BootArg data.
     {
