@@ -51,6 +51,10 @@ SECTIONS {
     /* BSS sections */
     .bss : ALIGN(4K) {
         _sbss = .;
+        _sbootstack = .;
+        *(.bss.boot_stack)
+        _ebootstack = .;
+        . = ALIGN(0x10);
         *(.bss .bss.*)
         . = ALIGN(4K);
         _ebss = .;

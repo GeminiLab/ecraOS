@@ -74,7 +74,7 @@ entry64:
     movw    %ax, %ss
 
     # Set up the boot stack
-    lea     boot_stack_top, %rsp
+    lea     _ebootstack, %rsp
 
     call    rust_entry64_bsp
 
@@ -112,10 +112,3 @@ boot_pt_pdpt:
     .quad 0x40000000 * i | 0x83 # PRESENT | WRITABLE | HUGE_PAGE | paddr(0x4000_0000 * i)
     .set i, i + 1
 .endr
-
-# The boot stack
-.section .bss
-.balign 4096
-boot_stack:
-    .space 4096 * 16    # 64 KiB stack
-boot_stack_top:

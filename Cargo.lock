@@ -82,6 +82,9 @@ dependencies = [
 [[package]]
 name = "ecraos-loader"
 version = "0.1.0"
+dependencies = [
+ "exboot",
+]
 
 [[package]]
 name = "exboot"

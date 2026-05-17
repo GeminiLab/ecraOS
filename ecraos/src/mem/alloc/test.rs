@@ -63,12 +63,12 @@ pub fn run() {
     kprintln!("  Multiple alloc/free (10x): OK");
 
     // 8. Vec<u8> with data push.
-    let mut vec: Vec<u8> = Vec::new();
-    for i in 0..100 {
+    let mut vec: Vec<usize> = Vec::new();
+    for i in 0..1000 {
         vec.push(i);
     }
-    assert!(vec.len() == 100);
-    kprintln!("  Vec<u8> push 100: OK");
+    assert!(vec.len() == 1000);
+    kprintln!("  Vec<u8> push 1000: OK");
     drop(vec);
 
     // 9. Large allocation (> 2048, buddy path).

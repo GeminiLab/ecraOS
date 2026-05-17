@@ -7,6 +7,13 @@
 #![no_main]
 #![feature(used_with_arg)] // Used when including the kernel.
 
+use exboot::BOOTSTACK_SIZE;
+
+#[unsafe(link_section = ".bss.boot_stack")]
+#[used(compiler)]
+#[used(linker)]
+static BOOTSTACK: [u8; BOOTSTACK_SIZE] = [0; BOOTSTACK_SIZE];
+
 // Include the kernel.
 include!(concat!(env!("OUT_DIR"), "/kernel.rs"));
 
