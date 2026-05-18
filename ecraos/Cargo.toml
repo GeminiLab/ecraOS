@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bitmaps = { version = "3.2.1", default-features = false }
+heapless = "0.9"
 exboot = { path = "../exboot/exboot" }
 exbuddy = { path = "../exbuddy" }
 explat = { path = "../explat/explat" }

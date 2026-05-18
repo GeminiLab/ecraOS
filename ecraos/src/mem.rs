@@ -12,6 +12,7 @@ use crate::kprintln;
 
 pub mod alloc;
 mod early;
+pub mod pmm;
 pub mod reloc;
 pub mod sections;
 pub mod vmm;

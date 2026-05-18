@@ -74,6 +74,7 @@ dependencies = [
  "explat",
  "expt",
  "exslab",
+ "heapless",
  "kspin",
  "memory_addr",
  "size-disp",
