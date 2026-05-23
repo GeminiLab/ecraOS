@@ -59,8 +59,8 @@ pub enum PagingError {
 pub type PagingResult<T = ()> = Result<T, PagingError>;
 
 pub trait PagingHandler {
-    fn alloc_frames(bytes_required: usize) -> Option<PhysAddr>;
-    fn dealloc_frames(addr: PhysAddr, bytes_deallocated: usize);
+    fn alloc_page_aligned(bytes_required: usize) -> Option<PhysAddr>;
+    fn dealloc_page_aligned(addr: PhysAddr, bytes_deallocated: usize);
     fn phys_to_virt(addr: PhysAddr) -> VirtAddr;
 }
 
@@ -276,7 +276,7 @@ where
     fn alloc_table<const LEVEL: usize, H: PagingHandler>() -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
-        if let Some(paddr) = H::alloc_frames(bytes_required) {
+        if let Some(paddr) = H::alloc_page_aligned(bytes_required) {
             let vaddr = H::phys_to_virt(paddr);
             unsafe {
                 core::ptr::write_bytes(vaddr.as_mut_ptr(), 0, bytes_required);

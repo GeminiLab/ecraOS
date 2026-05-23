@@ -6,7 +6,8 @@ use core::fmt;
 ///
 /// Each variant describes a specific failure mode of the buddy allocator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AllocError {
+pub enum BuddyError {
+    InvalidAlignment,
     /// Invalid size, alignment, or other input parameter.
     InvalidParam,
     /// A global allocator instance has already been initialized.
@@ -21,9 +22,10 @@ pub enum AllocError {
     NotFound,
 }
 
-impl fmt::Display for AllocError {
+impl fmt::Display for BuddyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidAlignment => write!(f, "invalid alignment"),
             Self::InvalidParam => write!(f, "invalid parameter"),
             Self::AlreadyInitialized => write!(f, "allocator already initialized"),
             Self::MemoryOverlap => write!(f, "memory regions overlap"),
@@ -35,4 +37,4 @@ impl fmt::Display for AllocError {
 }
 
 /// A [`Result`] alias with [`AllocError`] as the error type.
-pub type AllocResult<T = ()> = Result<T, AllocError>;
+pub type BuddyResult<T = ()> = Result<T, BuddyError>;

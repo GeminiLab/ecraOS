@@ -1,18 +1,17 @@
-use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
-use raw_cpuid::CpuId;
-use x86_64::registers::control::{Cr4, Cr4Flags};
-
 use explat::{
     init::PlatformBootArg,
     mem::{
-        DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_FLAGS, MemIf, MemoryRegion, MemoryRegionFlags,
-        MemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
+        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS, MemIf,
+        MemoryRegion, RawMemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
     reexport::{
         crate_interface,
         memery_addr::{PhysAddr, PhysAddrRange},
     },
 };
+use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
+use raw_cpuid::CpuId;
+use x86_64::registers::control::{Cr4, Cr4Flags};
 
 /// The implementation of the [`MemoryManagement`] trait for the multiboot
 /// information.
@@ -33,8 +32,18 @@ impl MemoryManagement for MultibootMem {
     unsafe fn deallocate(&mut self, _addr: PAddr) {}
 }
 
-fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> MemoryRegions {
-    let mut memory_regions = MemoryRegions::new();
+/// The end of the low memory region (1 MiB).
+const LOW_MEMORY_END: usize = 1 << 20;
+/// The description for the low memory region.
+const LOW_MEMORT_DESC: &str = "low memory";
+/// The description for the ACPI memory region.
+const ACPI_MEMORY_DESC: &str = "ACPI memory";
+/// The description for the ACPI NVS memory region.
+const NVS_MEMORY_DESC: &str = "ACPI NVS memory";
+
+/// Get the memory regions from the multiboot information.
+fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegions {
+    let mut memory_regions = RawMemoryRegions::new();
     let mut mem = MultibootMem;
     let PlatformBootArg::Multiboot(arg) = multiboot_arg else {
         return memory_regions;
@@ -43,30 +52,26 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> MemoryRegions
 
     if let Some(multiboot_memory_regions) = info.memory_regions() {
         for memory_region in multiboot_memory_regions {
-            const LOW_MEMORY_END: usize = 1 << 20;
-
             let region = PhysAddrRange::from_start_size(
                 PhysAddr::from_usize(memory_region.base_address() as _),
                 memory_region.length() as _,
             );
 
-            let flags: MemoryRegionFlags = match memory_region.memory_type() {
-                MemoryType::Available => {
-                    if region.start.as_usize() < LOW_MEMORY_END {
-                        DEFAULT_RESERVED_FLAGS
-                    } else {
-                        DEFAULT_RAM_FLAGS
-                    }
+            let (flags, desc) = match memory_region.memory_type() {
+                MemoryType::Available if region.start.as_usize() < LOW_MEMORY_END => {
+                    (DEFAULT_RESERVED_FLAGS, LOW_MEMORT_DESC)
                 }
-                MemoryType::Reserved => DEFAULT_RESERVED_FLAGS,
-                MemoryType::ACPI => DEFAULT_RESERVED_FLAGS,
-                MemoryType::NVS => DEFAULT_RESERVED_FLAGS,
+                MemoryType::Available => (DEFAULT_RAM_FLAGS, DEFAULT_RAM_DESC),
+                MemoryType::Reserved => (DEFAULT_RESERVED_FLAGS, DEFAULT_RESERVED_DESC),
+                MemoryType::ACPI => (DEFAULT_RESERVED_FLAGS, ACPI_MEMORY_DESC),
+                MemoryType::NVS => (DEFAULT_RESERVED_FLAGS, NVS_MEMORY_DESC),
                 MemoryType::Defect => continue,
             };
 
             let push_result = memory_regions.push(MemoryRegion {
                 range: region,
                 flags,
+                desc,
             });
 
             if push_result.is_err() {
@@ -82,8 +87,8 @@ pub struct MemImpl;
 
 #[crate_interface::impl_interface]
 impl MemIf for MemImpl {
-    fn boot_mem_regions(arg: PlatformBootArg) -> Option<MemoryRegions> {
-        Some(get_multiboot_memory_regions(arg))
+    fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
+        get_multiboot_memory_regions(arg)
     }
 
     fn virt_addr_space_modes() -> VirtAddrSpaceModes {

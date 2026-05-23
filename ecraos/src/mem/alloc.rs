@@ -8,9 +8,9 @@
 //!
 //! # Initialization
 //!
-//! Call [`init_allocators`] once during boot (after VMM is enabled and the
-//! early page allocator has been destroyed). Before that, any attempt to
-//! allocate through the global allocator will panic.
+//! Call [`init_allocators`] once during boot (after VMM is enabled).
+//! Before that, any attempt to allocate through the global allocator will
+//! panic.
 //!
 //! # Lock ordering
 //!
@@ -34,14 +34,15 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use exbuddy::{AllocatorUsage, BuddyAllocator};
+use exbuddy::{AllocatorStats, BuddyAllocator};
+use explat::mem::MemoryRegionFlags;
 use exslab::{
     SlabAllocResult, SlabPoolDeallocResult, SlabPoolTrait,
     page::SlabPageHeader,
     slab::{PerCpuSlab, StaticSlabPool},
 };
 use kspin::SpinNoIrq;
-use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
+use memory_addr::{PhysAddr, VirtAddr};
 
 use crate::{kprintln, mem};
 
@@ -58,7 +59,7 @@ static INITIALIZED: AtomicBool = AtomicBool::new(false);
 ///
 /// Written once during [`init_allocators`] and accessed thereafter through
 /// the lock.
-static mut BUDDY: SpinNoIrq<BuddyAllocator> = SpinNoIrq::new(BuddyAllocator::new());
+static BUDDY: SpinNoIrq<BuddyAllocator> = SpinNoIrq::new(BuddyAllocator::new());
 
 /// Backing storage for the slab pool.
 ///
@@ -75,22 +76,6 @@ static mut SLAB_POOL: Option<&'static StaticSlabPool<1>> = None;
 ///
 /// Set once during [`init_allocators`].
 static mut VIRT_PHYS_OFFSET: usize = 0;
-
-// ---------------------------------------------------------------------------
-// Raw-pointer accessors for statics (edition 2024 safe access)
-// ---------------------------------------------------------------------------
-
-/// Returns a reference to the buddy allocator spinlock.
-///
-/// # Panics
-///
-/// Panics if called before [`init_allocators`] has run.
-fn buddy() -> &'static SpinNoIrq<BuddyAllocator> {
-    // SAFETY: the buddy allocator is initialized once during boot and never
-    // moved or mutated outside of the lock. Using a raw pointer avoids the
-    // edition-2024 `static_mut_refs` lint.
-    unsafe { (&raw mut BUDDY).as_ref().expect("BUDDY not initialized") }
-}
 
 /// Returns the slab pool reference, panicking if not initialized.
 fn slab_pool() -> &'static StaticSlabPool<1> {
@@ -126,7 +111,7 @@ fn alloc_small(layout: Layout) -> *mut u8 {
             Ok(SlabAllocResult::Allocated(ptr)) => return ptr.as_ptr(),
             Ok(SlabAllocResult::NeedsSlab { size_class, pages }) => {
                 // Slab lock is released. Safe to acquire buddy lock.
-                let paddr = match buddy().lock().alloc_frames(pages, page_size) {
+                let paddr = match BUDDY.lock().alloc_frames(pages, page_size) {
                     Ok(p) => p,
                     Err(_) => return core::ptr::null_mut(),
                 };
@@ -151,7 +136,7 @@ fn alloc_large(layout: Layout) -> *mut u8 {
     let pages = bytes.div_ceil(page_size);
     let align = layout.align().max(page_size);
 
-    match buddy().lock().alloc_frames(pages, align) {
+    match BUDDY.lock().alloc_frames(pages, align) {
         Ok(paddr) => (paddr.as_usize() + vpo) as *mut u8,
         Err(_) => core::ptr::null_mut(),
     }
@@ -181,7 +166,7 @@ fn dealloc_small(ptr: *mut u8, layout: Layout) {
         SlabPoolDeallocResult::Done | SlabPoolDeallocResult::RemoteQueued => {}
         SlabPoolDeallocResult::FreeSlab { base, pages } => {
             let paddr = PhysAddr::from_usize(base.as_usize() - vpo);
-            buddy().lock().dealloc_frames(paddr, pages);
+            BUDDY.lock().dealloc_frames(paddr, pages);
         }
     }
 }
@@ -195,7 +180,7 @@ fn dealloc_large(ptr: *mut u8, _layout: Layout) {
     let paddr = PhysAddr::from_usize(ptr as usize - vpo);
     // The buddy allocator reads the stored order from the page metadata
     // so dealloc_frame is sufficient regardless of the original block size.
-    buddy().lock().dealloc_frame(paddr);
+    BUDDY.lock().dealloc_frame(paddr);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,118 +228,94 @@ unsafe impl GlobalAlloc for EcraosGlobalAlloc {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: EcraosGlobalAlloc = EcraosGlobalAlloc;
 
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
-
 /// Initializes the kernel allocators.
 ///
-/// Sets up the buddy allocator with usable memory regions (excluding the
-/// kernel image and the early page allocator region), creates the slab pool,
-/// and switches the global allocator from the panicking stub to the real one.
-///
-/// # Safety
-///
-/// Must be called exactly once, after the VMM is enabled and
-/// [`mem::init_vmm_later`] has been called (so the early allocator range is
-/// available). The caller must ensure that no other CPU is concurrently
-/// accessing memory.
-pub unsafe fn init_allocators(_boot_arg: *const exboot::BootArg) {
-    // Use the memory regions saved during init_vmm (before VMM setup).
-    // Calling boot_mem_regions again here would fail because the multiboot
-    // info's paddr_to_slice callback assumes identity mapping, which may
-    // not work after VMM setup.
-    let mem_regions = mem::saved_mem_regions();
-
+/// Destroys the early page allocator, then sets up the buddy allocator with
+/// FREE regions from the final physical memory region table. In-use pages
+/// from the early allocator are marked as allocated via
+/// [`BuddyAllocator::alloc_frames_at`]. Finally, creates the slab pool.
+pub fn init_allocators() {
+    let phys_regions = mem::pmm::phys_mem_regions();
     let page_size = 1usize << mem::vmm::page_size_shift();
     let vpo = mem::vmm::virt_phys_offset();
 
-    // Regions to exclude from the buddy allocator.
-    let kernel_phys_range = {
-        let kr = mem::sections::kernel_range();
-        PhysAddrRange::new(
-            PhysAddr::from_usize(kr.start.as_usize() - vpo),
-            PhysAddr::from_usize(kr.end.as_usize() - vpo),
-        )
-    };
-    let early_range = mem::early::early_allocator_range();
-
-    // The boot stack is still in use (kernel runs on it), so it must be excluded.
-    let loader_range = mem::loader_range();
+    // Step 1: Destroy the early page allocator.
+    let early_alloc_range = mem::early::phys_addr_range();
+    let (early_alloc_bitmap, page_size_shift, early_allocbase_paddr) =
+        mem::early::destroy_early_page_allocator();
+    kprintln!(
+        "Early page allocator destroyed: base={:#x}, range={:x}",
+        early_allocbase_paddr,
+        early_alloc_range,
+    );
 
     kprintln!("Initializing allocators ...");
 
-    // Excluded physical ranges (kernel image + early allocator + loader).
-    let excluded = [kernel_phys_range, early_range, loader_range];
-
-    // Collect usable sub-regions, carving out excluded ranges.
+    // Step 2: Iterate FREE regions from the final region table and add to buddy.
     let mut first = true;
-    for region in mem_regions {
-        if !region.flags.contains(explat::mem::MemoryRegionFlags::FREE) {
+    for region in phys_regions {
+        if !region.flags.contains(MemoryRegionFlags::FREE) {
             continue;
         }
 
-        // For each usable region, produce sub-ranges that don't overlap
-        // any excluded range. We do this by iteratively trimming.
-        let mut sub_regions: [Option<PhysAddrRange>; 8] =
-            [Some(region.range), None, None, None, None, None, None, None];
-        for excl in &excluded {
-            let mut next: [Option<PhysAddrRange>; 8] = [None; 8];
-            let mut count = 0usize;
-            for sr in sub_regions.into_iter().flatten() {
-                if !sr.overlaps(*excl) {
-                    next[count] = Some(sr);
-                    count += 1;
-                } else {
-                    if sr.start < excl.start {
-                        let end = excl.start.min(sr.end);
-                        let left = PhysAddrRange::new(sr.start, end);
-                        if left.size() > 0 {
-                            next[count] = Some(left);
-                            count += 1;
-                        }
-                    }
-                    if sr.end > excl.end {
-                        let start = excl.end.max(sr.start);
-                        let right = PhysAddrRange::new(start, sr.end);
-                        if right.size() > 0 {
-                            next[count] = Some(right);
-                            count += 1;
-                        }
-                    }
-                }
+        // Overlapping means containing here.
+        if early_alloc_range.overlaps(region.range) {
+            // Check if buddy metadata would overlap the early allocator range.
+            if BuddyAllocator::check_metadata_overlap(region.range, page_size, early_alloc_range) {
+                panic!(
+                    "Buddy metadata overlaps early allocator for region {:x} ({})",
+                    region.range, region.desc
+                );
             }
-            sub_regions = next;
         }
 
-        for sub in sub_regions.into_iter().flatten() {
-            if sub.size() < page_size * 4 {
-                continue;
+        if first {
+            unsafe {
+                BUDDY
+                    .lock()
+                    .init(region.range, page_size, vpo)
+                    .expect("failed to init buddy allocator with first region");
             }
-            if first {
-                unsafe {
-                    buddy()
-                        .lock()
-                        .init(sub, page_size, vpo)
-                        .expect("failed to init buddy allocator with first region");
-                }
-                first = false;
-                kprintln!("  Buddy init with region: {:x}", sub);
-            } else {
-                unsafe {
-                    buddy()
-                        .lock()
-                        .add_region(sub)
-                        .expect("failed to add region to buddy allocator");
-                }
-                kprintln!("  Buddy added region: {:x}", sub);
+            first = false;
+            kprintln!(
+                "  Buddy init with region: {:x} ({})",
+                region.range,
+                region.desc
+            );
+        } else {
+            unsafe {
+                BUDDY
+                    .lock()
+                    .add_region(region.range)
+                    .expect("failed to add region to buddy allocator");
             }
+            kprintln!("  Buddy added region: {:x} ({})", region.range, region.desc);
         }
     }
 
     assert!(!first, "no usable memory region found for buddy allocator");
 
-    // Create the slab pool (1 CPU, cpu_id = 0).
+    // Step 3: Mark early allocator's in-use pages as allocated in the buddy.
+    for pages_early_allocated in &early_alloc_bitmap {
+        let paddr = early_allocbase_paddr + (pages_early_allocated << page_size_shift);
+        kprintln!(
+            "  Early allocator page allocated: {:x} (#{:#x})",
+            paddr,
+            pages_early_allocated
+        );
+        unsafe {
+            BUDDY
+                .lock()
+                .alloc_frames_at(paddr, 1)
+                .expect("failed to mark early allocator page as in-use");
+        }
+    }
+    kprintln!(
+        "  Marked early allocator in-use pages (range: {:x})",
+        early_alloc_range,
+    );
+
+    // Step 4: Create the slab pool (1 CPU, cpu_id = 0).
     let slab_pool = StaticSlabPool::new([PerCpuSlab::new(0, page_size)], || 0, page_size);
     unsafe {
         // SAFETY: no concurrent access during single-CPU boot initialization.
@@ -383,16 +344,16 @@ pub unsafe fn init_allocators(_boot_arg: *const exboot::BootArg) {
 /// Allocates a single physical frame.
 ///
 /// Delegates directly to the buddy allocator.
-pub fn alloc_frame() -> exbuddy::AllocResult<PhysAddr> {
-    buddy().lock().alloc_frame()
+pub fn alloc_frame() -> exbuddy::BuddyResult<PhysAddr> {
+    BUDDY.lock().alloc_frame()
 }
 
 /// Allocates `count` contiguous physical frames with the given alignment.
 ///
 /// Delegates directly to the buddy allocator.
-pub fn alloc_frames(count: usize, align: usize) -> exbuddy::AllocResult<PhysAddr> {
+pub fn alloc_frames(count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr> {
     let page_size = 1usize << mem::vmm::page_size_shift();
-    buddy().lock().alloc_frames(count, align.max(page_size))
+    BUDDY.lock().alloc_frames(count, align.max(page_size))
 }
 
 /// Allocates `count` contiguous physical frames starting at the given physical
@@ -405,27 +366,27 @@ pub fn alloc_frames(count: usize, align: usize) -> exbuddy::AllocResult<PhysAddr
 /// The caller must ensure that `paddr` and `paddr + count * page_size` are
 /// valid physical addresses within a managed region, and that no other
 /// references to those frames exist.
-pub unsafe fn alloc_frames_at(paddr: PhysAddr, count: usize) -> exbuddy::AllocResult<PhysAddr> {
+pub unsafe fn alloc_frames_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
     // SAFETY: the buddy allocator has been initialized. The caller guarantees
     // that `paddr` and `paddr + count * page_size` are valid.
-    unsafe { buddy().lock().alloc_frames_at(paddr, count) }
+    unsafe { BUDDY.lock().alloc_frames_at(paddr, count) }
 }
 
 /// Deallocates `count` contiguous physical frames starting at `addr`.
 ///
 /// Delegates directly to the buddy allocator.
 pub fn dealloc_frames(addr: PhysAddr, count: usize) {
-    buddy().lock().dealloc_frames(addr, count)
+    BUDDY.lock().dealloc_frames(addr, count)
 }
 
 /// Deallocates a single physical frame.
 ///
 /// Delegates directly to the buddy allocator.
 pub fn dealloc_frame(addr: PhysAddr) {
-    buddy().lock().dealloc_frame(addr)
+    BUDDY.lock().dealloc_frame(addr)
 }
 
 /// Returns usage statistics for the buddy allocator.
-pub fn usage() -> AllocatorUsage {
-    buddy().lock().usage()
+pub fn stats() -> AllocatorStats {
+    BUDDY.lock().stats()
 }

@@ -31,6 +31,21 @@ SECTIONS {
     . = ALIGN(4K);
     _erodata = .;
 
+    /* Data sections */
+    .data : ALIGN(4K) {
+        _sdata = .;
+        *(.data .data.*)
+        . = ALIGN(4K);
+
+        /* Boot stack section */
+        _sbootstack = .;
+        *(.boot_stack)
+        _ebootstack = .;
+
+        . = ALIGN(4K);
+        _edata = .;
+    }
+
     /* Kernel payload section */
     .kernel : ALIGN(4K) {
         _skernel = .;
@@ -40,21 +55,9 @@ SECTIONS {
         _ekernel = .;
     }
 
-    /* Data sections */
-    .data : ALIGN(4K) {
-        _sdata = .;
-        *(.data .data.*)
-        . = ALIGN(4K);
-        _edata = .;
-    }
-
     /* BSS sections */
     .bss : ALIGN(4K) {
         _sbss = .;
-        _sbootstack = .;
-        *(.bss.boot_stack)
-        _ebootstack = .;
-        . = ALIGN(0x10);
         *(.bss .bss.*)
         . = ALIGN(4K);
         _ebss = .;

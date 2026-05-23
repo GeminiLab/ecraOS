@@ -4,7 +4,7 @@
 
 **Goal:** Refactor physical memory management to compute a unified, flag-annotated physical memory region table early in boot, and use it consistently across page table creation, early page allocation, and final allocator initialization.
 
-**Architecture:** Replace ad-hoc region exclusion logic with a single `ecraos::mem::pmm` module that builds a final region table by splitting raw platform regions around the loader and kernel image. All downstream consumers (page tables, early allocator, buddy+slab) use this table exclusively. The early page allocator is destroyed after the final allocator is initialized, and its in-use pages are marked as allocated via `alloc_frame_at`.
+**Architecture:** Replace ad-hoc region exclusion logic with a single `ecraos::mem::pmm` module that builds a final region table by splitting raw platform regions around the loader and kernel image. All downstream consumers (page tables, early allocator, buddy+slab) use this table exclusively. The early page allocator is destroyed after the final allocator is initialized, and its in-use pages are marked as allocated via `alloc_frames_at`.
 
 **Tech Stack:** Rust `no_std`, `heapless::Vec`, `bitflags`, `memory_addr` types, existing `exbuddy`/`exslab` crates.
 
@@ -14,9 +14,9 @@
 
 ### 1.1 Loader Boot Stack Fix (blocking)
 
-The current uncommitted changes to move the boot stack from `.bss` to `.data` in the loader linker script cause a triple fault during kernel boot. This must be diagnosed and fixed before any other work proceeds.
+**Current state:** The linker script (`ecraos-loader/link.ld`) and loader source (`ecraos-loader/src/main.rs`) have been modified to place the boot stack in `.data` instead of `.bss`, but the resulting binary triple-faults during kernel boot. The fix is partially applied but non-functional.
 
-The root cause: moving the 16 KiB boot stack into `.data` shifts `_skernel` (and therefore the kernel payload) by 16 KiB. The kernel enters successfully but crashes during early execution (relocation or BSS clearing phase).
+The root cause: moving the 16 KiB boot stack into `.data` shifts `_skernel` (and therefore the kernel payload) by 16 KiB. The kernel enters successfully (relocation runs, BSS is cleared) but crashes with an Invalid Opcode shortly after, likely during early execution of code that references incorrectly-relocated addresses.
 
 **Requirements:**
 - The boot stack must be in the `.data` section (not `.bss`) to avoid overlap with the kernel's BSS
@@ -76,6 +76,8 @@ In `explat-x86_64::get_multiboot_memory_regions`:
 
 `BOOT_SERVICE` is NOT set by the platform layer. The kernel applies it when splitting out the loader range.
 
+**Note on behavior change:** Previously, low memory (< 1 MiB) was classified as `BootService`. This is changed to `RESERVED | READ | WRITE` (via `DEFAULT_RESERVED_FLAGS`). The `BootMemoryRegionType::BootService` enum variant is removed entirely.
+
 **Files:** `explat/explat/src/mem.rs`, `explat/explat-x86_64/src/mem.rs`
 
 ---
@@ -96,23 +98,26 @@ pub type PhysMemRegions = HeaplessVec<(MemoryRegion, &'static str), 128>;
 pub fn build_phys_mem_regions(
     boot_regions: &MemoryRegions,
     loader_range: PhysAddrRange,
+    virt_phys_offset: usize,
 ) -> PhysMemRegions
 ```
 
 Located in `ecraos::mem::pmm` (a new module). Since this is inside `ecraos`, it has direct access to `sections::all_sections()` — no `SectionInfo` abstraction needed.
 
+**Kernel section address conversion:** `sections::all_sections()` returns virtual address ranges (the kernel is PIE and symbols are relocated). To get physical addresses, subtract `virt_phys_offset` from each range: `phys_start = virt_start - virt_phys_offset`, `phys_end = virt_end - virt_phys_offset`. All kernel section ranges used for splitting are page-aligned virtual ranges from `sections::*_aligned()` converted to physical.
+
 **Algorithm:**
 1. Start with all `boot_regions`
 2. For each region containing `FREE`, split it around:
    - `loader_range` → `BOOT_SERVICE | READ | WRITE`, label "loader"
-   - Kernel `.text` aligned range → `READ | EXECUTE`, label "kernel .text"
-   - Kernel `.rodata` aligned range → `READ`, label "kernel .rodata"
-   - Kernel `.data` / `.rela_dyn` / `.got` aligned ranges → `READ | WRITE`, label "kernel .data"
-   - Kernel `.bss` aligned range → `READ | WRITE`, label "kernel .bss"
+   - Kernel `.text` aligned range (converted to physical) → `READ | EXECUTE`, label "kernel .text"
+   - Kernel `.rodata` aligned range (converted to physical) → `READ`, label "kernel .rodata"
+   - Kernel `.data` / `.rela_dyn` / `.got` aligned ranges (converted to physical) → `READ | WRITE`, label "kernel .data"
+   - Kernel `.bss` aligned range (converted to physical) → `READ | WRITE`, label "kernel .bss"
    - Gaps from splitting retain `FREE | READ | WRITE`, label "free"
 3. Non-`FREE` regions (reserved) keep their flags, label "reserved"
 
-The splitting algorithm is iterative: for each excluded range, split every existing sub-region into non-overlapping pieces, inheriting flags from the parent (FREE) or applying specific flags (loader/kernel sections).
+The splitting algorithm is iterative: for each excluded range, split every existing sub-region into non-overlapping pieces, inheriting flags from the parent (FREE) or applying specific flags (loader/kernel sections). All split boundaries are page-aligned (4 KiB) since the input ranges use `_aligned()` variants from `sections` and `loader_range` is naturally page-aligned from the linker script.
 
 ### 3.3 Static Storage
 
@@ -120,9 +125,19 @@ The result is stored in a `MaybeUninit<PhysMemRegions>` static in `ecraos::mem::
 
 ### 3.4 Invocation
 
-Called in `init_vmm` after getting boot regions and saving the loader range, before any page table or allocator setup. After this call, the raw `boot_regions` is never used again.
+Called in `init_vmm` **after** `vmm::init_vmm_layout()` returns `virt_phys_offset` (needed for kernel section virtual-to-physical conversion), but **before** page table creation and early allocator setup. The call sequence is:
 
-**Printing:** In `kernel_entry`, after calling `build_phys_mem_regions`, print the full table with labels for debugging.
+1. `boot_mem_regions()` → raw `boot_regions`
+2. Save `loader_range` from `BootArg`
+3. `vmm::init_vmm_layout()` → `virt_phys_offset`
+4. `build_phys_mem_regions(&boot_regions, loader_range, virt_phys_offset)` → final table
+5. Page table creation using final table
+6. Early allocator setup using final table
+7. Switch CR3, jump to `kernel_entry_with_vmm`
+
+After step 4, the raw `boot_regions` is never used again.
+
+**Printing:** In `kernel_entry` (or `kernel_entry_with_vmm`), print the full region table with labels for debugging.
 
 **Files:** New `ecraos/src/mem/pmm.rs`, modified `ecraos/src/mem.rs`, `ecraos/src/main.rs`
 
@@ -159,22 +174,43 @@ Both identity mapping (`vaddr_low`) and high-half mapping (`vaddr_high`) are cre
 
 ### 6.1 Sequence
 
+**Lifecycle change:** Currently `destroy_early_page_allocator` is called in `init_vmm_later` and its range is stored in a static. Under the new design, the early allocator remains alive through `init_vmm_later` and is destroyed at the start of `init_allocators` instead. The `EARLY_ALLOCATOR_RANGE` static and `early_allocator_range()` accessor are removed.
+
 The initialization sequence in `init_allocators` is restructured:
 
 1. **Destroy early page allocator** → get `(bitmap, page_size_shift, base_paddr)`
 2. **Compute early allocator range:** `base_paddr..base_paddr + 512 * (1 << page_size_shift)`
 3. **Iterate `FREE` regions** from the final region table:
    - For each FREE region, check if the early allocator range falls within it
-   - **Overlap check (point 9):** Use `BuddySection::compute_region_layout` to compute where buddy metadata would be placed. If the metadata range `[section_start, managed_heap_start)` overlaps the early allocator range → panic. Otherwise, add the entire region to the buddy allocator.
+   - **Overlap check (point 9):** Use `BuddyAllocator::check_metadata_overlap` (new public method, see 6.2) to check whether buddy metadata would overlap the early allocator range. If overlap → panic. Otherwise, add the entire region to the buddy allocator.
    - If the early allocator range is NOT in this region, add the region directly.
-4. **Mark early allocator's in-use pages:** For each set bit in the bitmap, compute the physical address and call `alloc_frame_at` on the buddy allocator.
+4. **Mark early allocator's in-use pages:** For each set bit in the bitmap, compute the physical address and call `alloc_frames_at` on the buddy allocator.
 5. **Initialize slab pool** and set `INITIALIZED`.
 
 ### 6.2 Buddy Metadata Overlap Check
 
-The `exbuddy::BuddyAllocator` uses intrusive metadata — `BuddySection` header + `PageMeta` array are stored at the start of each managed region. `BuddySection::compute_region_layout` returns a `RegionLayout` struct with `section_start`, `meta_start`, `managed_heap_start`, and `managed_heap_size`.
+The `exbuddy::BuddyAllocator` uses intrusive metadata — `BuddySection` header + `PageMeta` array are stored at the start of each managed region. `BuddySection::compute_region_layout` (currently `pub(crate)`) returns a `RegionLayout` struct with `section_start`, `meta_start`, `managed_heap_start`, and `managed_heap_size`.
 
-The check: if `managed_heap_start > early_allocator_start` AND `section_start < early_allocator_end`, the metadata overlaps the early allocator → panic.
+**New public API:** Add a public method to `BuddyAllocator`:
+
+```rust
+/// Checks whether the intrusive buddy metadata for a region would overlap
+/// the given check range. Returns `true` if adding `region` with the given
+/// `page_size` would place metadata in `[section_start, managed_heap_start)`
+/// that overlaps `check_range`.
+pub fn check_metadata_overlap(
+    &self,
+    region: PhysAddrRange,
+    page_size: usize,
+    check_range: PhysAddrRange,
+) -> bool
+```
+
+This method wraps the internal `compute_region_layout` logic. The alternative of making `compute_region_layout` public was rejected because it exposes implementation details of `BuddySection` that callers should not depend on.
+
+The check: if `managed_heap_start > check_range.start` AND `section_start < check_range.end`, the metadata overlaps → `true`.
+
+**File:** `exbuddy/src/buddy.rs`
 
 ### 6.3 Code Removal
 
@@ -203,6 +239,7 @@ The raw `boot_mem_regions` result is used once in `init_vmm` (to build the final
 | `exboot-multiboot-x86_64/src/lib.rs` | Pass `_sloader.._skernel` as `loader_range` |
 | `explat/explat/src/mem.rs` | `BootMemoryRegion` → `MemoryRegion`, `BootMemoryRegionType` → `MemoryRegionFlags` |
 | `explat/explat-x86_64/src/mem.rs` | Populate flags instead of type enum |
+| `exbuddy/src/buddy.rs` | Add `check_metadata_overlap` public method |
 | `ecraos/src/mem/pmm.rs` | **New**: `build_phys_mem_regions`, static storage |
 | `ecraos/src/mem.rs` | Call `build_phys_mem_regions`, use final table for page tables, replace `BOOT_STACK_RANGE` with `LOADER_RANGE` |
 | `ecraos/src/mem/early.rs` | Use `PhysMemRegions`, remove `EARLY_ALLOCATOR_RANGE` |

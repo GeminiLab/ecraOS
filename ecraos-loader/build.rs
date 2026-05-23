@@ -8,6 +8,7 @@ use std::{
 fn main() {
     // Register the `building_ecraos_loader` cfg flag.
     println!("cargo::rustc-check-cfg=cfg(building_ecraos_loader)");
+    println!("cargo::rerun-if-env-changed=KERNEL_BIN");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR is not set");
     let out_dir = PathBuf::from(&out_dir);
@@ -19,6 +20,8 @@ fn main() {
         let kernel_len = fs::metadata(&kernel_abs_path)
             .expect("Failed to get metadata of kernel")
             .len();
+
+        println!("cargo::rerun-if-changed={}", kernel_abs_path.display());
 
         (
             kernel_len,

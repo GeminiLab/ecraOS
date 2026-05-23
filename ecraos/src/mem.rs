@@ -1,6 +1,9 @@
-use core::mem::MaybeUninit;
+//! Kernel memory management.
+//!
+//! Provides virtual memory management (VMM), physical memory management (PMM),
+//! early page allocation, and the final buddy+slab allocator integration.
 
-use explat::mem::MemoryRegions;
+use explat::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::{
     PageTable, X86Level4PageTableMeta,
     pte::{MappingFlags, x86_64::X64PTE},
@@ -17,104 +20,68 @@ pub mod reloc;
 pub mod sections;
 pub mod vmm;
 
-/// The physical address range occupied by the loader.
-///
-/// Stored during [`init_vmm`] (before VMM setup) so that the allocator
-/// integration can exclude it from the buddy allocator.
-static mut LOADER_RANGE: Option<memory_addr::PhysAddrRange> = None;
-
-/// Saved boot memory regions.
-///
-/// Stored during [`init_vmm`] (before VMM setup) because the multiboot
-/// info may become inaccessible after VMM setup (the `paddr_to_slice`
-/// callback in the platform layer assumes identity mapping).
-static mut SAVED_MEM_REGIONS: MaybeUninit<MemoryRegions> = MaybeUninit::uninit();
-
-/// Saves the loader physical range for later retrieval.
-///
-/// Called once during [`init_vmm`] before VMM setup, so the allocator
-/// integration can later exclude this range from the buddy allocator.
-fn set_loader_range(range: memory_addr::PhysAddrRange) {
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(LOADER_RANGE), Some(range));
-    }
-}
-
-/// Retrieves the loader physical range.
-///
-/// Panics if [`set_loader_range`] has not been called yet.
-pub fn loader_range() -> memory_addr::PhysAddrRange {
-    unsafe { (*core::ptr::addr_of!(LOADER_RANGE)).expect("loader range not set") }
-}
-
-/// Saves boot memory regions for later retrieval by [`saved_mem_regions`].
-fn set_saved_mem_regions(regions: MemoryRegions) {
-    unsafe {
-        (*core::ptr::addr_of_mut!(SAVED_MEM_REGIONS)).write(regions);
-    }
-}
-
-/// Retrieves the boot memory regions saved during [`init_vmm`].
-///
-/// Panics if [`set_saved_mem_regions`] has not been called yet.
-pub fn saved_mem_regions() -> &'static MemoryRegions {
-    unsafe { (*core::ptr::addr_of!(SAVED_MEM_REGIONS)).assume_init_ref() }
-}
-
-pub fn init_vmm(
+pub fn enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
     arg: *const exboot::BootArg,
 ) -> ! {
     // Print kernel location before initializing the vmm.
-    print_kernel_location();
+    print_kernel_location("Kernel location immediately after boot:");
 
     // Get physical memory regions from the boot argument.
-    let mem_regions = explat::mem::boot_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg })
-        .expect("Memory info unavailable");
-    print_mem_regions(&mem_regions);
+    let raw_mem_regions = explat::mem::raw_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg });
+    print_mem_regions("Raw memory regions reported by platform:", &raw_mem_regions);
 
-    // Save memory regions for later use (after VMM setup the multiboot
-    // info may become inaccessible because paddr_to_slice assumes
-    // identity mapping).
-    set_saved_mem_regions(mem_regions.clone());
-
-    // Store the loader range before VMM setup modifies the BootArg data.
-    {
-        let lr = unsafe { arg.as_ref_unchecked() }.loader_range;
-        set_loader_range(lr);
-    }
+    // Build the final physical memory region table by splitting raw boot
+    // regions around the loader and kernel image.
+    pmm::build_phys_mem_regions(
+        &raw_mem_regions,
+        unsafe { arg.as_ref_unchecked() }.loader_range,
+    );
+    print_mem_regions("Final physical memory regions:", pmm::phys_mem_regions());
+    // The final table is now the sole source of truth. boot_regions is never
+    // used again.
 
     // Determine the layout of the virtual address space.
     vmm::init_vmm_layout();
     let virt_phys_offset = vmm::virt_phys_offset();
 
-    // Initialize the early page allocator.
-    let early_allocator_range = early::find_early_page_allocator_range(&mem_regions)
-        .expect("No early page allocator range found");
-    early::init_early_page_allocator(early_allocator_range.start);
+    // Initialize the early page allocator using the final region table.
+    early::init_early_page_allocator();
 
-    // Map the memory regions to the virtual address space.
+    // Map the physical memory regions to the virtual address space.
     let mut early_page_table =
         PageTable::<X86Level4PageTableMeta, X64PTE>::new_alloc::<early::EarlyPagingHandler>()
             .unwrap();
-    kprintln!("Early page table: {:x}\n", early_page_table.base_paddr());
 
-    let flags: MappingFlags = MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE;
-    for memory_region in &mem_regions {
-        let paddr = memory_region.range.start;
+    // TODO: the physical memory regions are not guaranteed to be page-aligned,
+    // that may cause issues when mapping them. Luckily, it's not a serious or
+    // urgent issue now, becuase free memory regions and kernel sections are
+    // almost guaranteed to be page-aligned. We should fix this in the future.
+    //
+    // TODO: add a addrspace wrapper.
+    //
+    // TODO: select pagetable from vmm modes.
+    for region in pmm::phys_mem_regions() {
+        let mapping_flags = region_flags_to_mapping(region.flags);
+        if mapping_flags.is_empty() {
+            continue;
+        }
+
+        let paddr = region.range.start;
         let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
         let vaddr_high = vaddr_low + virt_phys_offset;
-        let size = memory_region.range.size();
+        let size = region.range.size();
 
         early_page_table
-            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, flags)
+            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, mapping_flags)
             .unwrap();
         early_page_table
-            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, flags)
+            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, mapping_flags)
             .unwrap();
     }
 
+    // Load the early page table.
     unsafe {
         core::arch::asm!(
             "mov cr3, rax",
@@ -124,31 +91,42 @@ pub fn init_vmm(
 
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        let loader_range_top = arg.as_ref_unchecked().loader_range.end;
-        let boot_stack_top = loader_range_top.as_usize() + virt_phys_offset;
+        // TODO: use a separated vmm region, or the vmalloc region, for the new stack, with a protection page.
+        let new_stack = early::alloc_page_aligned(exboot::BOOTSTACK_SIZE)
+            .expect("failed to allocate new stack");
+        let new_stack_top = new_stack.as_usize() + exboot::BOOTSTACK_SIZE + virt_phys_offset;
         let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
         let arg = arg.byte_add(virt_phys_offset);
 
-        call_fn_new_stack_arg2(entry_with_vmm as _, hart_id, arg as _, boot_stack_top)
+        call_fn_new_stack_arg2(entry_with_vmm as _, hart_id, arg as _, new_stack_top)
     }
 }
 
-pub fn init_vmm_later() {
-    print_kernel_location();
+pub fn after_enable_vmm() {
+    print_kernel_location("Kernel location after VMM setup:");
+    // TODO: recycle the loader memory region (as well as the bootstack).
+    // TODO: remove identical mappings.
+}
 
-    let (bitmap, page_size_shift, base_paddr) = early::destroy_early_page_allocator();
-    kprintln!(
-        "Early page allocator destroyed: {:?}, {:x}, {:x}",
-        bitmap,
-        page_size_shift,
-        base_paddr
-    );
-
-    // Store the early allocator range so that init_allocators can exclude it
-    // from the buddy allocator.
-    let early_range =
-        memory_addr::PhysAddrRange::from_start_size(base_paddr, 512 << page_size_shift);
-    early::set_early_allocator_range(early_range);
+/// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.
+fn region_flags_to_mapping(flags: MemoryRegionFlags) -> MappingFlags {
+    let mut mapping = MappingFlags::empty();
+    if flags.contains(MemoryRegionFlags::READ) {
+        mapping |= MappingFlags::READ;
+    }
+    if flags.contains(MemoryRegionFlags::WRITE) {
+        mapping |= MappingFlags::WRITE;
+    }
+    if flags.contains(MemoryRegionFlags::EXECUTE) {
+        mapping |= MappingFlags::EXECUTE;
+    }
+    if flags.contains(MemoryRegionFlags::DEVICE) {
+        mapping |= MappingFlags::DEVICE;
+    }
+    if flags.contains(MemoryRegionFlags::UNCACHED) {
+        mapping |= MappingFlags::UNCACHED;
+    }
+    mapping
 }
 
 unsafe fn call_fn_new_stack_arg2(
@@ -170,36 +148,37 @@ unsafe fn call_fn_new_stack_arg2(
     }
 }
 
-fn print_mem_regions(mem_regions: &MemoryRegions) {
-    kprintln!("Physical memory regions:");
+fn print_mem_regions(heading: &str, mem_regions: &[MemoryRegion]) {
+    kprintln!("{}", heading);
     for region in mem_regions {
         let start_usize = region.range.start.as_usize();
         let end_usize = region.range.end.as_usize();
         let size = region.range.size();
-        let flags = region.flags;
 
         kprintln!(
-            "  {:<#010x} - {:<#010x}, {}, {:?}",
+            "  {:<#018x} - {:<#018x}, {}, {} ({})",
             start_usize,
             end_usize,
             size.size_display_wide(),
-            flags,
+            region.flags,
+            region.desc,
         );
     }
 
     kprintln!();
 }
 
-pub fn print_kernel_location() {
-    kprintln!("Kernel location at: {:#x}", sections::kernel_range());
-    for (name, range, aligned_range) in sections::all_sections() {
+pub fn print_kernel_location(heading: &str) {
+    kprintln!("{}", heading);
+    kprintln!("  Kernel range: {:#x}", sections::kernel_range());
+    for section in sections::all_sections() {
         kprintln!(
-            "  {:<10}: {:#x}(..{:#x}), {} ({})",
-            name,
-            range,
-            aligned_range.end,
-            range.size().size_display_wide(),
-            aligned_range.size().size_display_wide(),
+            "    {:<10}: {:#x}(aligned {:#x}), {} (aligned {})",
+            section.name,
+            section.range,
+            section.aligned_range,
+            section.range.size().size_display_wide(),
+            section.aligned_range.size().size_display_wide(),
         );
     }
 

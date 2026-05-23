@@ -2,7 +2,7 @@
 
 macro_rules! sections {
     ($(
-        $name:ident ($name_aligned:ident) => $start_symbol:ident .. $end_symbol:ident .. $aligned_end_symbol:ident
+        $name:ident ($name_aligned:ident) => $start_symbol:ident .. $end_symbol:ident .. $aligned_end_symbol:ident, $flag_fn:ident: $flag0:ident $(| $flags:ident)*
     ),* $(,)?) => {
         unsafe extern "C" {
             $(
@@ -40,6 +40,16 @@ macro_rules! sections {
                     )
                 }
             }
+
+            #[doc = concat!("Returns the flags of the ", stringify!($name), " section.")]
+            #[doc = ""]
+            #[doc = "The flags are constant and do not change after relocation."]
+            pub const fn $flag_fn() -> explat::mem::MemoryRegionFlags {
+                explat::mem::MemoryRegionFlags::$flag0
+                $(
+                    .union(explat::mem::MemoryRegionFlags::$flags)
+                )*
+            }
         )*
 
         #[doc = "The number of sections in the kernel binary."]
@@ -47,22 +57,35 @@ macro_rules! sections {
             [$(stringify!($name)),*].len()
         };
 
+        /// A section of the kernel binary.
+        #[derive(Debug, Clone, Copy)]
+        pub struct Section {
+            /// The name of the section.
+            pub name: &'static str,
+            /// The address range of the section.
+            pub range: memory_addr::VirtAddrRange,
+            /// The address range of the section with padding bytes at the end.
+            pub aligned_range: memory_addr::VirtAddrRange,
+            /// The flags of the section.
+            pub flags: explat::mem::MemoryRegionFlags,
+        }
+
         #[doc = "Returns a list of all sections with their names and ranges."]
         #[doc = ""]
         #[doc = "The returned list is not constant and may change after relocation."]
-        pub fn all_sections() -> [(&'static str, memory_addr::VirtAddrRange, memory_addr::VirtAddrRange); SECTION_COUNT] {
-            [$((stringify!($name), $name(), $name_aligned())),*]
+        pub fn all_sections() -> [Section; SECTION_COUNT] {
+            [$((Section { name: stringify!($name), range: $name(), aligned_range: $name_aligned(), flags: $flag_fn() })),*]
         }
     };
 }
 
 sections![
-    text (text_aligned) => _stext .. _etext .. _ftext,
-    rodata (rodata_aligned) => _srodata .. _erodata .. _frodata,
-    data (data_aligned) => _sdata .. _edata .. _fdata,
-    rela_dyn (rela_dyn_aligned) => _srela_dyn .. _erela_dyn .. _frela_dyn,
-    got (got_aligned) => _sgot .. _egot .. _fgot,
-    bss (bss_aligned) => _sbss .. _ebss .. _fbss,
+    text (text_aligned) => _stext .. _etext .. _ftext, text_flags: READ | EXECUTE,
+    rodata (rodata_aligned) => _srodata .. _erodata .. _frodata, rodata_flag: READ,
+    data (data_aligned) => _sdata .. _edata .. _fdata, data_flag: READ | WRITE,
+    rela_dyn (rela_dyn_aligned) => _srela_dyn .. _erela_dyn .. _frela_dyn, rela_dyn_flag: READ | WRITE,
+    got (got_aligned) => _sgot .. _egot .. _fgot, got_flag: READ | WRITE,
+    bss (bss_aligned) => _sbss .. _ebss .. _fbss, bss_flag: READ | WRITE,
 ];
 
 /// Returns the address range of the kernel binary.

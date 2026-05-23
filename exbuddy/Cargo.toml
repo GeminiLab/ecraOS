@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 memory_addr.workspace = true
+
+explat = { path = "../explat/explat" }

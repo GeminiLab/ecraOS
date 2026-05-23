@@ -71,7 +71,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         arg_ref
     );
 
-    mem::init_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
+    mem::enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
 
 /// The later kernel entry function that runs after the VMM is initialized.
@@ -85,8 +85,8 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
 
-    mem::init_vmm_later();
-    unsafe { mem::alloc::init_allocators(_arg) };
+    mem::alloc::init_allocators();
+    mem::after_enable_vmm();
 
     let rsp: usize;
     let rip: usize;

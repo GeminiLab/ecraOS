@@ -1,6 +1,7 @@
 //! Virtual memory management.
 
 use explat::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps};
+use lazyinit::LazyInit;
 use memory_addr::{VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
@@ -15,42 +16,19 @@ pub struct VirtualAddressSpace {
     vmalloc_range: VirtAddrRange,
 }
 
-static mut VIRTUAL_ADDRESS_SPACE: Option<VirtualAddressSpace> = None;
-
-/// Reads the virtual address space from the static variable.
-///
-/// # Safety
-///
-/// The caller must ensure that this function is called only after the virtual
-/// address space is initialized.
-unsafe fn read_virtual_address_space() -> &'static VirtualAddressSpace {
-    unsafe {
-        (&raw const VIRTUAL_ADDRESS_SPACE)
-            .as_ref_unchecked()
-            .as_ref()
-            .expect("Virtual address space not initialized")
-    }
-}
+static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
 
 pub fn virt_phys_offset() -> usize {
-    // SAFETY: We manually ensure that the read happens only after the write.
-    unsafe {
-        read_virtual_address_space()
-            .direct_mapping_range
-            .start
-            .as_usize()
-    }
+    VIRTUAL_ADDRESS_SPACE.direct_mapping_range.start.as_usize()
 }
 
 #[expect(dead_code)]
 pub fn vmalloc_base() -> VirtAddr {
-    // SAFETY: We manually ensure that the read happens only after the write.
-    unsafe { read_virtual_address_space().vmalloc_range.start }
+    VIRTUAL_ADDRESS_SPACE.vmalloc_range.start
 }
 
 pub fn page_size_shift() -> usize {
-    // SAFETY: We manually ensure that the read happens only after the write.
-    unsafe { read_virtual_address_space().page_shift as _ }
+    VIRTUAL_ADDRESS_SPACE.page_shift as usize
 }
 
 pub(super) fn init_vmm_layout() {
@@ -65,7 +43,7 @@ pub(super) fn init_vmm_layout() {
     let (mode, page_shift, upper_va_bits) = select_va_mode(&va_modes);
     explat::mem::set_virt_addr_space_mode(mode);
 
-    kprintln!("  Selected virtual address space mode: {}", mode);
+    kprintln!("  Selected virtual address space mode:\n    {}", mode);
 
     let upper_bits = upper_va_bits;
     let upper_start = va!((1usize << upper_bits).wrapping_neg());
@@ -94,18 +72,17 @@ pub(super) fn init_vmm_layout() {
 
     kprintln!();
 
-    unsafe {
-        VIRTUAL_ADDRESS_SPACE = Some(VirtualAddressSpace {
-            // TODO: read page size from the virtual address space status
-            mode,
-            page_shift,
-            direct_mapping_range,
-            vmalloc_range,
-        });
-    }
+    VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
+        // TODO: read page size from the virtual address space status
+        mode,
+        page_shift,
+        direct_mapping_range,
+        vmalloc_range,
+    });
 }
 
 fn va_mode_good(mode: VirtAddrSpaceMode) -> Option<(VirtAddrSpaceMode, u8, u8)> {
+    // TODO: support other modes
     match mode {
         VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
             page_shift,

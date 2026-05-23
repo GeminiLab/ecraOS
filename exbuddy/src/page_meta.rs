@@ -14,8 +14,6 @@ pub enum PageFlags {
     Free = 0,
     /// Page is allocated (head page of a buddy block).
     Allocated = 1,
-    /// Page is used as a slab page.
-    Slab = 2,
 }
 
 /// Metadata for a single page frame (12 bytes).
@@ -37,7 +35,10 @@ pub struct PageMeta {
     pub next: u32,
 }
 
+/// Compile-time assertions to ensure `PageMeta` is exactly 12 bytes.
 const _: () = assert!(core::mem::size_of::<PageMeta>() == 12);
+/// Compile-time assertions to ensure `PageMeta` is 4-byte aligned.
+const _: () = assert!(core::mem::align_of::<PageMeta>() == 4);
 
 impl Default for PageMeta {
     fn default() -> Self {
@@ -69,17 +70,20 @@ impl PageMeta {
 /// `meta` must point to an array with at least `pfn + 1` entries.
 /// `pfn` must not already be in any free list.
 #[inline]
-pub unsafe fn free_list_push(meta: *mut PageMeta, free_lists: &mut [u32], pfn: u32, order: usize) {
-    unsafe {
-        let old_head = free_lists[order];
-        let m = &mut *meta.add(pfn as usize);
-        m.prev = PFN_NONE;
-        m.next = old_head;
-        if old_head != PFN_NONE {
-            (*meta.add(old_head as usize)).prev = pfn;
-        }
-        free_lists[order] = pfn;
+pub unsafe fn free_list_push(
+    meta: &mut [PageMeta],
+    free_lists: &mut [u32],
+    pfn: u32,
+    order: usize,
+) {
+    let old_head = free_lists[order];
+    let m = &mut meta[pfn as usize];
+    m.prev = PFN_NONE;
+    m.next = old_head;
+    if old_head != PFN_NONE {
+        meta[old_head as usize].prev = pfn;
     }
+    free_lists[order] = pfn;
 }
 
 /// Pops the first PFN from `free_lists[order]`, returning `PFN_NONE` if empty.
@@ -88,22 +92,20 @@ pub unsafe fn free_list_push(meta: *mut PageMeta, free_lists: &mut [u32], pfn: u
 ///
 /// `meta` must be a valid metadata array.
 #[inline]
-pub unsafe fn free_list_pop(meta: *mut PageMeta, free_lists: &mut [u32], order: usize) -> u32 {
-    unsafe {
-        let head = free_lists[order];
-        if head == PFN_NONE {
-            return PFN_NONE;
-        }
-        let m = &mut *meta.add(head as usize);
-        let next = m.next;
-        m.prev = PFN_NONE;
-        m.next = PFN_NONE;
-        if next != PFN_NONE {
-            (*meta.add(next as usize)).prev = PFN_NONE;
-        }
-        free_lists[order] = next;
-        head
+pub unsafe fn free_list_pop(meta: &mut [PageMeta], free_lists: &mut [u32], order: usize) -> u32 {
+    let head = free_lists[order];
+    if head == PFN_NONE {
+        return PFN_NONE;
     }
+    let m = &mut meta[head as usize];
+    let next = m.next;
+    m.prev = PFN_NONE;
+    m.next = PFN_NONE;
+    if next != PFN_NONE {
+        meta[next as usize].prev = PFN_NONE;
+    }
+    free_lists[order] = next;
+    head
 }
 
 /// Removes `pfn` from the free list at `order`.
@@ -113,28 +115,26 @@ pub unsafe fn free_list_pop(meta: *mut PageMeta, free_lists: &mut [u32], order: 
 /// `pfn` must currently be in `free_lists[order]`.
 #[inline]
 pub unsafe fn free_list_remove(
-    meta: *mut PageMeta,
+    meta: &mut [PageMeta],
     free_lists: &mut [u32],
     pfn: u32,
     order: usize,
 ) {
-    unsafe {
-        let m = &*meta.add(pfn as usize);
-        let prev = m.prev;
-        let next = m.next;
+    let m = &mut meta[pfn as usize];
+    let prev = m.prev;
+    let next = m.next;
 
-        if prev != PFN_NONE {
-            (*meta.add(prev as usize)).next = next;
-        } else {
-            // pfn was the head
-            free_lists[order] = next;
-        }
-        if next != PFN_NONE {
-            (*meta.add(next as usize)).prev = prev;
-        }
-
-        let m = &mut *meta.add(pfn as usize);
-        m.prev = PFN_NONE;
-        m.next = PFN_NONE;
+    if prev != PFN_NONE {
+        meta[prev as usize].next = next;
+    } else {
+        // pfn was the head
+        free_lists[order] = next;
     }
+    if next != PFN_NONE {
+        meta[next as usize].prev = prev;
+    }
+
+    let m = &mut meta[pfn as usize];
+    m.prev = PFN_NONE;
+    m.next = PFN_NONE;
 }

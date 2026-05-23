@@ -76,6 +76,7 @@ dependencies = [
  "exslab",
  "heapless",
  "kspin",
+ "lazyinit",
  "memory_addr",
  "size-disp",
 ]
@@ -116,6 +117,7 @@ dependencies = [
 name = "exbuddy"
 version = "0.1.0"
 dependencies = [
+ "explat",
  "memory_addr",
 ]
 
@@ -199,6 +201,12 @@ dependencies = [
  "cfg-if",
  "kernel_guard",
 ]
+
+[[package]]
+name = "lazyinit"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17f03abfebdaaf0fad16790237a0348baf84886d3ade460db13bae59e614a180"
 
 [[package]]
 name = "memory_addr"

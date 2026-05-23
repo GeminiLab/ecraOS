@@ -9,7 +9,13 @@
 
 use exboot::BOOTSTACK_SIZE;
 
-#[unsafe(link_section = ".bss.boot_stack")]
+/// The boot stack.
+///
+/// Note that the bootstack **IS NOT** a part of the bss section. Because the
+/// bss sections of the loader overlaps with the kernel's bss section, therefore
+/// placing the bootstack in the bss section may cause corruption of data or
+/// stack.
+#[unsafe(link_section = ".boot_stack")]
 #[used(compiler)]
 #[used(linker)]
 static BOOTSTACK: [u8; BOOTSTACK_SIZE] = [0; BOOTSTACK_SIZE];

@@ -4,11 +4,17 @@
 
 #![no_std]
 
+/// Maximum buddy order.
+///
+/// With 4 KiB pages this gives 2^20 x 4 KiB = 4 GiB blocks.
+pub const MAX_ORDER: usize = 20;
+
+mod buddy;
 pub mod error;
-pub use error::{AllocError, AllocResult};
+mod page_meta;
+mod section;
+mod stats;
 
-pub mod page_meta;
-pub use page_meta::{PFN_NONE, PageFlags, PageMeta};
-
-pub mod buddy;
-pub use buddy::{AllocatorUsage, BuddyAllocator, MAX_ORDER, ManagedSection};
+pub use buddy::BuddyAllocator;
+pub use error::{BuddyError, BuddyResult};
+pub use stats::AllocatorStats;

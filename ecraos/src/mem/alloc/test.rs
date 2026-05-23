@@ -7,6 +7,7 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
+use memory_addr::pa;
 use core::alloc::Layout;
 
 use super::*;
@@ -18,13 +19,31 @@ pub fn run() {
 
     kprintln!("=== Allocator smoke tests ===\n");
 
+    // 0. alloc many frames
+    let mut frames = Vec::new();
+    for i in 0..100 {
+        let frame = alloc_frame().expect("alloc_frame failed");
+        assert!(frame.as_usize().is_multiple_of(page_size));
+        frames.push(frame);
+        kprintln!("  alloc_frame #{}: OK ({:#x})", i, frame);
+    }
+
+    for (i, frame) in frames.into_iter().enumerate() {
+        dealloc_frame(frame);
+        kprintln!("  dealloc_frame #{}: OK ({:#x})", i, frame);
+    }
+
+    let framec = unsafe { alloc_frames_at(pa!(0x1fc000), 2).expect("alloc_frames_at failed") };
+    assert!(framec.as_usize().is_multiple_of(page_size));
+    kprintln!("  alloc_frames_at(0x1fc000, 2): OK ({:#x})", framec);
+
     // 1. alloc_frame — check alignment.
     let frame1 = alloc_frame().expect("alloc_frame failed");
     assert!(frame1.as_usize().is_multiple_of(page_size));
     kprintln!("  alloc_frame: OK ({:#x})", frame1);
 
     // 2. alloc_frames(4, page_size) — multi-page allocation.
-    let frames4 = alloc_frames(4, page_size).expect("alloc_frames(4) failed");
+    let frames4 = alloc_frames(4, page_size * 4).expect("alloc_frames(4) failed");
     assert!(frames4.as_usize().is_multiple_of(page_size));
     kprintln!("  alloc_frames(4): OK ({:#x})", frames4);
 
@@ -43,9 +62,13 @@ pub fn run() {
     dealloc_frame(frame2);
 
     // 5. usage — check statistics.
-    let u = usage();
-    kprintln!("  usage: total={}, used={}", u.total_pages, u.used_pages);
-    assert!(u.total_pages > 0);
+    let u = stats();
+    kprintln!(
+        "  usage: total={}, used={}",
+        u.total_pages(),
+        u.used_pages()
+    );
+    assert!(u.total_pages() > 0);
 
     // 6. Box::new (small object, slab path).
     let boxed = Box::new(42u32);
@@ -84,16 +107,16 @@ pub fn run() {
     drop(s);
 
     // 11. Loop test (leak check).
-    let usage_before = usage();
+    let usage_before = stats();
     for _ in 0..100 {
-        let b = Box::new([0u8; 64]);
+        let b = Box::new([0u8; 1024]);
         drop(b);
     }
-    let usage_after = usage();
+    let usage_after = stats();
     kprintln!(
         "  Loop 100x: before={}, after={}",
-        usage_before.used_pages,
-        usage_after.used_pages
+        usage_before.used_pages(),
+        usage_after.used_pages()
     );
 
     kprintln!("\n=== All allocator tests passed ===\n");
