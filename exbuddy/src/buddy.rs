@@ -13,6 +13,7 @@ use memory_addr::{
 use crate::{
     MAX_ORDER,
     error::{BuddyError, BuddyResult},
+    pfn::PhysFrameNumber,
     section::BuddySection,
     stats::AllocatorStats,
 };
@@ -99,7 +100,7 @@ fn virt_range_to_phys_range(range: VirtAddrRange, virt_phys_offset: usize) -> Ph
 /// Sections are linked together as a linked list.
 pub struct BuddyAllocator {
     /// Page size in bytes (must be a power of two).
-    page_size: usize,
+    page_size_shift: usize,
     /// Offset added to a physical address to obtain the corresponding virtual address.
     virt_phys_offset: usize,
     /// Head of the linked list of managed sections.
@@ -125,12 +126,17 @@ impl BuddyAllocator {
     /// Call [`init`](Self::init) before use.
     pub const fn new() -> Self {
         Self {
-            page_size: 0,
+            page_size_shift: 0,
             virt_phys_offset: 0,
             sections_head: ptr::null_mut(),
             sections_tail: ptr::null_mut(),
             section_count: 0,
         }
+    }
+
+    #[inline]
+    const fn page_size(&self) -> usize {
+        1usize << self.page_size_shift
     }
 
     #[inline]
@@ -183,12 +189,9 @@ impl BuddyAllocator {
     ///
     /// - The physical memory region must be writable (mapped) and remain valid
     ///   for the lifetime of this allocator.
-    pub unsafe fn init(
-        &mut self,
-        page_size: usize,
-        virt_phys_offset: usize,
-    ) -> BuddyResult {
-        self.page_size = page_size;
+    pub unsafe fn init(&mut self, page_size: usize, virt_phys_offset: usize) -> BuddyResult {
+        debug_assert!(page_size.is_power_of_two());
+        self.page_size_shift = page_size.trailing_zeros() as usize;
         self.virt_phys_offset = virt_phys_offset;
         self.reset();
         Ok(())
@@ -205,15 +208,16 @@ impl BuddyAllocator {
     ///   for the lifetime of this allocator.
     /// - The region must not overlap any existing managed region.
     pub unsafe fn add_region(&mut self, region: PhysAddrRange) -> BuddyResult {
-        debug_assert!(self.page_size.is_power_of_two());
+        let page_size = self.page_size();
+        let page_size_shift = self.page_size_shift;
 
         // Normalize the region to the page size.
-        let region = normalize_region(region, self.page_size).ok_or(BuddyError::InvalidParam)?;
+        let region = normalize_region(region, page_size).ok_or(BuddyError::InvalidParam)?;
         let region_virt = phys_range_to_virt_range(region, self.virt_phys_offset);
-        let total_pages = region.size() / self.page_size;
+        let total_pages = region.size() >> page_size_shift;
 
         // Get the layout for the new section.
-        let layout = BuddySection::layout_for_section(total_pages, self.page_size)
+        let layout = BuddySection::layout_for_section(total_pages, page_size_shift)
             .ok_or(BuddyError::InvalidParam)?;
 
         // Check for overlap with existing sections.
@@ -224,8 +228,18 @@ impl BuddyAllocator {
         }
 
         let section = region_virt.start.as_mut_ptr_of();
+        let heap_start = region.start + (layout.metadata_pages << page_size_shift);
+        let heap_start_pfn = PhysFrameNumber::from_phys_addr(heap_start, page_size_shift);
 
-        unsafe { BuddySection::init_at(section, region_virt, layout, self.page_size) };
+        unsafe {
+            BuddySection::init_at(
+                section,
+                region_virt,
+                layout,
+                heap_start_pfn,
+                page_size_shift,
+            )
+        };
 
         if self.sections_head.is_null() {
             self.sections_head = section;
@@ -262,7 +276,7 @@ impl BuddyAllocator {
     ///
     /// Returns the starting physical address of the allocation on success.
     pub fn alloc_frames(&mut self, count: usize, align: usize) -> BuddyResult<PhysAddr> {
-        let page_size = self.page_size;
+        let page_size = self.page_size();
 
         if count == 0 {
             return Err(BuddyError::InvalidParam);
@@ -277,8 +291,9 @@ impl BuddyAllocator {
             return Err(BuddyError::NoMemory);
         }
 
+        let page_size_shift = self.page_size_shift;
         for section in self.section_iter_mut() {
-            if let Ok(vaddr) = section.alloc_frames(order, align, page_size) {
+            if let Ok(vaddr) = section.alloc_frames(order, align, page_size_shift) {
                 return Ok(self.virt_to_phys(vaddr));
             }
         }
@@ -290,7 +305,7 @@ impl BuddyAllocator {
     ///
     /// This is a convenience wrapper around [`alloc_frames`](Self::alloc_frames).
     pub fn alloc_frame(&mut self) -> BuddyResult<PhysAddr> {
-        self.alloc_frames(1, self.page_size)
+        self.alloc_frames(1, self.page_size())
     }
 
     /// Allocates `count` contiguous physical frames starting at the given physical address.
@@ -313,11 +328,11 @@ impl BuddyAllocator {
         }
 
         let vaddr = self.phys_to_virt(paddr);
-        let page_size = self.page_size;
+        let page_size_shift = self.page_size_shift;
         let section = self
             .find_section_by_addr_mut(vaddr)
             .ok_or(BuddyError::NotFound)?;
-        section.alloc_frames_at(vaddr, count, page_size)?;
+        section.alloc_frames_at(vaddr, count, page_size_shift)?;
         Ok(paddr)
     }
 
@@ -329,7 +344,7 @@ impl BuddyAllocator {
     /// up for buddy order or alignment.
     pub fn dealloc_frames(&mut self, addr: PhysAddr, count: usize) {
         let vaddr = self.phys_to_virt(addr);
-        let page_size = self.page_size;
+        let page_size_shift = self.page_size_shift;
         let Some(section) = self.find_section_by_addr_mut(vaddr) else {
             debug_assert!(
                 false,
@@ -338,7 +353,7 @@ impl BuddyAllocator {
             return;
         };
 
-        section.dealloc_frames(vaddr, count, page_size);
+        section.dealloc_frames(vaddr, count, page_size_shift);
     }
 
     /// Frees a single physical frame.
@@ -358,7 +373,7 @@ impl BuddyAllocator {
     // /// physical address within a managed region.
     // pub unsafe fn set_page_flags(&mut self, addr: PhysAddr, flags: PageFlags) -> BuddyResult {
     //     let vaddr = self.phys_to_virt(addr);
-    //     let page_size = self.page_size;
+    //     let page_size = self.page_size();
     //     let section = self
     //         .find_section_by_addr_mut(vaddr)
     //         .ok_or(BuddyError::NotFound)?;
@@ -371,7 +386,7 @@ impl BuddyAllocator {
     //     let section = self
     //         .find_section_by_addr(vaddr)
     //         .ok_or(BuddyError::NotFound)?;
-    //     section.page_flags(vaddr, self.page_size)
+    //     section.page_flags(vaddr, self.page_size())
     // }
 
     /// Checks whether the intrusive buddy metadata for a region would overlap
@@ -388,20 +403,21 @@ impl BuddyAllocator {
         check_range: PhysAddrRange,
     ) -> bool {
         debug_assert!(page_size.is_power_of_two());
+        let page_size_shift = page_size.trailing_zeros() as usize;
 
         let Some(region) = normalize_region(region, page_size) else {
             return false;
         };
 
-        let total_pages = region.size() / page_size;
+        let total_pages = region.size() >> page_size_shift;
 
-        let Some(layout) = BuddySection::layout_for_section(total_pages, page_size) else {
+        let Some(layout) = BuddySection::layout_for_section(total_pages, page_size_shift) else {
             return false;
         };
 
         let metadata_region = PhysAddrRange::new(
             region.start,
-            region.start + layout.metadata_pages * page_size,
+            region.start + (layout.metadata_pages << page_size_shift),
         );
 
         metadata_region.overlaps(check_range)
@@ -459,5 +475,76 @@ impl<'a> Iterator for BuddySectionIterMut<'a> {
         let current = unsafe { self.current.as_mut()? };
         self.current = current.next;
         Some(current)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::{vec, vec::Vec};
+
+    use memory_addr::{MemoryAddr, pa};
+
+    use crate::pfn::SectionFrameNumber;
+
+    use super::*;
+
+    fn page_aligned_buffer(page_size: usize, pages: usize) -> (*mut u8, Vec<u8>) {
+        let mut buffer = vec![0; pages * page_size + page_size];
+        let start = buffer.as_mut_ptr() as usize;
+        let aligned = start.align_up(page_size) as *mut u8;
+        (aligned, buffer)
+    }
+
+    #[test]
+    fn alloc_frames_handles_section_heap_not_aligned_to_requested_alignment() {
+        let page_size = 4096;
+        let total_pages = 64;
+        let (region_ptr, _buffer) = page_aligned_buffer(page_size, total_pages + 8);
+        let region_paddr = pa!(region_ptr as usize + page_size * 5);
+        let virt_phys_offset = 0;
+        let region = PhysAddrRange::new(region_paddr, region_paddr + total_pages * page_size);
+
+        let mut allocator = BuddyAllocator::new();
+        unsafe {
+            allocator.init(page_size, virt_phys_offset).unwrap();
+            allocator.add_region(region).unwrap();
+        }
+
+        let allocation = allocator.alloc_frames(4, page_size * 8).unwrap();
+
+        assert_eq!(allocation.as_usize() & (page_size * 8 - 1), 0);
+    }
+
+    #[test]
+    fn dealloc_frames_merges_only_absolute_physical_buddies() {
+        let page_size = 4096;
+        let total_pages = 64;
+        let (region_ptr, _buffer) = page_aligned_buffer(page_size, total_pages + 8);
+        let region_paddr = pa!(region_ptr as usize + page_size * 5);
+        let virt_phys_offset = 0;
+        let region = PhysAddrRange::new(region_paddr, region_paddr + total_pages * page_size);
+
+        let mut allocator = BuddyAllocator::new();
+        unsafe {
+            allocator.init(page_size, virt_phys_offset).unwrap();
+            allocator.add_region(region).unwrap();
+        }
+
+        let section = allocator.section_iter_mut().next().unwrap();
+        let heap_start = section.heap_region.start;
+        let page0 = SectionFrameNumber::new(0).to_addr(heap_start, 12);
+        let page1 = SectionFrameNumber::new(1).to_addr(heap_start, 12);
+
+        section.alloc_frames_at(page0, 1, 12).unwrap();
+        section.alloc_frames_at(page1, 1, 12).unwrap();
+        section.dealloc_frames(page0, 1, 12);
+        section.dealloc_frames(page1, 1, 12);
+
+        let allocation = section.alloc_frames(1, page_size * 2, 12).unwrap();
+
+        assert_ne!(allocation, page0);
+        assert_eq!(allocation.as_usize() & (page_size * 2 - 1), 0);
     }
 }

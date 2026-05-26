@@ -241,9 +241,7 @@ pub fn init_allocators() {
 
     // Step 1: Destroy the early page allocator.
     let early_alloc_range = mem::early::phys_addr_range();
-    let (early_alloc_bitmap, _, early_allocbase_paddr) =
-        mem::early::destroy_early_page_allocator();
-    
+    let (early_alloc_bitmap, _, early_allocbase_paddr) = mem::early::destroy_early_page_allocator();
 
     // Step 2: Iterate FREE regions from the final region table and add to buddy.
     kprintln!("Initializing allocator, early page allocator destroyed:");
@@ -259,7 +257,7 @@ pub fn init_allocators() {
 
         // Is this range used by the early allocator? If so, we need to check
         // whether the buddy metadata would overlap the early allocator range.
-        if early_alloc_range.overlaps(region.range) { 
+        if early_alloc_range.overlaps(region.range) {
             // Overlapping means containing here.
             if BuddyAllocator::check_metadata_overlap(region.range, page_size, early_alloc_range) {
                 panic!(
@@ -272,15 +270,23 @@ pub fn init_allocators() {
         kprintln!("  Allocator region: {:x} ({})", region.range, region.desc);
         // SATETY: we believe that the platform crate gives us a valid physical
         // memory map.
-        unsafe { buddy.add_region(region.range) }.expect("failed to add the previous region to buddy allocator");
+        unsafe { buddy.add_region(region.range) }
+            .expect("failed to add the previous region to buddy allocator");
     }
 
-    assert!(buddy.section_count() > 0, "no usable memory region found for buddy allocator");
+    assert!(
+        buddy.section_count() > 0,
+        "no usable memory region found for buddy allocator"
+    );
 
     // Step 3: Mark early allocator's in-use pages as allocated in the buddy.
     for page_index_early_allocated in &early_alloc_bitmap {
         unsafe {
-            buddy.alloc_frames_at(early_allocbase_paddr + (page_index_early_allocated * page_size), 1)
+            buddy
+                .alloc_frames_at(
+                    early_allocbase_paddr + (page_index_early_allocated * page_size),
+                    1,
+                )
                 .expect("failed to mark early allocator page as in-use");
         }
     }

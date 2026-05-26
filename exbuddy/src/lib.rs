@@ -12,6 +12,7 @@ pub const MAX_ORDER: usize = 20;
 mod buddy;
 pub mod error;
 mod page_meta;
+mod pfn;
 mod section;
 mod stats;
 
