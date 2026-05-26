@@ -241,26 +241,26 @@ pub fn init_allocators() {
 
     // Step 1: Destroy the early page allocator.
     let early_alloc_range = mem::early::phys_addr_range();
-    let (early_alloc_bitmap, page_size_shift, early_allocbase_paddr) =
+    let (early_alloc_bitmap, _, early_allocbase_paddr) =
         mem::early::destroy_early_page_allocator();
-    kprintln!(
-        "Early page allocator destroyed: base={:#x}, range={:x}",
-        early_allocbase_paddr,
-        early_alloc_range,
-    );
-
-    kprintln!("Initializing allocators ...");
+    
 
     // Step 2: Iterate FREE regions from the final region table and add to buddy.
-    let mut first = true;
+    kprintln!("Initializing allocator, early page allocator destroyed:");
+    let mut buddy = BUDDY.lock();
+    // SAFETY: we believe that we have mapped the physical memory to the virtual
+    // memory correctly.
+    unsafe { buddy.init(page_size, vpo) }.expect("failed to init buddy allocator");
+
     for region in phys_regions {
         if !region.flags.contains(MemoryRegionFlags::FREE) {
             continue;
         }
 
-        // Overlapping means containing here.
-        if early_alloc_range.overlaps(region.range) {
-            // Check if buddy metadata would overlap the early allocator range.
+        // Is this range used by the early allocator? If so, we need to check
+        // whether the buddy metadata would overlap the early allocator range.
+        if early_alloc_range.overlaps(region.range) { 
+            // Overlapping means containing here.
             if BuddyAllocator::check_metadata_overlap(region.range, page_size, early_alloc_range) {
                 panic!(
                     "Buddy metadata overlaps early allocator for region {:x} ({})",
@@ -269,51 +269,27 @@ pub fn init_allocators() {
             }
         }
 
-        if first {
-            unsafe {
-                BUDDY
-                    .lock()
-                    .init(region.range, page_size, vpo)
-                    .expect("failed to init buddy allocator with first region");
-            }
-            first = false;
-            kprintln!(
-                "  Buddy init with region: {:x} ({})",
-                region.range,
-                region.desc
-            );
-        } else {
-            unsafe {
-                BUDDY
-                    .lock()
-                    .add_region(region.range)
-                    .expect("failed to add region to buddy allocator");
-            }
-            kprintln!("  Buddy added region: {:x} ({})", region.range, region.desc);
-        }
+        kprintln!("  Allocator region: {:x} ({})", region.range, region.desc);
+        // SATETY: we believe that the platform crate gives us a valid physical
+        // memory map.
+        unsafe { buddy.add_region(region.range) }.expect("failed to add the previous region to buddy allocator");
     }
 
-    assert!(!first, "no usable memory region found for buddy allocator");
+    assert!(buddy.section_count() > 0, "no usable memory region found for buddy allocator");
 
     // Step 3: Mark early allocator's in-use pages as allocated in the buddy.
-    for pages_early_allocated in &early_alloc_bitmap {
-        let paddr = early_allocbase_paddr + (pages_early_allocated << page_size_shift);
-        kprintln!(
-            "  Early allocator page allocated: {:x} (#{:#x})",
-            paddr,
-            pages_early_allocated
-        );
+    for page_index_early_allocated in &early_alloc_bitmap {
         unsafe {
-            BUDDY
-                .lock()
-                .alloc_frames_at(paddr, 1)
+            buddy.alloc_frames_at(early_allocbase_paddr + (page_index_early_allocated * page_size), 1)
                 .expect("failed to mark early allocator page as in-use");
         }
     }
+    let early_alloc_page_count = early_alloc_bitmap.len();
     kprintln!(
-        "  Marked early allocator in-use pages (range: {:x})",
-        early_alloc_range,
+        "  Marked {} page allocated by the early allocator as in-use",
+        early_alloc_page_count,
     );
+    drop(buddy);
 
     // Step 4: Create the slab pool (1 CPU, cpu_id = 0).
     let slab_pool = StaticSlabPool::new([PerCpuSlab::new(0, page_size)], || 0, page_size);
@@ -329,17 +305,7 @@ pub fn init_allocators() {
     INITIALIZED.store(true, Ordering::Release);
 
     test::run();
-
-    kprintln!(
-        "  Allocators initialized (page_size={}, virt_phys_offset={:#x})",
-        page_size,
-        vpo
-    );
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Allocates a single physical frame.
 ///

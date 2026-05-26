@@ -86,28 +86,6 @@ pub unsafe fn free_list_push(
     free_lists[order] = pfn;
 }
 
-/// Pops the first PFN from `free_lists[order]`, returning `PFN_NONE` if empty.
-///
-/// # Safety
-///
-/// `meta` must be a valid metadata array.
-#[inline]
-pub unsafe fn free_list_pop(meta: &mut [PageMeta], free_lists: &mut [u32], order: usize) -> u32 {
-    let head = free_lists[order];
-    if head == PFN_NONE {
-        return PFN_NONE;
-    }
-    let m = &mut meta[head as usize];
-    let next = m.next;
-    m.prev = PFN_NONE;
-    m.next = PFN_NONE;
-    if next != PFN_NONE {
-        meta[next as usize].prev = PFN_NONE;
-    }
-    free_lists[order] = next;
-    head
-}
-
 /// Removes `pfn` from the free list at `order`.
 ///
 /// # Safety

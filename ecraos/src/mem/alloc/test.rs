@@ -7,8 +7,10 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use memory_addr::pa;
 use core::alloc::Layout;
+
+use heapless::Vec as HeaplessVec;
+use memory_addr::pa;
 
 use super::*;
 use crate::kprintln;
@@ -20,11 +22,11 @@ pub fn run() {
     kprintln!("=== Allocator smoke tests ===\n");
 
     // 0. alloc many frames
-    let mut frames = Vec::new();
+    let mut frames = HeaplessVec::<_, 100>::new();
     for i in 0..100 {
         let frame = alloc_frame().expect("alloc_frame failed");
         assert!(frame.as_usize().is_multiple_of(page_size));
-        frames.push(frame);
+        frames.push(frame).unwrap();
         kprintln!("  alloc_frame #{}: OK ({:#x})", i, frame);
     }
 
@@ -43,7 +45,7 @@ pub fn run() {
     kprintln!("  alloc_frame: OK ({:#x})", frame1);
 
     // 2. alloc_frames(4, page_size) — multi-page allocation.
-    let frames4 = alloc_frames(4, page_size * 4).expect("alloc_frames(4) failed");
+    let frames4 = alloc_frames(4, page_size * 8).expect("alloc_frames(4) failed");
     assert!(frames4.as_usize().is_multiple_of(page_size));
     kprintln!("  alloc_frames(4): OK ({:#x})", frames4);
 
