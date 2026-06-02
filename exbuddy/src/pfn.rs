@@ -1,20 +1,19 @@
-//! Page frame number types.
+//! Frame number types.
 //!
-//! Defines semantic page-frame-number wrappers used to keep the code readable
-//! and understandable.
+//! Defines semantic frame-number wrappers used to keep the code readable and understandable.
 
 use core::ops::{Add, AddAssign, BitXor, Sub, SubAssign};
 
 use memory_addr::{PhysAddr, VirtAddr, pa};
 
-/// An absolute physical page frame number.
+/// An absolute physical frame number.
 ///
-/// Represents a physical frame number in the global physical address space.
+/// Represents a frame number in the global physical address space.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct PhysFrameNumber(usize);
 
-/// A section-local page frame number.
+/// A section-local frame number.
 ///
 /// Represents a page index inside a [`crate::section::BuddySection`] heap.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,34 +21,73 @@ pub struct PhysFrameNumber(usize);
 pub struct SectionFrameNumber(u32);
 
 impl PhysFrameNumber {
-    /// Creates an absolute physical page frame number.
+    /// Creates an absolute physical frame number.
     ///
-    /// Wraps a raw page-frame index in the global physical address space.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// assert_eq!(pfn.as_usize(), 0x12345);
+    /// ```
     #[inline]
     pub const fn new(value: usize) -> Self {
         Self(value)
     }
 
-    /// Returns the raw page-frame index.
+    /// Returns the raw representation of the `PhysFrameNumber` as a `usize`.
     ///
-    /// Exposes the numeric value for arithmetic at API boundaries.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// assert_eq!(pfn.as_usize(), 0x12345);
+    /// ```
     #[inline]
     pub const fn as_usize(self) -> usize {
         self.0
     }
 
-    /// Creates an absolute physical page frame number from a physical address.
+    /// Creates an absolute physical frame number from a physical address.
     ///
-    /// Converts the address by shifting out the page offset bits.
+    /// The `page_size_shift` is the number of bits to shift the address right by to get the frame number.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    /// use memory_addr::pa;
+    ///
+    /// let addr = pa!(0x1234_5000);
+    /// let pfn = PhysFrameNumber::from_phys_addr(addr, 12);
+    ///
+    /// assert_eq!(pfn.as_usize(), 0x12345);
+    /// ```
     #[inline]
     pub const fn from_phys_addr(addr: PhysAddr, page_size_shift: usize) -> Self {
         Self(addr.as_usize() >> page_size_shift)
     }
 
-    /// Creates an absolute physical page frame number from a virtual address.
+    /// Creates an absolute physical frame number from a virtual address.
     ///
-    /// Removes the fixed virtual-physical offset before shifting out the page
-    /// offset bits.
+    /// The `virt_phys_offset` is the offset between the virtual and physical address spaces, and
+    /// the `page_size_shift` is the number of bits to shift the address right by to get the frame
+    /// number.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    /// use memory_addr::va;
+    ///
+    /// let addr = va!(0xffff_8000_1234_5000);
+    /// let pfn = PhysFrameNumber::from_virt_addr(addr, 0xffff_8000_0000_0000, 12);
+    ///
+    /// assert_eq!(pfn.as_usize(), 0x12345);
+    /// ```
     #[inline]
     pub const fn from_virt_addr(
         addr: VirtAddr,
@@ -59,25 +97,66 @@ impl PhysFrameNumber {
         Self((addr.as_usize().wrapping_sub(virt_phys_offset)) >> page_size_shift)
     }
 
-    /// Converts this page frame number to a physical address.
+    /// Converts this physical frame number to a physical address.
     ///
-    /// Shifts the page-frame index back into a byte address.
+    /// Shifts the frame number back into a byte address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    /// use memory_addr::pa;
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// let addr = pfn.to_phys_addr(12);
+    ///
+    /// assert_eq!(addr, pa!(0x1234_5000));
+    /// ```
     #[inline]
     pub const fn to_phys_addr(self, page_size_shift: usize) -> PhysAddr {
         pa!(self.0 << page_size_shift)
     }
 
-    /// Returns the maximum buddy order allowed by this physical PFN alignment.
+    /// Returns the maximal buddy order allowed for buddy blocks that start at this physical frame
+    /// number.
     ///
-    /// Computes the number of trailing zero bits in the absolute PFN.
+    /// See [the documentation of `BuddyAllocator`](crate::BuddyAllocator) for more details about
+    /// the alignment requirements for buddy blocks.
+    ///
+    /// The return value of this function is **NOT** clamped by the [`MAX_ORDER`](crate::MAX_ORDER).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// assert_eq!(pfn.max_order(), 0);
+    /// let pfn = PhysFrameNumber::new(0x2468a);
+    /// assert_eq!(pfn.max_order(), 1);
+    /// let pfn = PhysFrameNumber::new(0x48d14);
+    /// assert_eq!(pfn.max_order(), 2);
+    /// ```
     #[inline]
     pub const fn max_order(self) -> usize {
         self.0.trailing_zeros() as usize
     }
 
-    /// Returns this PFN's physical buddy at the given order.
+    /// Returns the physical frame number of the start page of the buddy of the block that starts at
+    /// this physical frame number.
     ///
-    /// Flips the absolute PFN bit corresponding to a block of `2^order` pages.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::PhysFrameNumber;
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// assert_eq!(pfn.buddy(0), PhysFrameNumber::new(0x12344));
+    /// let pfn = PhysFrameNumber::new(0x2468a);
+    /// assert_eq!(pfn.buddy(1), PhysFrameNumber::new(0x24688));
+    /// let pfn = PhysFrameNumber::new(0x48d14);
+    /// assert_eq!(pfn.buddy(2), PhysFrameNumber::new(0x48d10));
+    /// ```
     #[inline]
     pub const fn buddy(self, order: usize) -> Self {
         Self(self.0 ^ (1usize << order))
@@ -85,60 +164,163 @@ impl PhysFrameNumber {
 }
 
 impl SectionFrameNumber {
-    /// Creates a section-local page frame number.
+    /// The maximal valid section-local frame number.
     ///
-    /// Wraps a raw page index inside a section heap.
+    /// [`SectionFrameNumber`] itself does not enforce this constraint.
+    pub const MAX_VALID_SFN: Self = Self(SFN_NONE - 1);
+
+    /// Creates a section-local frame number from `usize`.
+    ///
+    /// If the `value` is greater than `u32::MAX`, the highest bits will be truncated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// assert_eq!(sfn.as_usize(), 0x12345);
+    /// assert_eq!(sfn.as_u32(), 0x12345);
+    /// ```
     #[inline]
     pub const fn new(value: usize) -> Self {
         Self(value as u32)
     }
 
-    /// Creates a section-local page frame number from free-list storage.
+    /// Creates a section-local frame number from `u32`.
     ///
-    /// Converts the compact `u32` representation used by page metadata.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    ///
+    /// let sfn = SectionFrameNumber::from_u32(0x12345);
+    /// assert_eq!(sfn.as_usize(), 0x12345);
+    /// assert_eq!(sfn.as_u32(), 0x12345);
+    /// ```
     #[inline]
     pub const fn from_u32(value: u32) -> Self {
         Self(value)
     }
 
-    /// Returns the raw section-local page index.
+    /// Returns the raw representation of the `SectionFrameNumber` as a `usize`.
     ///
-    /// Exposes the numeric value for metadata indexing.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// assert_eq!(sfn.as_usize(), 0x12345);
+    /// ```
     #[inline]
     pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
 
-    /// Returns the compact free-list representation.
+    /// Returns the raw representation of the `SectionFrameNumber`.
     ///
-    /// Converts this section-local PFN to the storage type used by page metadata.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// assert_eq!(sfn.as_u32(), 0x12345);
     #[inline]
     pub const fn as_u32(self) -> u32 {
         self.0
     }
 
-    /// Returns this section-local PFN's byte offset from the heap start.
+    /// Returns this section-local frame number's byte offset from the heap
+    /// start.
     ///
-    /// Shifts the page index into a byte offset.
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// assert_eq!(sfn.byte_offset(12), 0x12345 << 12);
+    /// ```
     #[inline]
     pub const fn byte_offset(self, page_size_shift: usize) -> usize {
         (self.0 as usize) << page_size_shift
     }
 
-    /// Converts this section-local PFN to a virtual address.
+    /// Converts this section-local frame number to a virtual address.
     ///
-    /// Adds the page offset represented by this PFN to the section heap start.
+    /// The `heap_start` is the virtual address of the start of the heap, and
+    /// the `page_size_shift` is the number of bits to shift the frame number back by to get the
+    /// byte offset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::SectionFrameNumber;
+    /// use memory_addr::va;
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// let addr = sfn.to_addr(va!(0xffff_8000_0000_0000), 12);
+    /// assert_eq!(addr, va!(0xffff_8000_1234_5000));
+    /// ```
     #[inline]
     pub fn to_addr(self, heap_start: VirtAddr, page_size_shift: usize) -> VirtAddr {
         heap_start + self.byte_offset(page_size_shift)
     }
 
-    /// Returns this section-local PFN's physical buddy.
+    /// Converts this section-local frame number to an absolute physical frame number.
     ///
-    /// Converts this section-local PFN to an absolute physical PFN using
-    /// `heap_base_pfn`, computes the physical buddy at `order`, then converts the
-    /// result back to a section-local PFN. Returns `None` if the physical buddy is
-    /// outside the section heap.
+    /// The `heap_base_pfn` is the physical frame number of the start of the heap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::{SectionFrameNumber, PhysFrameNumber};
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// let pfn = sfn.to_pfn(PhysFrameNumber::new(0x10000));
+    /// assert_eq!(pfn.as_usize(), 0x12345 + 0x10000);
+    /// ```
+    #[inline]
+    pub fn to_pfn(self, heap_base_pfn: PhysFrameNumber) -> PhysFrameNumber {
+        heap_base_pfn + self.as_usize()
+    }
+
+    /// Converts an absolute physical frame number to a section-local frame number.
+    ///
+    /// The `heap_base_pfn` is the physical frame number of the start of the heap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::{SectionFrameNumber, PhysFrameNumber};
+    ///
+    /// let pfn = PhysFrameNumber::new(0x12345);
+    /// let sfn = SectionFrameNumber::from_pfn(pfn, PhysFrameNumber::new(0x10000));
+    /// assert_eq!(sfn.as_usize(), 0x12345 - 0x10000);
+    /// ```
+    #[inline]
+    pub fn from_pfn(pfn: PhysFrameNumber, heap_base_pfn: PhysFrameNumber) -> Self {
+        Self((pfn - heap_base_pfn) as _)
+    }
+
+    /// Returns the section-local frame number of the start page of the buddy of the block that
+    /// starts at this section-local frame number.
+    ///
+    /// Returns `None` if the buddy is outside the section heap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::{SectionFrameNumber, PhysFrameNumber};
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// let buddy = sfn.buddy(0, PhysFrameNumber::new(0x10001), 0x12347);
+    /// assert_eq!(buddy, Some(SectionFrameNumber::new(0x12346)));
+    /// let buddy = sfn.buddy(0, PhysFrameNumber::new(0x10001), 0x12346);
+    /// assert_eq!(buddy, None);
+    /// ```
     #[inline]
     pub fn buddy(
         self,
@@ -236,6 +418,79 @@ impl AddAssign<usize> for SectionFrameNumber {
 impl SubAssign<usize> for SectionFrameNumber {
     fn sub_assign(&mut self, rhs: usize) {
         self.0 -= rhs as u32;
+    }
+}
+
+/// Sentinel value indicating "no page" in free-list links.
+const SFN_NONE: u32 = u32::MAX;
+
+/// An optional [`SectionFrameNumber`] that fits into a `u32`.
+///
+/// `u32::MAX` is used as a sentinel value to indicate `None`. Therefore, a `SectionFrameNumber`
+/// with value `u32::MAX` will cause undefined behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct OptionSectionFrameNumber(u32);
+
+impl From<Option<SectionFrameNumber>> for OptionSectionFrameNumber {
+    #[inline]
+    fn from(value: Option<SectionFrameNumber>) -> Self {
+        Self::from_option_sfn(value)
+    }
+}
+
+impl From<OptionSectionFrameNumber> for Option<SectionFrameNumber> {
+    #[inline]
+    fn from(value: OptionSectionFrameNumber) -> Self {
+        value.into_option_sfn()
+    }
+}
+
+impl OptionSectionFrameNumber {
+    /// The sentinel value indicating `None`.
+    pub const NONE: Self = Self(SFN_NONE);
+
+    /// Creates an `OptionSectionFrameNumber` from an `Option<SectionFrameNumber>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::{SectionFrameNumber, OptionSectionFrameNumber};
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// let osfn = OptionSectionFrameNumber::from_option_sfn(Some(sfn));
+    /// assert_eq!(osfn.into_option_sfn(), Some(sfn));
+    /// let osfn = OptionSectionFrameNumber::from_option_sfn(None);
+    /// assert_eq!(osfn.into_option_sfn(), None);
+    /// ```
+    #[inline]
+    pub const fn from_option_sfn(value: Option<SectionFrameNumber>) -> Self {
+        match value {
+            Some(pfn) => Self(pfn.as_u32()),
+            None => Self::NONE,
+        }
+    }
+
+    /// Converts this `OptionSectionFrameNumber` to an `Option<SectionFrameNumber>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use exbuddy::pfn::{SectionFrameNumber, OptionSectionFrameNumber};
+    ///
+    /// let sfn = SectionFrameNumber::new(0x12345);
+    /// let osfn = OptionSectionFrameNumber::from_option_sfn(Some(sfn));
+    /// assert_eq!(osfn.into_option_sfn(), Some(sfn));
+    /// let osfn = OptionSectionFrameNumber::from_option_sfn(None);
+    /// assert_eq!(osfn.into_option_sfn(), None);
+    /// ```
+    #[inline]
+    pub const fn into_option_sfn(self) -> Option<SectionFrameNumber> {
+        if self.0 == SFN_NONE {
+            None
+        } else {
+            Some(SectionFrameNumber::from_u32(self.0))
+        }
     }
 }
 

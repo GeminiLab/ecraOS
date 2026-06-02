@@ -1,40 +1,51 @@
-//! Error types for allocation operations.
+//! Error types for buddy allocator operations.
 
-use core::fmt;
-
-/// The error type for allocation operations.
-///
-/// Each variant describes a specific failure mode of the buddy allocator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The error type for buddy allocator operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BuddyError {
+    /// The provided page size is invalid.
+    #[error("invalid page size")]
+    InvalidPageSize,
+    /// The provided alignment is invalid.
+    #[error("invalid alignment")]
     InvalidAlignment,
-    /// Invalid size, alignment, or other input parameter.
-    InvalidParam,
-    /// A global allocator instance has already been initialized.
-    AlreadyInitialized,
-    /// A region overlaps with an existing managed region.
-    MemoryOverlap,
-    /// Not enough memory is available to satisfy the request.
+    /// The provided page count is invalid.
+    #[error("invalid page count")]
+    InvalidPageCount,
+    /// The provided order is invalid.
+    #[error("invalid order")]
+    InvalidOrder,
+    /// The section is too small for buddy allocator.
+    #[error("section too small")]
+    SectionTooSmall,
+    /// The section is too large for buddy allocator.
+    #[error("section too large")]
+    SectionTooLarge,
+    /// The section overlaps with another section.
+    #[error("section overlaps with another section")]
+    SectionOverlap,
+    /// No suitable memory found for operation.
+    #[error("no suitable memory")]
     NoMemory,
-    /// The allocator has not been initialized.
+    /// The specified address is not in any managed section.
+    #[error("the specified address is not in any managed section")]
+    NotInHeap,
+    /// The specified address is not aligned.
+    #[error("the specified address is not aligned")]
+    NotAligned,
+    /// The specified range (or part of it) is not allocated.
+    #[error("(at least a part of) the specified range is not allocated")]
+    NotAllocated,
+    /// The specified range (or part of it) is already allocated.
+    #[error("(at least a part of) the specified range is already allocated")]
+    AlreadyAllocated,
+    /// The specified order does not match the actual value.
+    #[error("the specified order does not match the actual value")]
+    OrderMismatch,
+    /// The allocator is not initialized.
+    #[error("allocator not initialized")]
     NotInitialized,
-    /// The requested address or entity was not found in any managed region.
-    NotFound,
 }
 
-impl fmt::Display for BuddyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidAlignment => write!(f, "invalid alignment"),
-            Self::InvalidParam => write!(f, "invalid parameter"),
-            Self::AlreadyInitialized => write!(f, "allocator already initialized"),
-            Self::MemoryOverlap => write!(f, "memory regions overlap"),
-            Self::NoMemory => write!(f, "out of memory"),
-            Self::NotInitialized => write!(f, "allocator not initialized"),
-            Self::NotFound => write!(f, "not found"),
-        }
-    }
-}
-
-/// A [`Result`] alias with [`AllocError`] as the error type.
+/// A specialized [`Result`] type for buddy allocator operations.
 pub type BuddyResult<T = ()> = Result<T, BuddyError>;

@@ -21,23 +21,47 @@ pub fn run() {
 
     kprintln!("=== Allocator smoke tests ===\n");
 
-    // 0. alloc many frames
-    let mut frames = HeaplessVec::<_, 100>::new();
-    for i in 0..100 {
-        let frame = alloc_frame().expect("alloc_frame failed");
-        assert!(frame.as_usize().is_multiple_of(page_size));
-        frames.push(frame).unwrap();
-        kprintln!("  alloc_frame #{}: OK ({:#x})", i, frame);
+    // 0. Exhaust all currently free buddy heap frames, then release them in one batch.
+    let virt_phys_offset = crate::mem::vmm::virt_phys_offset();
+    let sections: HeaplessVec<_, 100> =
+        BUDDY.lock().section_iter().map(|s| s.heap_region).collect();
+    let total_pages = sections
+        .iter()
+        .map(|section| section.size() / page_size)
+        .sum();
+    let mut allocated_pages = Vec::with_capacity(total_pages);
+
+    for section in &sections {
+        let mut allocated_in_section = 0usize;
+        let start = section.start.as_usize();
+        let end = section.end.as_usize();
+        for paddr in (start..end).step_by(page_size) {
+            let paddr = pa!(paddr);
+            if is_allocated(paddr).expect("is_allocated failed") {
+                continue;
+            }
+            let _ = unsafe { alloc_frames_at(paddr, 1).expect("alloc_frames_at failed") };
+            assert!(is_allocated(paddr).expect("is_allocated after alloc failed"));
+            allocated_pages.push(paddr);
+            allocated_in_section += 1;
+        }
+        kprintln!(
+            "  buddy heap exhaustion: allocated {} free pages in section {:#x} - {:#x}",
+            allocated_in_section,
+            section.start,
+            section.end
+        );
     }
 
-    for (i, frame) in frames.into_iter().enumerate() {
-        dealloc_frame(frame);
-        kprintln!("  dealloc_frame #{}: OK ({:#x})", i, frame);
+    let released_pages = allocated_pages.len();
+    for paddr in allocated_pages {
+        dealloc_blocks_at(paddr, 1).expect("dealloc_blocks_at failed");
+        assert!(!is_allocated(paddr).expect("is_allocated after dealloc failed"));
     }
-
-    let framec = unsafe { alloc_frames_at(pa!(0x1fc000), 2).expect("alloc_frames_at failed") };
-    assert!(framec.as_usize().is_multiple_of(page_size));
-    kprintln!("  alloc_frames_at(0x1fc000, 2): OK ({:#x})", framec);
+    kprintln!(
+        "  buddy heap exhaustion/release: OK ({} pages)",
+        released_pages
+    );
 
     // 1. alloc_frame — check alignment.
     let frame1 = alloc_frame().expect("alloc_frame failed");
@@ -119,6 +143,18 @@ pub fn run() {
         "  Loop 100x: before={}, after={}",
         usage_before.used_pages(),
         usage_after.used_pages()
+    );
+
+    // 12. Check statistics.
+    let u = stats();
+    kprintln!(
+        "  usage: total={}, meta={}, heap={}, used={}, free={}, unused={}",
+        u.total_pages(),
+        u.meta_pages(),
+        u.heap_pages(),
+        u.used_pages(),
+        u.free_pages(),
+        u.unused_pages()
     );
 
     kprintln!("\n=== All allocator tests passed ===\n");

@@ -119,6 +119,7 @@ version = "0.1.0"
 dependencies = [
  "explat",
  "memory_addr",
+ "thiserror",
 ]
 
 [[package]]

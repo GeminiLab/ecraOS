@@ -61,6 +61,7 @@ We use the following code format conventions, beyond common Rust conventions:
       - The summary of modules should be a noun phrase describing its contents or its role. E.g. "Virtual memory management.", "Infomations about the sections of the kernel binary.".
    - Headings in doc comments start at level 1 ("# Heading"), lower levels are used for sub-headings.
    - Semicolons should be avoided in doc comments.
+   - Comments wrap at 100 characters.
 - Items in Rust source files should be ordered in the following order, with a blank line between each group:
    - Doc comments.
    - Other outer attributes.
@@ -73,3 +74,5 @@ We use the following code format conventions, beyond common Rust conventions:
       - One exception here: if a use statement is used to resolve the visibility issue of a macro, it should be placed immediately after the macro definition.
    - Other items.
 - Uses from the same crate should be merged into a single use statement.
+
+Any violation of these rules should be fixed when checking for lint errors.

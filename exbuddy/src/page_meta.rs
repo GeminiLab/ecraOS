@@ -3,38 +3,55 @@
 //! Each page frame in the heap has a corresponding [`PageMeta`] entry.
 //! Free pages are linked together via intrusive doubly-linked lists using PFN indices.
 
-use crate::pfn::SectionFrameNumber;
-
-/// Sentinel value indicating "no page" in free-list links.
-pub const PFN_NONE: SectionFrameNumber = SectionFrameNumber::from_u32(u32::MAX);
+use crate::pfn::{OptionSectionFrameNumber, SectionFrameNumber};
 
 /// Page state flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// It can be considered to have the following bitfield layout:
+/// - Bit 0: **Head**. Whether the page is the head of a buddy block.
+/// - Bit 1: **Allocated**. Whether the block is allocated.
+///
+/// It's designed such that zero-initialization is safe for pages that are not block heads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum PageFlags {
-    /// Page is free and sits in a buddy free list.
-    Free = 0,
-    /// Page is allocated. Only the head page of a buddy block is marked.
-    Allocated = 1,
+    /// Page is inside a larger buddy block.
+    #[default]
+    InBlock = 0,
+    /// Page is the head of a free block.
+    Free = 2,
+    /// Page is the head of an allocated block.
+    Allocated = 3,
 }
 
-/// Metadata for a single page frame (12 bytes).
+/// Metadata for a single page frame.
 ///
-/// Head pages carry the `order` of the entire block.
-/// Tail pages within a buddy block are marked `Allocated` (or `Slab`) with order 0.
+/// This struct should be 12 bytes in size and 4-byte aligned.
+///
+/// For free or allocated blocks, only the head page carries the `flags` and
+/// `order` of the whole block, while other pages are marked as `InBlock`.
+///
+/// It's designed such that zero-initialization is safe for pages that are not
+/// block heads.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PageMeta {
     /// Current state of this page.
     pub flags: PageFlags,
-    /// Order of the block (only meaningful on head pages).
+    /// Order of the block.
+    ///
+    /// This field is valid only if `flags` does not equal `PageFlags::InBlock`.
     pub order: u8,
     /// Reserved padding.
     pub _pad: u16,
-    /// Previous PFN in the same-order free list (`PFN_NONE` if head or not free).
-    pub prev: SectionFrameNumber,
-    /// Next PFN in the same-order free list (`PFN_NONE` if tail or not free).
-    pub next: SectionFrameNumber,
+    /// Previous PFN in the same-order free list.
+    ///
+    /// This field is valid only if `flags` equals `PageFlags::Free`.
+    pub prev: OptionSectionFrameNumber,
+    /// Next PFN in the same-order free list.
+    ///
+    /// This field is valid only if `flags` equals `PageFlags::Free`.
+    pub next: OptionSectionFrameNumber,
 }
 
 /// Compile-time assertions to ensure `PageMeta` is exactly 12 bytes.
@@ -55,84 +72,66 @@ impl PageMeta {
             flags: PageFlags::Free,
             order: 0,
             _pad: 0,
-            prev: PFN_NONE,
-            next: PFN_NONE,
+            prev: OptionSectionFrameNumber::NONE,
+            next: OptionSectionFrameNumber::NONE,
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Free-list helpers operating on a `*mut PageMeta` array + head array
-// ---------------------------------------------------------------------------
-
-/// Encodes an optional section-local PFN for free-list storage.
-///
-/// Converts `None` to the free-list sentinel and real section-local PFNs to the
-/// compact storage type used in page metadata.
-#[inline]
-pub fn encode_pfn(pfn: Option<SectionFrameNumber>) -> SectionFrameNumber {
-    pfn.unwrap_or(PFN_NONE)
-}
-
-/// Decodes an optional section-local PFN from free-list storage.
-///
-/// Converts the free-list sentinel to `None` and real stored values to
-/// section-local PFNs.
-#[inline]
-pub fn decode_pfn(value: SectionFrameNumber) -> Option<SectionFrameNumber> {
-    (value != PFN_NONE).then_some(value)
-}
-
-/// Pushes `pfn` onto the front of `free_lists[order]`.
-///
-/// # Safety
-///
-/// `meta` must point to an array with at least `pfn + 1` entries.
-/// `pfn` must not already be in any free list.
-#[inline]
-pub unsafe fn free_list_push(
-    meta: &mut [PageMeta],
-    free_lists: &mut [SectionFrameNumber],
-    pfn: SectionFrameNumber,
-    order: usize,
-) {
-    let old_head = free_lists[order];
-    let m = &mut meta[pfn.as_usize()];
-    m.prev = PFN_NONE;
-    m.next = old_head;
-    if let Some(old_head) = decode_pfn(old_head) {
-        meta[old_head.as_usize()].prev = pfn;
-    }
-    free_lists[order] = encode_pfn(Some(pfn));
-}
-
-/// Removes `pfn` from the free list at `order`.
-///
-/// # Safety
-///
-/// `pfn` must currently be in `free_lists[order]`.
-#[inline]
-pub unsafe fn free_list_remove(
-    meta: &mut [PageMeta],
-    free_lists: &mut [SectionFrameNumber],
-    pfn: SectionFrameNumber,
-    order: usize,
-) {
-    let m = &mut meta[pfn.as_usize()];
-    let prev = m.prev;
-    let next = m.next;
-
-    if let Some(prev) = decode_pfn(prev) {
-        meta[prev.as_usize()].next = next;
-    } else {
-        // pfn was the head
-        free_lists[order] = next;
-    }
-    if let Some(next) = decode_pfn(next) {
-        meta[next.as_usize()].prev = prev;
+    /// Reads the [`SectionFrameNumber`] of the previous page in the same-order
+    /// free list.
+    ///
+    /// The value is valid only if `flags` equals `PageFlags::Free`.
+    #[inline]
+    pub const fn prev(&self) -> Option<SectionFrameNumber> {
+        self.prev.into_option_sfn()
     }
 
-    let m = &mut meta[pfn.as_usize()];
-    m.prev = PFN_NONE;
-    m.next = PFN_NONE;
+    /// Reads the [`SectionFrameNumber`] of the next page in the same-order
+    /// free list.
+    ///
+    /// The value is valid only if `flags` equals `PageFlags::Free`.
+    #[inline]
+    pub const fn next(&self) -> Option<SectionFrameNumber> {
+        self.next.into_option_sfn()
+    }
+
+    /// Sets the previous page in the same-order free list to the given
+    /// [`SectionFrameNumber`] or `None`.
+    #[inline]
+    pub const fn set_prev(&mut self, sfn: Option<SectionFrameNumber>) {
+        self.prev = OptionSectionFrameNumber::from_option_sfn(sfn);
+    }
+
+    /// Sets the next page in the same-order free list to the given
+    /// [`SectionFrameNumber`] or `None`.
+    #[inline]
+    pub const fn set_next(&mut self, sfn: Option<SectionFrameNumber>) {
+        self.next = OptionSectionFrameNumber::from_option_sfn(sfn);
+    }
+
+    /// Sets the previous page in the same-order free list to the given
+    /// [`SectionFrameNumber`].
+    #[inline]
+    pub const fn set_prev_to(&mut self, sfn: SectionFrameNumber) {
+        self.set_prev(Some(sfn));
+    }
+
+    /// Sets the next page in the same-order free list to the given
+    /// [`SectionFrameNumber`].
+    #[inline]
+    pub const fn set_next_to(&mut self, sfn: SectionFrameNumber) {
+        self.set_next(Some(sfn));
+    }
+
+    /// Sets the previous page in the same-order free list to `None`.
+    #[inline]
+    pub const fn clear_prev(&mut self) {
+        self.set_prev(None);
+    }
+
+    /// Sets the next page in the same-order free list to `None`.
+    #[inline]
+    pub const fn clear_next(&mut self) {
+        self.set_next(None);
+    }
 }

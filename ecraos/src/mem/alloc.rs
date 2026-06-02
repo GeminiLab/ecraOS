@@ -236,7 +236,8 @@ static GLOBAL_ALLOCATOR: EcraosGlobalAlloc = EcraosGlobalAlloc;
 /// [`BuddyAllocator::alloc_frames_at`]. Finally, creates the slab pool.
 pub fn init_allocators() {
     let phys_regions = mem::pmm::phys_mem_regions();
-    let page_size = 1usize << mem::vmm::page_size_shift();
+    let page_size_shift = mem::vmm::page_size_shift();
+    let page_size = 1usize << page_size_shift;
     let vpo = mem::vmm::virt_phys_offset();
 
     // Step 1: Destroy the early page allocator.
@@ -248,7 +249,7 @@ pub fn init_allocators() {
     let mut buddy = BUDDY.lock();
     // SAFETY: we believe that we have mapped the physical memory to the virtual
     // memory correctly.
-    unsafe { buddy.init(page_size, vpo) }.expect("failed to init buddy allocator");
+    unsafe { buddy.init(page_size_shift, vpo) }.expect("failed to init buddy allocator");
 
     for region in phys_regions {
         if !region.flags.contains(MemoryRegionFlags::FREE) {
@@ -259,7 +260,10 @@ pub fn init_allocators() {
         // whether the buddy metadata would overlap the early allocator range.
         if early_alloc_range.overlaps(region.range) {
             // Overlapping means containing here.
-            if BuddyAllocator::check_metadata_overlap(region.range, page_size, early_alloc_range) {
+            if buddy
+                .check_metadata_overlap(region.range, early_alloc_range)
+                .unwrap()
+            {
                 panic!(
                     "Buddy metadata overlaps early allocator for region {:x} ({})",
                     region.range, region.desc
@@ -270,7 +274,7 @@ pub fn init_allocators() {
         kprintln!("  Allocator region: {:x} ({})", region.range, region.desc);
         // SATETY: we believe that the platform crate gives us a valid physical
         // memory map.
-        unsafe { buddy.add_region(region.range) }
+        unsafe { buddy.add_section(region.range) }
             .expect("failed to add the previous region to buddy allocator");
     }
 
@@ -281,14 +285,12 @@ pub fn init_allocators() {
 
     // Step 3: Mark early allocator's in-use pages as allocated in the buddy.
     for page_index_early_allocated in &early_alloc_bitmap {
-        unsafe {
-            buddy
-                .alloc_frames_at(
-                    early_allocbase_paddr + (page_index_early_allocated * page_size),
-                    1,
-                )
-                .expect("failed to mark early allocator page as in-use");
-        }
+        buddy
+            .alloc_blocks_at(
+                early_allocbase_paddr + (page_index_early_allocated * page_size),
+                1,
+            )
+            .expect("failed to mark early allocator page as in-use");
     }
     let early_alloc_page_count = early_alloc_bitmap.len();
     kprintln!(
@@ -315,14 +317,14 @@ pub fn init_allocators() {
 
 /// Allocates a single physical frame.
 ///
-/// Delegates directly to the buddy allocator.
+/// Delegates directly to the buddy allocator. Pair with [`dealloc_frame`].
 pub fn alloc_frame() -> exbuddy::BuddyResult<PhysAddr> {
     BUDDY.lock().alloc_frame()
 }
 
 /// Allocates `count` contiguous physical frames with the given alignment.
 ///
-/// Delegates directly to the buddy allocator.
+/// Delegates directly to the buddy allocator. Pair with [`dealloc_frames`].
 pub fn alloc_frames(count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr> {
     let page_size = 1usize << mem::vmm::page_size_shift();
     BUDDY.lock().alloc_frames(count, align.max(page_size))
@@ -331,31 +333,38 @@ pub fn alloc_frames(count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr
 /// Allocates `count` contiguous physical frames starting at the given physical
 /// address.
 ///
-/// Delegates directly to the buddy allocator.
-///
-/// # Safety
-///
-/// The caller must ensure that `paddr` and `paddr + count * page_size` are
-/// valid physical addresses within a managed region, and that no other
-/// references to those frames exist.
-pub unsafe fn alloc_frames_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
-    // SAFETY: the buddy allocator has been initialized. The caller guarantees
-    // that `paddr` and `paddr + count * page_size` are valid.
-    unsafe { BUDDY.lock().alloc_frames_at(paddr, count) }
+/// Delegates directly to the buddy allocator. Pair with [`dealloc_blocks_at`].
+pub fn alloc_frames_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
+    BUDDY.lock().alloc_blocks_at(paddr, count)?;
+    Ok(paddr)
 }
 
 /// Deallocates `count` contiguous physical frames starting at `addr`.
 ///
-/// Delegates directly to the buddy allocator.
-pub fn dealloc_frames(addr: PhysAddr, count: usize) {
+/// Delegates directly to the buddy allocator. Pair with [`alloc_frames`]
+pub fn dealloc_frames(addr: PhysAddr, count: usize) -> exbuddy::BuddyResult {
     BUDDY.lock().dealloc_frames(addr, count)
 }
 
 /// Deallocates a single physical frame.
 ///
-/// Delegates directly to the buddy allocator.
-pub fn dealloc_frame(addr: PhysAddr) {
+/// Delegates directly to the buddy allocator. Pair with [`alloc_frame`].
+pub fn dealloc_frame(addr: PhysAddr) -> exbuddy::BuddyResult {
     BUDDY.lock().dealloc_frame(addr)
+}
+
+/// Deallocates `count` contiguous physical frames starting at `addr`.
+///
+/// Delegates directly to the buddy allocator. Pair with [`alloc_blocks_at`].
+pub fn dealloc_blocks_at(addr: PhysAddr, count: usize) -> exbuddy::BuddyResult {
+    BUDDY.lock().dealloc_blocks_at(addr, count)
+}
+
+/// Returns whether the page containing the physical address is allocated.
+///
+/// Delegates directly to the buddy allocator.
+pub fn is_allocated(addr: PhysAddr) -> exbuddy::BuddyResult<bool> {
+    BUDDY.lock().is_allocated(addr)
 }
 
 /// Returns usage statistics for the buddy allocator.
