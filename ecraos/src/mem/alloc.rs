@@ -43,10 +43,9 @@ use exslab::{
 };
 use kspin::SpinNoIrq;
 use memory_addr::{PhysAddr, VirtAddr};
+use size_disp::SizeDisplay;
 
 use crate::{kprintln, mem};
-
-mod test;
 
 // ---------------------------------------------------------------------------
 // Static storage
@@ -166,7 +165,7 @@ fn dealloc_small(ptr: *mut u8, layout: Layout) {
         SlabPoolDeallocResult::Done | SlabPoolDeallocResult::RemoteQueued => {}
         SlabPoolDeallocResult::FreeSlab { base, pages } => {
             let paddr = PhysAddr::from_usize(base.as_usize() - vpo);
-            BUDDY.lock().dealloc_frames(paddr, pages);
+            BUDDY.lock().dealloc_frames(paddr, pages).expect("failed to dealloc frames");
         }
     }
 }
@@ -180,7 +179,7 @@ fn dealloc_large(ptr: *mut u8, _layout: Layout) {
     let paddr = PhysAddr::from_usize(ptr as usize - vpo);
     // The buddy allocator reads the stored order from the page metadata
     // so dealloc_frame is sufficient regardless of the original block size.
-    BUDDY.lock().dealloc_frame(paddr);
+    BUDDY.lock().dealloc_frame(paddr).expect("failed to dealloc frame");
 }
 
 // ---------------------------------------------------------------------------
@@ -297,9 +296,18 @@ pub fn init_allocators() {
         "  Marked {} page allocated by the early allocator as in-use",
         early_alloc_page_count,
     );
+
+    // Step 4: Print the allocator stats.
+    kprintln!("  Initial buddy allocator stats:");
+    kprintln!("    Total pages    : {: <10}({})", buddy.stats().total_pages(), (buddy.stats().total_pages() << page_size_shift).size_display_wide());
+    kprintln!("    Metadata pages : {: <10}({})", buddy.stats().meta_pages(), (buddy.stats().meta_pages() << page_size_shift).size_display_wide());
+    kprintln!("    Heap pages     : {: <10}({})", buddy.stats().heap_pages(), (buddy.stats().heap_pages() << page_size_shift).size_display_wide());
+    kprintln!("      Used pages   : {: <10}({})", buddy.stats().used_pages(), (buddy.stats().used_pages() << page_size_shift).size_display_wide());
+    kprintln!("      Free pages   : {: <10}({})", buddy.stats().free_pages(), (buddy.stats().free_pages() << page_size_shift).size_display_wide());
+    kprintln!("    Unused pages   : {: <10}({})", buddy.stats().unused_pages(), (buddy.stats().unused_pages() << page_size_shift).size_display_wide());
     drop(buddy);
 
-    // Step 4: Create the slab pool (1 CPU, cpu_id = 0).
+    // Step 5: Create the slab pool (1 CPU, cpu_id = 0).
     let slab_pool = StaticSlabPool::new([PerCpuSlab::new(0, page_size)], || 0, page_size);
     unsafe {
         // SAFETY: no concurrent access during single-CPU boot initialization.
@@ -310,9 +318,9 @@ pub fn init_allocators() {
         core::ptr::addr_of_mut!(VIRT_PHYS_OFFSET).write(vpo);
     }
 
-    INITIALIZED.store(true, Ordering::Release);
+    kprintln!();
 
-    test::run();
+    INITIALIZED.store(true, Ordering::Release);
 }
 
 /// Allocates a single physical frame.

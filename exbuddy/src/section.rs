@@ -191,8 +191,8 @@ impl<'a> BuddySectionVisitorMut<'a> {
         debug_assert!(target_sfn >= free_block_sfn);
         debug_assert!(target_order <= free_block_order);
         debug_assert!(
-            target_sfn.as_usize() + 1usize << target_order
-                <= free_block_sfn.as_usize() + 1usize << free_block_order
+            target_sfn.as_usize() + (1usize << target_order)
+                <= free_block_sfn.as_usize() + (1usize << free_block_order)
         );
 
         self.free_list_remove(free_block_sfn, free_block_order);
@@ -236,7 +236,7 @@ impl<'a> BuddySectionVisitorMut<'a> {
             };
 
             let buddy_m = self.meta_mut(buddy_sfn);
-            if buddy_m.flags != PageFlags::Free {
+            if buddy_m.flags != PageFlags::Free || buddy_m.order as usize != current_order {
                 break;
             }
 
@@ -303,6 +303,9 @@ impl BuddySection {
 
         let page_size = 1usize << page_size_shift;
         let total_bytes = total_pages << page_size_shift;
+        if total_bytes <= mem::size_of::<BuddySection>() {
+            return 0;
+        }
         (total_bytes - mem::size_of::<BuddySection>()) / (page_size + mem::size_of::<PageMeta>())
     }
 
@@ -760,10 +763,23 @@ impl BuddySection {
             page_size_shift,
             |_, _, _, _, _| Err(BuddyError::OrderMismatch),
             (),
+            |_acc, visitor, block, _, splitted| {
+                debug_assert!(!splitted);
+                if visitor.metas[block.as_usize()].flags != PageFlags::Allocated {
+                    return Err(BuddyError::NotAllocated);
+                }
+
+                Ok(())
+            },
+        )?;
+
+        self.iter_blocks_in_range(
+            range,
+            page_size_shift,
+            |_, _, _, _, _| Err(BuddyError::OrderMismatch),
+            (),
             |_acc, visitor, block, order, splitted| {
                 debug_assert!(!splitted);
-                debug_assert_eq!(visitor.metas[block.as_usize()].flags, PageFlags::Allocated);
-
                 visitor.free_and_merge_block(block, order)
             },
         )

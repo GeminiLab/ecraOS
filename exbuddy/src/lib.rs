@@ -6,6 +6,9 @@
 #![deny(stable_features)]
 #![feature(likely_unlikely)]
 
+#[cfg(test)]
+extern crate std;
+
 /// Maximum buddy order.
 ///
 /// It determines the maximum size of buddy blocks - with 4 KiB pages this gives
@@ -19,6 +22,9 @@ mod page_meta;
 pub mod pfn;
 mod section;
 mod stats;
+
+#[cfg(test)]
+mod tests;
 
 #[doc(inline)]
 pub use buddy::BuddyAllocator;

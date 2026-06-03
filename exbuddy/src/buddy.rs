@@ -370,6 +370,10 @@ impl BuddyAllocator {
     /// This function is a convenience wrapper around [`alloc_block`](Self::alloc_block), and always
     /// allocates a full buddy block.
     pub fn alloc_frames(&mut self, count: usize, align: usize) -> BuddyResult<PhysAddr> {
+        if count == 0 {
+            return Err(BuddyError::InvalidPageCount);
+        }
+
         self.alloc_block(page_count_to_order_ceiling(count)?, align)
     }
 
