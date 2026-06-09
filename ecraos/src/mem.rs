@@ -62,23 +62,22 @@ pub fn enable_vmm(
     // TODO: add a addrspace wrapper.
     //
     // TODO: select pagetable from vmm modes.
-    for region in pmm::phys_mem_regions() {
-        let mapping_flags = region_flags_to_mapping(region.flags);
-        if mapping_flags.is_empty() {
-            continue;
+    {
+        let mut cursor = early_page_table.cursor::<early::EarlyPagingHandler>();
+        for region in pmm::phys_mem_regions() {
+            let mapping_flags = region_flags_to_mapping(region.flags);
+            if mapping_flags.is_empty() {
+                continue;
+            }
+
+            let paddr = region.range.start;
+            let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+            let vaddr_high = vaddr_low + virt_phys_offset;
+            let size = region.range.size();
+
+            cursor.map(vaddr_low, paddr, size, mapping_flags).unwrap();
+            cursor.map(vaddr_high, paddr, size, mapping_flags).unwrap();
         }
-
-        let paddr = region.range.start;
-        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
-        let vaddr_high = vaddr_low + virt_phys_offset;
-        let size = region.range.size();
-
-        early_page_table
-            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, mapping_flags)
-            .unwrap();
-        early_page_table
-            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, mapping_flags)
-            .unwrap();
     }
 
     // Load the early page table.

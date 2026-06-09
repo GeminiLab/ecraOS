@@ -25,6 +25,12 @@ where
 pub trait PageTableMeta: Send + Sync {
     type VirtAddr: MemoryAddr + Add<usize, Output = Self::VirtAddr> + LowerHex;
 
+    /// Flushes the local TLB.
+    ///
+    /// `Some(vaddr)` flushes the entry for the mapping containing `vaddr`.
+    /// `None` flushes the whole local TLB.
+    fn flush_tlb(vaddr: Option<Self::VirtAddr>);
+
     // Required constants:
     /// The number of levels in the page table.
     const LEVELS: usize;

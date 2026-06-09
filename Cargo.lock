@@ -151,9 +151,11 @@ name = "expt"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "heapless",
  "memory_addr",
  "page_table_entry",
  "thiserror",
+ "x86",
 ]
 
 [[package]]

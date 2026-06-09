@@ -3,19 +3,45 @@
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
 
+#[cfg(test)]
+extern crate std;
+
 mod arch;
 mod meta;
 pub mod pte {
     pub use page_table_entry::*;
 }
 
-use core::marker::PhantomData;
+use core::{
+    marker::PhantomData,
+    ops::{Add, AddAssign},
+};
 
+use heapless::Vec as HeaplessVec;
 use memory_addr::{AddrRange, MemoryAddr, PhysAddr, VirtAddr};
 
 pub use meta::PageTableMeta;
 use page_table_entry::{GenericPTE, MappingFlags};
 
+#[inline]
+fn flush_x86_tlb(vaddr: Option<VirtAddr>) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        if let Some(vaddr) = vaddr {
+            x86::tlb::flush(vaddr.into());
+        } else {
+            x86::tlb::flush_all();
+        }
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = vaddr;
+        unimplemented!("x86 page table metadata can only flush TLB on x86_64");
+    }
+}
+
+/// Metadata for standard x86_64 four-level page tables.
 pub struct X86Level4PageTableMeta;
 
 impl PageTableMeta for X86Level4PageTableMeta {
@@ -27,8 +53,13 @@ impl PageTableMeta for X86Level4PageTableMeta {
 
     // Max page size 1GiB, at level 2 of levels 0-3.
     const MAX_PAGE_LEVEL: usize = 2;
+
+    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
+        flush_x86_tlb(vaddr);
+    }
 }
 
+/// Metadata for standard x86_64 five-level page tables.
 pub struct X86Level5PageTableMeta;
 
 impl PageTableMeta for X86Level5PageTableMeta {
@@ -40,6 +71,10 @@ impl PageTableMeta for X86Level5PageTableMeta {
 
     // Max page size 512GiB, at level 3 of levels 0-4.
     const MAX_PAGE_LEVEL: usize = 3;
+
+    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
+        flush_x86_tlb(vaddr);
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -89,6 +124,79 @@ impl<M: PageTableMeta> PageTableMetaAssertions<M> {
     } where [(); M::LEVELS]: Sized;
 }
 
+const SMALL_FLUSH_THRESHOLD: usize = 32;
+
+enum TlbFlush<M: PageTableMeta> {
+    None,
+    Page(M::VirtAddr),
+    Full,
+}
+
+enum PendingTlbFlushes<M: PageTableMeta> {
+    None,
+    Pages(HeaplessVec<M::VirtAddr, SMALL_FLUSH_THRESHOLD>),
+    Full,
+}
+
+impl<M: PageTableMeta> AddAssign<TlbFlush<M>> for PendingTlbFlushes<M> {
+    fn add_assign(&mut self, rhs: TlbFlush<M>) {
+        match rhs {
+            TlbFlush::None => {}
+            TlbFlush::Page(vaddr) => match self {
+                PendingTlbFlushes::None => {
+                    let mut pages = HeaplessVec::new();
+                    let _ = pages.push(vaddr);
+                    *self = PendingTlbFlushes::Pages(pages);
+                }
+                PendingTlbFlushes::Pages(pages) => {
+                    if pages.push(vaddr).is_err() {
+                        *self = PendingTlbFlushes::Full;
+                    }
+                }
+                PendingTlbFlushes::Full => {}
+            },
+            TlbFlush::Full => *self = PendingTlbFlushes::Full,
+        }
+    }
+}
+
+impl<M: PageTableMeta> Add<TlbFlush<M>> for PendingTlbFlushes<M> {
+    type Output = Self;
+
+    fn add(mut self, rhs: TlbFlush<M>) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl<M: PageTableMeta> PendingTlbFlushes<M> {
+    fn flush(&mut self) {
+        match self {
+            PendingTlbFlushes::None => {}
+            PendingTlbFlushes::Pages(pages) => {
+                for vaddr in pages.iter().copied() {
+                    M::flush_tlb(Some(vaddr));
+                }
+            }
+            PendingTlbFlushes::Full => M::flush_tlb(None),
+        }
+        *self = PendingTlbFlushes::None;
+    }
+}
+
+/// A mutating cursor over a page table.
+///
+/// Cursor operations record the virtual mappings they affect and flush the
+/// local TLB when [`Self::flush`] is called or when the cursor is dropped.
+pub struct PageTableCursor<'a, M: PageTableMeta, PTE: GenericPTE, H: PagingHandler>
+where
+    [(); M::LEVELS]: Sized,
+{
+    table: &'a mut PageTable<M, PTE>,
+    pending_flushes: PendingTlbFlushes<M>,
+    _handler: PhantomData<H>,
+}
+
 pub struct PageTable<M: PageTableMeta, PTE: GenericPTE> {
     root: PhysAddr,
     _phantom: PhantomData<(PTE, M)>,
@@ -113,6 +221,7 @@ where
         }
     }
 
+    /// Allocates and initializes a new root page table through `H`.
     pub fn new_alloc<H: PagingHandler>() -> PagingResult<Self>
     where
         [(); M::LEVELS - 1]: Sized,
@@ -121,8 +230,21 @@ where
         Ok(unsafe { Self::new_at(paddr) })
     }
 
+    /// Returns the physical address of the root page table.
     pub const fn base_paddr(&self) -> PhysAddr {
         self.root
+    }
+
+    /// Creates a cursor for batched page-table mutations.
+    ///
+    /// All mapping changes should go through the returned cursor so affected
+    /// virtual mappings can be collected and flushed together.
+    pub fn cursor<H: PagingHandler>(&mut self) -> PageTableCursor<'_, M, PTE, H> {
+        PageTableCursor {
+            table: self,
+            pending_flushes: PendingTlbFlushes::None,
+            _handler: PhantomData,
+        }
     }
 
     const fn table_size<const LEVEL: usize>() -> usize {
@@ -133,81 +255,6 @@ where
         let (start, end) = M::LEVEL_BIT_RANGES[LEVEL];
 
         (vaddr >> start) & ((1 << (end - start)) - 1)
-    }
-
-    fn get_page_entry_mut<H: PagingHandler>(
-        &mut self,
-        vaddr: M::VirtAddr,
-        level: usize,
-        create_if_not_exists: bool,
-        split_huge_page: bool,
-    ) -> PagingResult<(&mut PTE, usize)> {
-        let vaddr: usize = vaddr.into();
-
-        if level > M::MAX_PAGE_LEVEL {
-            return Err(PagingError::CannotBePage { level });
-        }
-
-        // We use 0-indexed level here, so the naming is different from other
-        // kernels. PML5 in other kernels is p4 in ours, PML4 is p3, etc.
-        let p0 = if M::LEVELS > 1 {
-            let p1 = if M::LEVELS > 2 {
-                let p2 = if M::LEVELS > 3 {
-                    let p3 = if M::LEVELS > 4 {
-                        let p4 = Self::table_of_mut::<4, H>(self.root);
-                        let index4 = Self::index::<4>(vaddr);
-                        let p4e = &mut p4[index4];
-
-                        if level == 4 {
-                            Self::clear_pte::<H>(p4e, 4)?;
-                            return Ok((p4e, index4));
-                        }
-
-                        Self::next_table_mut::<3, H>(p4e, create_if_not_exists, split_huge_page)?
-                    } else {
-                        Self::table_of_mut::<3, H>(self.root)
-                    };
-                    let index3 = Self::index::<3>(vaddr);
-                    let p3e = &mut p3[index3];
-
-                    if level == 3 {
-                        Self::clear_pte::<H>(p3e, 3)?;
-                        return Ok((p3e, index3));
-                    }
-
-                    Self::next_table_mut::<2, H>(p3e, create_if_not_exists, split_huge_page)?
-                } else {
-                    Self::table_of_mut::<2, H>(self.root)
-                };
-                let index2 = Self::index::<2>(vaddr);
-                let p2e = &mut p2[index2];
-
-                if level == 2 {
-                    Self::clear_pte::<H>(p2e, 2)?;
-                    return Ok((p2e, index2));
-                }
-
-                Self::next_table_mut::<1, H>(p2e, create_if_not_exists, split_huge_page)?
-            } else {
-                Self::table_of_mut::<1, H>(self.root)
-            };
-            let index1 = Self::index::<1>(vaddr);
-            let p1e = &mut p1[index1];
-
-            if level == 1 {
-                Self::clear_pte::<H>(p1e, 1)?;
-                return Ok((p1e, index1));
-            }
-
-            Self::next_table_mut::<0, H>(p1e, create_if_not_exists, split_huge_page)?
-        } else {
-            Self::table_of_mut::<0, H>(self.root)
-        };
-        let index0 = Self::index::<0>(vaddr);
-        let p0e = &mut p0[index0];
-
-        Self::clear_pte::<H>(p0e, 0)?;
-        Ok((p0e, index0))
     }
 
     /// Gets the table at level `LEVEL` from its physical address `paddr`.
@@ -235,44 +282,6 @@ where
         }
     }
 
-    /// Gets the table at level `LEVEL` from a PTE of the level above.
-    fn next_table_mut<'a, const LEVEL: usize, H: PagingHandler>(
-        entry: &mut PTE,
-        create_if_not_exists: bool,
-        split_huge_page: bool,
-    ) -> PagingResult<&'a mut [PTE]> {
-        if entry.is_unused() {
-            if create_if_not_exists {
-                let table = Self::alloc_table::<LEVEL, H>()?;
-                *entry = GenericPTE::new_table(table);
-                Ok(Self::table_of_mut::<LEVEL, H>(table))
-            } else {
-                Err(PagingError::NotMapped)
-            }
-        } else if entry.is_huge() {
-            if split_huge_page {
-                let paddr = entry.paddr();
-                let flags = entry.flags();
-
-                let table = Self::alloc_table::<LEVEL, H>()?;
-                *entry = GenericPTE::new_table(table);
-
-                let table = Self::table_of_mut::<LEVEL, H>(paddr);
-
-                for (i, entry) in table.iter_mut().enumerate() {
-                    *entry =
-                        PTE::new_page(paddr + i * M::LEVEL_PAGE_SIZE[LEVEL], flags, LEVEL != 0);
-                }
-
-                Ok(table)
-            } else {
-                Err(PagingError::MappedToHugePage)
-            }
-        } else {
-            Ok(Self::table_of_mut::<LEVEL, H>(entry.paddr()))
-        }
-    }
-
     fn alloc_table<const LEVEL: usize, H: PagingHandler>() -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
@@ -286,23 +295,155 @@ where
             Err(PagingError::AllocationFailed)
         }
     }
+}
 
-    fn clear_pte<H: PagingHandler>(entry: &mut PTE, level: usize) -> PagingResult {
+impl<M: PageTableMeta, PTE: GenericPTE, H: PagingHandler> PageTableCursor<'_, M, PTE, H>
+where
+    [(); M::LEVELS]: Sized,
+{
+    /// Flushes all TLB entries affected by changes made through this cursor.
+    ///
+    /// Calling this method clears the pending flush set, so the cursor's
+    /// eventual [`Drop`] will not flush the same records again unless later
+    /// operations add new pending flushes.
+    pub fn flush(&mut self) {
+        self.pending_flushes.flush();
+    }
+
+    fn get_page_entry_mut(
+        &mut self,
+        vaddr: M::VirtAddr,
+        level: usize,
+        create_if_not_exists: bool,
+        split_huge_page: bool,
+    ) -> PagingResult<(&mut PTE, usize)> {
+        let vaddr_usize: usize = vaddr.into();
+
+        if level > M::MAX_PAGE_LEVEL {
+            return Err(PagingError::CannotBePage { level });
+        }
+
+        // We use 0-indexed level here, so the naming is different from other
+        // kernels. PML5 in other kernels is p4 in ours, PML4 is p3, etc.
+        let p0 = if M::LEVELS > 1 {
+            let p1 = if M::LEVELS > 2 {
+                let p2 = if M::LEVELS > 3 {
+                    let p3 = if M::LEVELS > 4 {
+                        let p4 = PageTable::<M, PTE>::table_of_mut::<4, H>(self.table.root);
+                        let index4 = PageTable::<M, PTE>::index::<4>(vaddr_usize);
+                        let p4e = &mut p4[index4];
+
+                        if level == 4 {
+                            self.clear_pte(p4e, 4, vaddr)?;
+                            return Ok((p4e, index4));
+                        }
+
+                        self.next_table_mut::<3>(p4e, create_if_not_exists, split_huge_page)?
+                    } else {
+                        PageTable::<M, PTE>::table_of_mut::<3, H>(self.table.root)
+                    };
+                    let index3 = PageTable::<M, PTE>::index::<3>(vaddr_usize);
+                    let p3e = &mut p3[index3];
+
+                    if level == 3 {
+                        self.clear_pte(p3e, 3, vaddr)?;
+                        return Ok((p3e, index3));
+                    }
+
+                    self.next_table_mut::<2>(p3e, create_if_not_exists, split_huge_page)?
+                } else {
+                    PageTable::<M, PTE>::table_of_mut::<2, H>(self.table.root)
+                };
+                let index2 = PageTable::<M, PTE>::index::<2>(vaddr_usize);
+                let p2e = &mut p2[index2];
+
+                if level == 2 {
+                    self.clear_pte(p2e, 2, vaddr)?;
+                    return Ok((p2e, index2));
+                }
+
+                self.next_table_mut::<1>(p2e, create_if_not_exists, split_huge_page)?
+            } else {
+                PageTable::<M, PTE>::table_of_mut::<1, H>(self.table.root)
+            };
+            let index1 = PageTable::<M, PTE>::index::<1>(vaddr_usize);
+            let p1e = &mut p1[index1];
+
+            if level == 1 {
+                self.clear_pte(p1e, 1, vaddr)?;
+                return Ok((p1e, index1));
+            }
+
+            self.next_table_mut::<0>(p1e, create_if_not_exists, split_huge_page)?
+        } else {
+            PageTable::<M, PTE>::table_of_mut::<0, H>(self.table.root)
+        };
+        let index0 = PageTable::<M, PTE>::index::<0>(vaddr_usize);
+        let p0e = &mut p0[index0];
+
+        self.clear_pte(p0e, 0, vaddr)?;
+        Ok((p0e, index0))
+    }
+
+    /// Gets the table at level `LEVEL` from a PTE of the level above.
+    fn next_table_mut<'a, const LEVEL: usize>(
+        &mut self,
+        entry: &mut PTE,
+        create_if_not_exists: bool,
+        split_huge_page: bool,
+    ) -> PagingResult<&'a mut [PTE]> {
         if entry.is_unused() {
-            // It's already cleared.
+            if create_if_not_exists {
+                let table = PageTable::<M, PTE>::alloc_table::<LEVEL, H>()?;
+                *entry = GenericPTE::new_table(table);
+                Ok(PageTable::<M, PTE>::table_of_mut::<LEVEL, H>(table))
+            } else {
+                Err(PagingError::NotMapped)
+            }
+        } else if entry.is_huge() {
+            if split_huge_page {
+                let old_paddr = entry.paddr();
+                let flags = entry.flags();
+
+                let table_paddr = PageTable::<M, PTE>::alloc_table::<LEVEL, H>()?;
+                *entry = GenericPTE::new_table(table_paddr);
+
+                // A huge-page TLB entry may cover any address in the old mapping.
+                // Use a conservative full flush when replacing a huge leaf with a table.
+                self.pending_flushes += TlbFlush::Full;
+
+                let table = PageTable::<M, PTE>::table_of_mut::<LEVEL, H>(table_paddr);
+                for (i, entry) in table.iter_mut().enumerate() {
+                    *entry =
+                        PTE::new_page(old_paddr + i * M::LEVEL_PAGE_SIZE[LEVEL], flags, LEVEL != 0);
+                }
+
+                Ok(table)
+            } else {
+                Err(PagingError::MappedToHugePage)
+            }
+        } else {
+            Ok(PageTable::<M, PTE>::table_of_mut::<LEVEL, H>(entry.paddr()))
+        }
+    }
+
+    fn clear_pte(&mut self, entry: &mut PTE, level: usize, vaddr: M::VirtAddr) -> PagingResult {
+        if entry.is_unused() {
             Ok(())
         } else if level == 0 || entry.is_huge() {
-            // It points to a page.
+            if entry.is_huge() {
+                self.pending_flushes += TlbFlush::Full;
+            } else {
+                self.pending_flushes += TlbFlush::Page(vaddr);
+            }
             entry.clear();
             Ok(())
         } else {
-            // It points to a table, clear it recursively.
-            let table = Self::table_of_mut_non_const::<H>(entry.paddr(), level - 1);
-
-            for entry in table.iter_mut() {
-                Self::clear_pte::<H>(entry, level - 1)?;
+            let table = PageTable::<M, PTE>::table_of_mut_non_const::<H>(entry.paddr(), level - 1);
+            for (index, child) in table.iter_mut().enumerate() {
+                let child_vaddr = vaddr + index * M::LEVEL_PAGE_SIZE[level - 1];
+                self.clear_pte(child, level - 1, child_vaddr)?;
             }
-
             Ok(())
         }
     }
@@ -319,17 +460,14 @@ where
     /// - The mutable reference to the PTE of the page.
     ///
     /// Before calling the function, the PTE is [cleared](GenericPTE::clear). If
-    /// the PTE points to a table, the table is freed recursively. If the range
-    /// overlaps with a huge page, the page is split into smaller pages.
+    /// the PTE points to a table, descendant entries are cleared recursively and
+    /// table pages are retained. If the range overlaps with a huge page, the
+    /// page is split into smaller pages.
     ///
     /// The range is aligned to the page size of the lowest level.
-    fn iter_pages_in_range<F, H: PagingHandler>(
-        &mut self,
-        range: AddrRange<M::VirtAddr>,
-        mut f: F,
-    ) -> PagingResult
+    fn iter_pages_in_range<F>(&mut self, range: AddrRange<M::VirtAddr>, mut f: F) -> PagingResult
     where
-        F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult,
+        F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult<TlbFlush<M>>,
     {
         let mut start_vaddr = range.start.align_down(M::LEVEL_PAGE_SIZE[0]);
         let end_vaddr = range.end.align_up(M::LEVEL_PAGE_SIZE[0]);
@@ -338,9 +476,12 @@ where
             for level in (0..=M::MAX_PAGE_LEVEL).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
                 if start_vaddr.is_aligned(page_size) && (start_vaddr + page_size) <= end_vaddr {
-                    let (entry, index) =
-                        self.get_page_entry_mut::<H>(start_vaddr, level, true, true)?;
-                    f(level, index, start_vaddr, entry)?;
+                    let flush = {
+                        let (entry, index) =
+                            self.get_page_entry_mut(start_vaddr, level, true, true)?;
+                        f(level, index, start_vaddr, entry)?
+                    };
+                    self.pending_flushes += flush;
                     start_vaddr = start_vaddr + page_size;
                     break;
                 }
@@ -350,7 +491,12 @@ where
         Ok(())
     }
 
-    pub fn map<H: PagingHandler>(
+    /// Maps a virtual address range to a physical address range.
+    ///
+    /// The range is rounded to base-page boundaries, existing mappings in the
+    /// covered range are replaced, and the virtual-to-physical offset is
+    /// preserved across the mapped range.
+    pub fn map(
         &mut self,
         vaddr: M::VirtAddr,
         paddr: PhysAddr,
@@ -358,20 +504,38 @@ where
         flags: MappingFlags,
     ) -> PagingResult {
         let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
-        self.iter_pages_in_range::<_, H>(
+        self.iter_pages_in_range(
             AddrRange::new(vaddr, vaddr + size),
             |level, _index, page_vaddr, entry| {
                 let page_paddr = PhysAddr::from_usize(page_vaddr.wrapping_sub(offset).into());
                 *entry = GenericPTE::new_page(page_paddr, flags, level != 0);
-                Ok(())
+                Ok(TlbFlush::Page(page_vaddr))
             },
         )
     }
 
-    pub fn unmap<H: PagingHandler>(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult {
-        self.iter_pages_in_range::<_, H>(
+    /// Removes mappings from a virtual address range.
+    ///
+    /// The range is rounded to base-page boundaries. Existing huge mappings may
+    /// be split or cleared as needed, and any affected TLB entries are recorded
+    /// for this cursor's next flush.
+    pub fn unmap(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult {
+        self.iter_pages_in_range(
             AddrRange::new(vaddr, vaddr + size),
-            |_level, _index, _page_vaddr, _entry| Ok(()),
+            |_level, _index, _page_vaddr, _entry| Ok(TlbFlush::None),
         )
     }
 }
+
+impl<'a, M: PageTableMeta, PTE: GenericPTE, H: PagingHandler> Drop
+    for PageTableCursor<'a, M, PTE, H>
+where
+    [(); M::LEVELS]: Sized,
+{
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests;

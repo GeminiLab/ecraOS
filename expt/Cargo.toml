@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 cfg-if.workspace = true
+heapless = "0.9"
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
 thiserror.workspace = true
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86 = "0.52"
