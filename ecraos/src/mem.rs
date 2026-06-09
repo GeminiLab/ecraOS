@@ -8,7 +8,7 @@ use expt::{
     PageTable, X86Level4PageTableMeta,
     pte::{MappingFlags, x86_64::X64PTE},
 };
-use memory_addr::VirtAddr;
+use memory_addr::{VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -19,6 +19,8 @@ pub mod pmm;
 pub mod reloc;
 pub mod sections;
 pub mod vmm;
+
+const TEMP_KERNEL_STACK_SIZE: usize = 16384;
 
 pub fn enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
@@ -45,6 +47,7 @@ pub fn enable_vmm(
     // Determine the layout of the virtual address space.
     vmm::init_vmm_layout();
     let virt_phys_offset = vmm::virt_phys_offset();
+    let page_size_shift = vmm::page_size_shift();
 
     // Initialize the early page allocator using the final region table.
     early::init_early_page_allocator();
@@ -62,27 +65,51 @@ pub fn enable_vmm(
     // TODO: add a addrspace wrapper.
     //
     // TODO: select pagetable from vmm modes.
-    {
-        let mut cursor = early_page_table.cursor::<early::EarlyPagingHandler>();
-        for region in pmm::phys_mem_regions() {
-            let mapping_flags = region_flags_to_mapping(region.flags);
-            if mapping_flags.is_empty() {
-                continue;
-            }
-
-            let paddr = region.range.start;
-            let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
-            let vaddr_high = vaddr_low + virt_phys_offset;
-            let size = region.range.size();
-
-            cursor.map(vaddr_low, paddr, size, mapping_flags).unwrap();
-            cursor.map(vaddr_high, paddr, size, mapping_flags).unwrap();
+    let mut cursor = early_page_table.cursor::<early::EarlyPagingHandler>();
+    for region in pmm::phys_mem_regions() {
+        let mapping_flags = region_flags_to_mapping(region.flags);
+        if mapping_flags.is_empty() {
+            continue;
         }
+
+        let paddr = region.range.start;
+        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+        let vaddr_high = vaddr_low + virt_phys_offset;
+        let size = region.range.size();
+
+        cursor.map(vaddr_low, paddr, size, mapping_flags).unwrap();
+        cursor.map(vaddr_high, paddr, size, mapping_flags).unwrap();
     }
+
+    // Allocate new stack for the BSP.
+    let kernel_stack_pages = TEMP_KERNEL_STACK_SIZE.div_ceil(1 << page_size_shift);
+
+    let kernel_stack_region_start = vmm::vmalloc_base();
+    let kernel_stack_start = kernel_stack_region_start + (1usize << page_size_shift);
+    let kernel_stack_end = kernel_stack_start + (kernel_stack_pages << page_size_shift);
+    let kernel_stack_region_end = kernel_stack_end + (1usize << page_size_shift);
+
+    unsafe {
+        vmm::TEMP_BSP_KERNEL_STACK =
+            VirtAddrRange::new_unchecked(kernel_stack_region_start, kernel_stack_region_end);
+    }
+
+    let kernel_stack_paddr = early::alloc_page_aligned(kernel_stack_pages << page_size_shift)
+        .expect("failed to allocate kernel stack");
+
+    cursor
+        .map(
+            kernel_stack_start,
+            kernel_stack_paddr,
+            kernel_stack_pages << page_size_shift,
+            MappingFlags::READ | MappingFlags::WRITE,
+        )
+        .unwrap();
+    drop(cursor);
 
     // Load the early page table.
     unsafe {
-        vmm::PAGE_TABLE_ROOT = early_page_table.base_paddr();
+        vmm::TEMP_PAGE_TABLE_ROOT = early_page_table.base_paddr();
 
         core::arch::asm!(
             "mov cr3, rax",
@@ -92,10 +119,7 @@ pub fn enable_vmm(
 
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        // TODO: use a separated vmm region, or the vmalloc region, for the new stack, with a protection page.
-        let new_stack = early::alloc_page_aligned(exboot::BOOTSTACK_SIZE)
-            .expect("failed to allocate new stack");
-        let new_stack_top = new_stack.as_usize() + exboot::BOOTSTACK_SIZE + virt_phys_offset;
+        let new_stack_top = kernel_stack_end.as_usize();
         let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
         let arg = arg.byte_add(virt_phys_offset);
 
@@ -103,15 +127,16 @@ pub fn enable_vmm(
     }
 }
 
-pub fn after_enable_vmm() {
+pub fn init_after_enable_vmm() {
     print_kernel_location("Kernel location after VMM setup:");
 
-    alloc::init_allocators();
     // TODO: recycle the loader memory region (as well as the bootstack).
+    alloc::init_allocators();
 
     // TODO: move this to real vmm.
-    // Remove identical mappings.
-    let page_table_root = unsafe { vmm::PAGE_TABLE_ROOT };
+    // Remove identical mappings. We cannot do this before the allocator is initialized, because
+    // this will destroy the early allocator effectively.
+    let page_table_root = unsafe { vmm::TEMP_PAGE_TABLE_ROOT };
     let mut pt = unsafe { PageTable::<X86Level4PageTableMeta, X64PTE>::new_at(page_table_root) };
 
     let mut cursor = pt.cursor::<vmm::TmpGoodPagingHandler>();

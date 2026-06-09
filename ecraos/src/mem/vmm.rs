@@ -22,7 +22,6 @@ pub fn virt_phys_offset() -> usize {
     VIRTUAL_ADDRESS_SPACE.direct_mapping_range.start.as_usize()
 }
 
-#[expect(dead_code)]
 pub fn vmalloc_base() -> VirtAddr {
     VIRTUAL_ADDRESS_SPACE.vmalloc_range.start
 }
@@ -108,7 +107,7 @@ fn select_va_mode(va_modes: &VirtAddrSpaceModes) -> (VirtAddrSpaceMode, u8, u8) 
 }
 
 /// Temporary for page table root physical address.
-pub static mut PAGE_TABLE_ROOT: memory_addr::PhysAddr = pa!(0);
+pub static mut TEMP_PAGE_TABLE_ROOT: memory_addr::PhysAddr = pa!(0);
 
 pub struct TmpGoodPagingHandler;
 
@@ -130,3 +129,6 @@ impl expt::PagingHandler for TmpGoodPagingHandler {
         VirtAddr::from_usize(addr.as_usize() + virt_phys_offset())
     }
 }
+
+pub static mut TEMP_BSP_KERNEL_STACK: VirtAddrRange =
+    unsafe { VirtAddrRange::new_unchecked(VirtAddr::from_usize(0), VirtAddr::from_usize(0)) };

@@ -87,7 +87,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
 
-    mem::after_enable_vmm();
+    mem::init_after_enable_vmm();
 
     let rsp: usize;
     let rip: usize;
