@@ -35,6 +35,8 @@ macro_rules! kprintln {
 
 pub(crate) use kprintln;
 
+use crate::mem::vmm;
+
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 /// Attribution line printed at startup.
@@ -85,7 +87,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
 
-    mem::alloc::init_allocators();
     mem::after_enable_vmm();
 
     let rsp: usize;

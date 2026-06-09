@@ -82,6 +82,8 @@ pub fn enable_vmm(
 
     // Load the early page table.
     unsafe {
+        vmm::PAGE_TABLE_ROOT = early_page_table.base_paddr();
+
         core::arch::asm!(
             "mov cr3, rax",
             in("rax") early_page_table.base_paddr().as_usize()
@@ -103,8 +105,23 @@ pub fn enable_vmm(
 
 pub fn after_enable_vmm() {
     print_kernel_location("Kernel location after VMM setup:");
+
+    alloc::init_allocators();
     // TODO: recycle the loader memory region (as well as the bootstack).
-    // TODO: remove identical mappings.
+
+    // TODO: move this to real vmm.
+    // Remove identical mappings.
+    let page_table_root = unsafe { vmm::PAGE_TABLE_ROOT };
+    let mut pt = unsafe { PageTable::<X86Level4PageTableMeta, X64PTE>::new_at(page_table_root) };
+
+    let mut cursor = pt.cursor::<vmm::TmpGoodPagingHandler>();
+    for region in pmm::phys_mem_regions() {
+        let paddr = region.range.start;
+        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+        let size = region.range.size();
+
+        cursor.unmap(vaddr_low, size).unwrap();
+    }
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

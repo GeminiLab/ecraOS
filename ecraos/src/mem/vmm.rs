@@ -2,10 +2,10 @@
 
 use explat::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps};
 use lazyinit::LazyInit;
-use memory_addr::{VirtAddr, VirtAddrRange, va};
+use memory_addr::{VirtAddr, VirtAddrRange, pa, va};
 use size_disp::SizeDisplay;
 
-use crate::kprintln;
+use crate::{kprintln, mem};
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpace {
@@ -105,4 +105,28 @@ fn select_va_mode(va_modes: &VirtAddrSpaceModes) -> (VirtAddrSpaceMode, u8, u8) 
     }
 
     panic!("No good virtual address space mode found");
+}
+
+/// Temporary for page table root physical address.
+pub static mut PAGE_TABLE_ROOT: memory_addr::PhysAddr = pa!(0);
+
+pub struct TmpGoodPagingHandler;
+
+impl expt::PagingHandler for TmpGoodPagingHandler {
+    fn alloc_page_aligned(bytes_required: usize) -> Option<exboot::PhysAddr> {
+        let page_size_shift = page_size_shift();
+        let count = bytes_required >> page_size_shift;
+        let align = 1 << page_size_shift;
+        mem::alloc::alloc_frames(count, align).ok()
+    }
+
+    fn dealloc_page_aligned(addr: exboot::PhysAddr, bytes_deallocated: usize) {
+        let page_size_shift = page_size_shift();
+        let count = bytes_deallocated >> page_size_shift;
+        mem::alloc::dealloc_frames(addr, count).unwrap();
+    }
+
+    fn phys_to_virt(addr: exboot::PhysAddr) -> VirtAddr {
+        VirtAddr::from_usize(addr.as_usize() + virt_phys_offset())
+    }
 }
