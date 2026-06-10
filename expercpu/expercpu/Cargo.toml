@@ -3,5 +3,18 @@ name = "expercpu"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+remote-access = ["dep:crate_interface", "expercpu_macros/remote-access"]
+preempt = ["expercpu_macros/preempt", "dep:kernel_guard"]
+arm-el2 = ["expercpu_macros/arm-el2"]
+
 [dependencies]
+cfg-if.workspace = true
+crate_interface = { version = "0.3", optional = true }
 expercpu_macros = { path = "../expercpu_macros" }
+kernel_guard = { version = "0.2", optional = true }
+memory_addr.workspace = true
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86 = "0.52"

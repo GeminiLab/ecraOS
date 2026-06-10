@@ -128,12 +128,22 @@ dependencies = [
 name = "expercpu"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
+ "crate_interface",
  "expercpu_macros",
+ "kernel_guard",
+ "memory_addr",
+ "x86",
 ]
 
 [[package]]
 name = "expercpu_macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "explat"
