@@ -7,7 +7,7 @@ members = [
     "ecraos-loader",
     "exboot/exboot",
     "exboot/exboot-macros",
-    "exboot/exboot-multiboot-x86_64", "exbuddy", "exslab", "expt", "size-disp", "memory_range_set",
+    "exboot/exboot-multiboot-x86_64", "exbuddy", "exslab", "expt", "size-disp", "memory_range_set", "expercpu/expercpu", "expercpu/expercpu_macros"
 ]
 
 [workspace.dependencies]

@@ -125,6 +125,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "expercpu"
+version = "0.1.0"
+dependencies = [
+ "expercpu_macros",
+]
+
+[[package]]
+name = "expercpu_macros"
+version = "0.1.0"
+
+[[package]]
 name = "explat"
 version = "0.1.0"
 dependencies = [
