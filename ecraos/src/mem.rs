@@ -18,11 +18,12 @@ mod early;
 pub mod pmm;
 pub mod reloc;
 pub mod sections;
+pub mod vmalloc;
 pub mod vmm;
 
 const TEMP_KERNEL_STACK_SIZE: usize = 16384;
 
-pub fn enable_vmm(
+pub fn init_and_enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
     arg: *const exboot::BootArg,

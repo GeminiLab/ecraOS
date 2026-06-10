@@ -14,4 +14,6 @@ exslab = { path = "../exslab" }
 kspin = "0.2"
 lazyinit.workspace = true
 memory_addr.workspace = true
+memory_range_set = { path = "../memory_range_set" }
 size-disp = { path = "../size-disp" }
+thiserror.workspace = true

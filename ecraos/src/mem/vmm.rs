@@ -8,7 +8,7 @@ use size_disp::SizeDisplay;
 use crate::{kprintln, mem};
 
 /// The layout of the virtual address space.
-pub struct VirtualAddressSpace {
+pub struct VirtualAddressSpaceLayout {
     #[expect(dead_code)]
     mode: VirtAddrSpaceMode,
     page_shift: u8,
@@ -16,18 +16,21 @@ pub struct VirtualAddressSpace {
     vmalloc_range: VirtAddrRange,
 }
 
-static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
+static VIRTUAL_ADDRESS_SPACE_LAYOUT: LazyInit<VirtualAddressSpaceLayout> = LazyInit::new();
 
 pub fn virt_phys_offset() -> usize {
-    VIRTUAL_ADDRESS_SPACE.direct_mapping_range.start.as_usize()
+    VIRTUAL_ADDRESS_SPACE_LAYOUT
+        .direct_mapping_range
+        .start
+        .as_usize()
 }
 
 pub fn vmalloc_base() -> VirtAddr {
-    VIRTUAL_ADDRESS_SPACE.vmalloc_range.start
+    VIRTUAL_ADDRESS_SPACE_LAYOUT.vmalloc_range.start
 }
 
 pub fn page_size_shift() -> usize {
-    VIRTUAL_ADDRESS_SPACE.page_shift as usize
+    VIRTUAL_ADDRESS_SPACE_LAYOUT.page_shift as usize
 }
 
 pub(super) fn init_vmm_layout() {
@@ -71,7 +74,7 @@ pub(super) fn init_vmm_layout() {
 
     kprintln!();
 
-    VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
+    VIRTUAL_ADDRESS_SPACE_LAYOUT.init_once(VirtualAddressSpaceLayout {
         // TODO: read page size from the virtual address space status
         mode,
         page_shift,

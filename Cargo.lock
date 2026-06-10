@@ -78,7 +78,9 @@ dependencies = [
  "kspin",
  "lazyinit",
  "memory_addr",
+ "memory_range_set",
  "size-disp",
+ "thiserror",
 ]
 
 [[package]]

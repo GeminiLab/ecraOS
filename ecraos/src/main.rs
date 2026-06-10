@@ -35,8 +35,6 @@ macro_rules! kprintln {
 
 pub(crate) use kprintln;
 
-use crate::mem::vmm;
-
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 /// Attribution line printed at startup.
@@ -73,7 +71,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         arg_ref
     );
 
-    mem::enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
+    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
 
 /// The later kernel entry function that runs after the VMM is initialized.
@@ -85,7 +83,10 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
-    kprintln!("VMM enabled on hart_id: {:#x}\n", hart_id);
+    kprintln!(
+        "{HLINE}\necraOS now in VMM world...\n{HLINE}\nVMM enabled on hart_id: {:#x}\n",
+        hart_id
+    );
 
     mem::init_after_enable_vmm();
 
