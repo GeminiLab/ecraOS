@@ -66,7 +66,7 @@ pub fn init_and_enable_vmm(
     // TODO: add a addrspace wrapper.
     //
     // TODO: select pagetable from vmm modes.
-    let mut cursor = early_page_table.cursor::<early::EarlyPagingHandler>();
+    let mut cursor = early_page_table.cursor();
     for region in pmm::phys_mem_regions() {
         let mapping_flags = region_flags_to_mapping(region.flags);
         if mapping_flags.is_empty() {
@@ -78,8 +78,12 @@ pub fn init_and_enable_vmm(
         let vaddr_high = vaddr_low + virt_phys_offset;
         let size = region.range.size();
 
-        cursor.map(vaddr_low, paddr, size, mapping_flags).unwrap();
-        cursor.map(vaddr_high, paddr, size, mapping_flags).unwrap();
+        cursor
+            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, mapping_flags)
+            .unwrap();
+        cursor
+            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, mapping_flags)
+            .unwrap();
     }
 
     // Allocate new stack for the BSP.
@@ -99,7 +103,7 @@ pub fn init_and_enable_vmm(
         .expect("failed to allocate kernel stack");
 
     cursor
-        .map(
+        .map::<early::EarlyPagingHandler>(
             kernel_stack_start,
             kernel_stack_paddr,
             kernel_stack_pages << page_size_shift,
@@ -110,11 +114,11 @@ pub fn init_and_enable_vmm(
 
     // Load the early page table.
     unsafe {
-        vmm::TEMP_PAGE_TABLE_ROOT = early_page_table.base_paddr();
+        vmm::TEMP_PAGE_TABLE_ROOT = early_page_table.root_paddr();
 
         core::arch::asm!(
             "mov cr3, rax",
-            in("rax") early_page_table.base_paddr().as_usize()
+            in("rax") early_page_table.root_paddr().as_usize()
         );
     }
 
@@ -140,13 +144,15 @@ pub fn init_after_enable_vmm() {
     let page_table_root = unsafe { vmm::TEMP_PAGE_TABLE_ROOT };
     let mut pt = unsafe { PageTable::<X86Level4PageTableMeta, X64PTE>::new_at(page_table_root) };
 
-    let mut cursor = pt.cursor::<vmm::TmpGoodPagingHandler>();
+    let mut cursor = pt.cursor();
     for region in pmm::phys_mem_regions() {
         let paddr = region.range.start;
         let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
         let size = region.range.size();
 
-        cursor.unmap(vaddr_low, size).unwrap();
+        cursor
+            .unmap::<vmm::TmpGoodPagingHandler>(vaddr_low, size)
+            .unwrap();
     }
 }
 

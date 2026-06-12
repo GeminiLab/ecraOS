@@ -65,6 +65,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyn_static_traits"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "ecraos"
 version = "0.1.0"
 dependencies = [
@@ -174,6 +183,7 @@ name = "expt"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "dyn_static_traits",
  "heapless",
  "memory_addr",
  "page_table_entry",

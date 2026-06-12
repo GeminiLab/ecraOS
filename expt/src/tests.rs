@@ -219,7 +219,7 @@ fn table_slice(_table: &PageTable<TestMeta, TestPte>, paddr: PhysAddr, level: us
 }
 
 fn lookup(table: &PageTable<TestMeta, TestPte>, vaddr: usize) -> Option<MappingSnapshot> {
-    let mut table_paddr = table.base_paddr();
+    let mut table_paddr = table.root_paddr();
     let mut level = TestMeta::LEVELS - 1;
     loop {
         let entries = table_slice(table, table_paddr, level);
@@ -286,7 +286,7 @@ fn new_alloc_initializes_zeroed_root_table() {
     reset_test_state();
 
     let table = PageTable::<TestMeta, TestPte>::new_alloc::<TestPagingHandler>().unwrap();
-    let root_paddr = table.base_paddr();
+    let root_paddr = table.root_paddr();
     assert_ne!(root_paddr.as_usize(), 0);
     assert!(allocation_contains(
         root_paddr,
@@ -347,7 +347,7 @@ fn cursor_unmaps_empty_range_without_flush_or_mapping() {
     reset_test_state();
     let mut table = new_table();
     let root_index = index_for(TestMeta::LEVELS - 1, 0x4000);
-    assert!(table_slice(&table, table.base_paddr(), TestMeta::LEVELS - 1)[root_index].is_unused());
+    assert!(table_slice(&table, table.root_paddr(), TestMeta::LEVELS - 1)[root_index].is_unused());
 
     {
         let mut cursor = table.cursor::<TestPagingHandler>();
@@ -358,10 +358,10 @@ fn cursor_unmaps_empty_range_without_flush_or_mapping() {
     }
 
     assert_eq!(
-        table_slice(&table, table.base_paddr(), TestMeta::LEVELS - 1)[root_index].kind,
+        table_slice(&table, table.root_paddr(), TestMeta::LEVELS - 1)[root_index].kind,
         PTE_TABLE
     );
-    assert_subtree_has_no_leaf_mappings(&table, table.base_paddr(), TestMeta::LEVELS - 1);
+    assert_subtree_has_no_leaf_mappings(&table, table.root_paddr(), TestMeta::LEVELS - 1);
     assert_unmapped(&table, 0x4000);
     assert!(flush_log().is_empty());
     reset_test_state();

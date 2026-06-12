@@ -1,11 +1,21 @@
 //! Virtual memory management.
 
+use exboot::PhysAddr;
 use explat::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps};
+use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::{VirtAddr, VirtAddrRange, pa, va};
 use size_disp::SizeDisplay;
 
 use crate::{kprintln, mem};
+
+pub struct VirtualAddressSpace {
+    layout: VirtualAddressSpaceLayout,
+    page_table_root: PhysAddr,
+    page_table_mutex: SpinNoIrq<()>,
+}
+
+static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpaceLayout {

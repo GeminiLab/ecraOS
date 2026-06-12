@@ -55,7 +55,7 @@ impl<'a> BuddySectionVisitor<'a> {
     /// Returns a reference to the allocator statistics.
     #[inline]
     pub fn stats(&self) -> &AllocatorStats {
-        &self.stats
+        self.stats
     }
 
     /// Finds the block head page containing the given page.
@@ -129,7 +129,7 @@ impl<'a> BuddySectionVisitorMut<'a> {
         unsafe {
             let page_data_byte_slice = slice::from_raw_parts_mut(
                 self.metas.as_mut_ptr() as *mut u8,
-                self.metas.len() * mem::size_of::<PageMeta>(),
+                mem::size_of_val(self.metas),
             );
             page_data_byte_slice.fill(0);
         }
@@ -580,6 +580,7 @@ impl BuddySection {
     /// The `block_splitter` should return two values:
     /// - The actual head page that should be passed to the `f` closure.
     /// - The actual order that should be passed to the `f` closure.
+    ///
     /// These values may be different from the arguments passed to the
     /// `block_splitter`. The start position of the next iteration will be
     /// inferred from these values.
