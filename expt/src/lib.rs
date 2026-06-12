@@ -224,7 +224,7 @@ where
     }
 
     /// Allocates and initializes a new root page table through `H`.
-    // #[maybe_non_generic(new_alloc_dyn; H => handler: &DynPagingHandler; Self::alloc_table => Self::alloc_table_dyn)]
+    // #[maybe_non_generic(new_alloc_dyn; H => handler: DynPagingHandler; Self::alloc_table => Self::alloc_table_dyn)]
     pub fn new_alloc<H: PagingHandler>() -> PagingResult<Self>
     where
         [(); M::LEVELS - 1]: Sized,
@@ -233,7 +233,7 @@ where
         Ok(unsafe { Self::new_at(paddr) })
     }
 
-    pub fn new_alloc_dyn(handler: &DynPagingHandler) -> PagingResult<Self>
+    pub fn new_alloc_dyn(handler: DynPagingHandler) -> PagingResult<Self>
     where
         [(); M::LEVELS - 1]: Sized,
     {
@@ -269,8 +269,8 @@ where
 
     /// Gets the table at level `LEVEL` from its physical address `paddr`.
     // #[maybe_non_generic(table_of_mut_non_const; const LEVEL => level: usize)]
-    // #[maybe_non_generic(table_of_mut_dyn; H => handler: &DynPagingHandler)]
-    // #[maybe_non_generic(table_of_mut_non_const_dyn; const LEVEL => level: usize, H => handler: &DynPagingHandler)]
+    // #[maybe_non_generic(table_of_mut_dyn; H => handler: DynPagingHandler)]
+    // #[maybe_non_generic(table_of_mut_non_const_dyn; const LEVEL => level: usize, H => handler: DynPagingHandler)]
     fn table_of_mut<'a, const LEVEL: usize, H: PagingHandler>(paddr: PhysAddr) -> &'a mut [PTE] {
         let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
 
@@ -295,7 +295,7 @@ where
         }
     }
 
-    // #[maybe_non_generic(alloc_table_dyn; H => handler: &DynPagingHandler)]
+    // #[maybe_non_generic(alloc_table_dyn; H => handler: DynPagingHandler)]
     fn alloc_table<const LEVEL: usize, H: PagingHandler>() -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
@@ -310,7 +310,7 @@ where
         }
     }
 
-    fn alloc_table_dyn<const LEVEL: usize>(handler: &DynPagingHandler) -> PagingResult<PhysAddr> {
+    fn alloc_table_dyn<const LEVEL: usize>(handler: DynPagingHandler) -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
         if let Some(paddr) = (handler.alloc_page_aligned)(bytes_required) {
@@ -457,7 +457,7 @@ where
 
     // #[maybe_non_generic(
     //      clear_pte_dyn;
-    //      H => handler: &DynPagingHandler;
+    //      H => handler: DynPagingHandler;
     //      PageTable::table_of_mut_non_const => PageTable::table_of_mut_non_const_dyn
     // )]
     fn clear_pte<H: PagingHandler>(

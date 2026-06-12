@@ -6,7 +6,7 @@ use syn::{Ident, ItemTrait, Signature, TraitItem, parse_macro_input, spanned::Sp
 fn error_at<S: Spanned, M: AsRef<str> + ?Sized, T>(span: &S, msg: &M) -> Result<T, TokenStream> {
     let span = span.span();
     let msg = msg.as_ref();
-    Err(quote_spanned!(span => compile_error!(#msg)))
+    Err(quote_spanned!(span => compile_error!(#msg);))
 }
 
 fn collect_static_trait_methods(trait_item: &ItemTrait) -> Result<Vec<&Signature>, TokenStream> {
