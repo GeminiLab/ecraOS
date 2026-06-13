@@ -5,7 +5,9 @@
 
 use explat::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::{
-    PageTable, X86Level4PageTableMeta,
+    PageTable,
+    arch::x86_64::X86Level4PageTableMeta,
+    opaque::OpaquePageTableType,
     pte::{MappingFlags, x86_64::X64PTE},
 };
 use memory_addr::{VirtAddr, VirtAddrRange};
@@ -54,9 +56,10 @@ pub fn init_and_enable_vmm(
     early::init_early_page_allocator();
 
     // Map the physical memory regions to the virtual address space.
-    let mut early_page_table =
-        PageTable::<X86Level4PageTableMeta, X64PTE>::new_alloc::<early::EarlyPagingHandler>()
-            .unwrap();
+    let pt_type = OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>();
+    let mut pt = pt_type
+        .new_pagetable_alloc::<early::EarlyPagingHandler>()
+        .unwrap();
 
     // TODO: the physical memory regions are not guaranteed to be page-aligned,
     // that may cause issues when mapping them. Luckily, it's not a serious or
@@ -66,7 +69,6 @@ pub fn init_and_enable_vmm(
     // TODO: add a addrspace wrapper.
     //
     // TODO: select pagetable from vmm modes.
-    let mut cursor = early_page_table.cursor();
     for region in pmm::phys_mem_regions() {
         let mapping_flags = region_flags_to_mapping(region.flags);
         if mapping_flags.is_empty() {
@@ -78,11 +80,9 @@ pub fn init_and_enable_vmm(
         let vaddr_high = vaddr_low + virt_phys_offset;
         let size = region.range.size();
 
-        cursor
-            .map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, mapping_flags)
+        pt.map::<early::EarlyPagingHandler>(vaddr_low, paddr, size, mapping_flags)
             .unwrap();
-        cursor
-            .map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, mapping_flags)
+        pt.map::<early::EarlyPagingHandler>(vaddr_high, paddr, size, mapping_flags)
             .unwrap();
     }
 
@@ -102,23 +102,22 @@ pub fn init_and_enable_vmm(
     let kernel_stack_paddr = early::alloc_page_aligned(kernel_stack_pages << page_size_shift)
         .expect("failed to allocate kernel stack");
 
-    cursor
-        .map::<early::EarlyPagingHandler>(
-            kernel_stack_start,
-            kernel_stack_paddr,
-            kernel_stack_pages << page_size_shift,
-            MappingFlags::READ | MappingFlags::WRITE,
-        )
-        .unwrap();
-    drop(cursor);
+    pt.map::<early::EarlyPagingHandler>(
+        kernel_stack_start,
+        kernel_stack_paddr,
+        kernel_stack_pages << page_size_shift,
+        MappingFlags::READ | MappingFlags::WRITE,
+    )
+    .unwrap();
 
     // Load the early page table.
     unsafe {
-        vmm::TEMP_PAGE_TABLE_ROOT = early_page_table.root_paddr();
+        let root = pt.root_paddr();
+        vmm::TEMP_PAGE_TABLE_ROOT = root;
 
         core::arch::asm!(
             "mov cr3, rax",
-            in("rax") early_page_table.root_paddr().as_usize()
+            in("rax") root.as_usize()
         );
     }
 
@@ -142,16 +141,15 @@ pub fn init_after_enable_vmm() {
     // Remove identical mappings. We cannot do this before the allocator is initialized, because
     // this will destroy the early allocator effectively.
     let page_table_root = unsafe { vmm::TEMP_PAGE_TABLE_ROOT };
-    let mut pt = unsafe { PageTable::<X86Level4PageTableMeta, X64PTE>::new_at(page_table_root) };
+    let pt_type = OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>();
+    let mut pt = unsafe { pt_type.new_pagetable_at(page_table_root) };
 
-    let mut cursor = pt.cursor();
     for region in pmm::phys_mem_regions() {
         let paddr = region.range.start;
         let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
         let size = region.range.size();
 
-        cursor
-            .unmap::<vmm::TmpGoodPagingHandler>(vaddr_low, size)
+        pt.unmap::<vmm::TmpGoodPagingHandler>(vaddr_low, size)
             .unwrap();
     }
 }

@@ -6,7 +6,7 @@
 #[cfg(test)]
 extern crate std;
 
-mod arch;
+pub mod arch;
 mod meta;
 pub mod opaque;
 pub mod pte {
@@ -22,63 +22,9 @@ use dyn_static_traits::dyn_static_traits;
 use heapless::Vec as HeaplessVec;
 use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, MemoryAddr, PhysAddr, VirtAddr};
-
-pub use meta::PageTableMeta;
 use page_table_entry::{GenericPTE, MappingFlags};
 
-#[inline]
-fn flush_x86_tlb(vaddr: Option<VirtAddr>) {
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        if let Some(vaddr) = vaddr {
-            x86::tlb::flush(vaddr.into());
-        } else {
-            x86::tlb::flush_all();
-        }
-    }
-
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        let _ = vaddr;
-        unimplemented!("x86 page table metadata can only flush TLB on x86_64");
-    }
-}
-
-/// Metadata for standard x86_64 four-level page tables.
-pub struct X86Level4PageTableMeta;
-
-impl PageTableMeta for X86Level4PageTableMeta {
-    type VirtAddr = VirtAddr;
-
-    const LEVELS: usize = 4;
-    const PAGE_OFFSET_BITS: usize = 12;
-    const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
-
-    // Max page size 1GiB, at level 2 of levels 0-3.
-    const MAX_PAGE_LEVEL: usize = 2;
-
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_x86_tlb(vaddr);
-    }
-}
-
-/// Metadata for standard x86_64 five-level page tables.
-pub struct X86Level5PageTableMeta;
-
-impl PageTableMeta for X86Level5PageTableMeta {
-    type VirtAddr = VirtAddr;
-
-    const LEVELS: usize = 5;
-    const PAGE_OFFSET_BITS: usize = 12;
-    const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
-
-    // Max page size 512GiB, at level 3 of levels 0-4.
-    const MAX_PAGE_LEVEL: usize = 3;
-
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_x86_tlb(vaddr);
-    }
-}
+pub use meta::PageTableMeta;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PagingError {
@@ -266,16 +212,11 @@ where
 
     /// Gets the table at level `LEVEL` from its physical address `paddr`.
     #[maybe_non_generic(table_of_mut_non_const, const(LEVEL => level: usize))]
-    #[maybe_non_generic(
-        table_of_mut_dyn,
-        type(H => handler: DynPagingHandler),
-        attr(allow(dead_code))
-    )]
+    #[maybe_non_generic(table_of_mut_dyn, type(H => handler: DynPagingHandler))]
     #[maybe_non_generic(
         table_of_mut_non_const_dyn,
         const(LEVEL => level: usize),
         type(H => handler: DynPagingHandler),
-        attr(allow(dead_code))
     )]
     fn table_of_mut<'a, const LEVEL: usize, H: PagingHandler>(paddr: PhysAddr) -> &'a mut [PTE] {
         let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
@@ -403,7 +344,6 @@ where
         type(H => handler: DynPagingHandler),
         fn(PageTable::alloc_table => PageTable::alloc_table_dyn),
         fn(PageTable::table_of_mut => PageTable::table_of_mut_dyn),
-        attr(allow(dead_code))
     )]
     fn next_table_mut<'a, const LEVEL: usize, H: PagingHandler>(
         &mut self,
@@ -451,7 +391,6 @@ where
         type(H => handler: DynPagingHandler),
         fn(self.clear_pte => self.clear_pte_dyn),
         fn(PageTable::table_of_mut_non_const => PageTable::table_of_mut_non_const_dyn),
-        attr(allow(dead_code))
     )]
     fn clear_pte<H: PagingHandler>(
         &mut self,

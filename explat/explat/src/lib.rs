@@ -18,4 +18,9 @@ pub mod reexport {
     pub mod memery_addr {
         pub use memory_addr::*;
     }
+
+    /// Re-export of the `expt` crate.
+    pub mod expt {
+        pub use expt::*;
+    }
 }

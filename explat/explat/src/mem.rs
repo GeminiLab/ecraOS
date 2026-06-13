@@ -1,7 +1,9 @@
 use core::fmt;
 
 use exboot::{PhysAddrRange, PlatformBootArg};
+use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
+use memory_addr::VirtAddr;
 
 use crate::reexport::crate_interface::def_interface;
 
@@ -258,17 +260,21 @@ impl VirtAddrSpaceModes {
 
 #[def_interface(gen_caller)]
 pub trait MemIf {
-    /// Collect the memory regions from the platform boot argument.
+    /// Collects the memory regions from the platform boot argument.
     ///
     /// The returned memory regions should not cantain the
     /// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
     /// kernel itself.
     fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
 
-    /// Get the supported and current virtual address space modes.
+    /// Gets the supported and current virtual address space modes.
     fn virt_addr_space_modes() -> VirtAddrSpaceModes;
 
-    /// Set the current virtual address space mode.
+    /// Sets the current virtual address space mode.
+    ///
+    /// It's guaranteed that this function will only be called when an identical mapping is
+    /// currently active. It's also required that when this function returns, a valid identical
+    /// mapping is active.
     ///
     /// # Panics
     ///
@@ -276,4 +282,13 @@ pub trait MemIf {
     /// list returned by [`virt_addr_space_modes`], and not supported by the
     /// platform.
     fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
+
+    /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
+    ///
+    /// # Panics
+    ///
+    /// This function will and should panic if the specified mode is not in the
+    /// list returned by [`virt_addr_space_modes`], and not supported by the
+    /// platform.
+    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
 }

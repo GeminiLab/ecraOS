@@ -6,7 +6,12 @@ use explat::{
     },
     reexport::{
         crate_interface,
-        memery_addr::{PhysAddr, PhysAddrRange},
+        expt::{
+            arch::x86_64::{X86Level4PageTableMeta, X86Level5PageTableMeta},
+            opaque::OpaquePageTableType,
+            pte::x86_64::X64PTE,
+        },
+        memery_addr::{PhysAddr, PhysAddrRange, VirtAddr},
     },
 };
 use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
@@ -85,6 +90,35 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegi
 
 pub struct MemImpl;
 
+impl MemImpl {
+    const PAGE_SHIFT: u8 = 12;
+    const LA48_VA_BITS: u8 = 48;
+    const LA57_VA_BITS: u8 = 57;
+
+    /// Checks if the specified virtual address space mode is supported by the `x86_64`
+    /// architecture, and returns the result of the callback function.
+    ///
+    /// When the mode is supported, the callback function `ok` will be called, the boolean argument
+    /// specifies whether the mode is LA48(`false`) or LA57(`true`).
+    ///
+    /// When the mode is not supported, the callback function `err` will be called with the mode.
+    fn check_mode<T, O, E>(mode: VirtAddrSpaceMode, ok: O, err: E) -> T
+    where
+        O: FnOnce(bool) -> T,
+        E: FnOnce(VirtAddrSpaceMode) -> T,
+    {
+        match mode {
+            VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
+                page_shift: Self::PAGE_SHIFT,
+                va_bits: va_bits @ (Self::LA48_VA_BITS | Self::LA57_VA_BITS),
+            }) => ok(va_bits == Self::LA57_VA_BITS),
+            _ => err(mode),
+        }
+    }
+}
+
+core::arch::global_asm!(include_str!("mem.S"), options(att_syntax));
+
 #[crate_interface::impl_interface]
 impl MemIf for MemImpl {
     fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
@@ -94,15 +128,11 @@ impl MemIf for MemImpl {
     fn virt_addr_space_modes() -> VirtAddrSpaceModes {
         let mut modes = VirtAddrSpaceModes::new();
 
-        const PAGE_SHIFT: u8 = 12;
-        const LA48_VA_BITS: u8 = 48;
-        const LA57_VA_BITS: u8 = 57;
-
         let _ = modes
             .modes
             .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
-                page_shift: 12,
-                va_bits: LA48_VA_BITS,
+                page_shift: Self::PAGE_SHIFT,
+                va_bits: Self::LA48_VA_BITS,
             }));
         modes.current_index = modes.modes.len() - 1;
 
@@ -114,8 +144,8 @@ impl MemIf for MemImpl {
             let _ = modes
                 .modes
                 .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
-                    page_shift: PAGE_SHIFT,
-                    va_bits: LA57_VA_BITS,
+                    page_shift: Self::PAGE_SHIFT,
+                    va_bits: Self::LA57_VA_BITS,
                 }));
 
             let la57_enabled = Cr4::read().contains(Cr4Flags::L5_PAGING);
@@ -127,7 +157,25 @@ impl MemIf for MemImpl {
         modes
     }
 
-    fn set_virt_addr_space_mode(_mode: VirtAddrSpaceMode) {
-        // TODO: Implement this
+    fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
+        Self::check_mode(
+            mode,
+            |is_la57| todo!(),
+            |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
+        )
+    }
+
+    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+        Self::check_mode(
+            mode,
+            |is_la57| {
+                if is_la57 {
+                    OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE>()
+                } else {
+                    OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>()
+                }
+            },
+            |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
+        )
     }
 }

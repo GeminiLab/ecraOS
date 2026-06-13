@@ -2,6 +2,7 @@
 //! implementations, and ACPI-style shutdown for QEMU.
 
 #![no_std]
+#![cfg(target_arch = "x86_64")]
 
 /// UART 16550 COM1 implementation of [`explat::debug_console::DebugConsoleIf`].
 pub mod debug_console;
