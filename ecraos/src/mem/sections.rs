@@ -44,10 +44,10 @@ macro_rules! sections {
             #[doc = concat!("Returns the flags of the ", stringify!($name), " section.")]
             #[doc = ""]
             #[doc = "The flags are constant and do not change after relocation."]
-            pub const fn $flag_fn() -> explat::mem::MemoryRegionFlags {
-                explat::mem::MemoryRegionFlags::$flag0
+            pub const fn $flag_fn() -> exarch::mem::MemoryRegionFlags {
+                exarch::mem::MemoryRegionFlags::$flag0
                 $(
-                    .union(explat::mem::MemoryRegionFlags::$flags)
+                    .union(exarch::mem::MemoryRegionFlags::$flags)
                 )*
             }
         )*
@@ -67,7 +67,7 @@ macro_rules! sections {
             /// The address range of the section with padding bytes at the end.
             pub aligned_range: memory_addr::VirtAddrRange,
             /// The flags of the section.
-            pub flags: explat::mem::MemoryRegionFlags,
+            pub flags: exarch::mem::MemoryRegionFlags,
         }
 
         #[doc = "Returns a list of all sections with their names and ranges."]

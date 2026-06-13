@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use memory_addr::{MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
@@ -19,12 +17,26 @@ struct PageTableMethods<A: MemoryAddr> {
     pub unmap: fn(root: PhysAddr, handler: DynPagingHandler, vaddr: A, size: usize) -> PagingResult,
 }
 
+impl<A: MemoryAddr> PageTableMethods<A> {
+    pub const fn dummy() -> Self {
+        fn panic_im_dummy() -> ! {
+            panic!("dummy page table type does not support any actual operations")
+        }
+
+        Self {
+            new_alloc: |_| panic_im_dummy(),
+            map: |_, _, _, _, _, _| panic_im_dummy(),
+            unmap: |_, _, _, _| panic_im_dummy(),
+        }
+    }
+}
+
 pub struct OpaquePageTableType<A: MemoryAddr> {
     methods: PageTableMethods<A>,
 }
 
 impl<A: MemoryAddr> OpaquePageTableType<A> {
-    pub fn new<M, PTE: GenericPTE>() -> Self
+    pub const fn new<M, PTE: GenericPTE>() -> Self
     where
         M: PageTableMeta<VirtAddr = A>,
         [(); M::LEVELS - 1]: Sized,
@@ -46,6 +58,12 @@ impl<A: MemoryAddr> OpaquePageTableType<A> {
         }
     }
 
+    pub const fn dummy() -> Self {
+        Self {
+            methods: PageTableMethods::dummy(),
+        }
+    }
+
     /// # Safety
     ///
     /// The caller must ensure that the physical address is valid.
@@ -53,7 +71,6 @@ impl<A: MemoryAddr> OpaquePageTableType<A> {
         OpaquePageTable {
             root: paddr,
             methods: self.methods.clone(),
-            _phantom: PhantomData,
         }
     }
 
@@ -67,10 +84,16 @@ impl<A: MemoryAddr> OpaquePageTableType<A> {
 pub struct OpaquePageTable<A: MemoryAddr> {
     root: PhysAddr,
     methods: PageTableMethods<A>,
-    _phantom: PhantomData<A>,
 }
 
 impl<A: MemoryAddr> OpaquePageTable<A> {
+    pub const fn dummy() -> Self {
+        Self {
+            root: PhysAddr::from_usize(0),
+            methods: PageTableMethods::dummy(),
+        }
+    }
+
     pub fn root_paddr(&self) -> PhysAddr {
         self.root
     }

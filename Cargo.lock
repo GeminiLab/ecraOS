@@ -78,6 +78,7 @@ name = "ecraos"
 version = "0.1.0"
 dependencies = [
  "bitmaps",
+ "exarch",
  "exboot",
  "exbuddy",
  "explat",
@@ -97,6 +98,23 @@ name = "ecraos-loader"
 version = "0.1.0"
 dependencies = [
  "exboot",
+]
+
+[[package]]
+name = "exarch"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.1",
+ "exboot",
+ "explat",
+ "expt",
+ "heapless",
+ "kspin",
+ "memory_addr",
+ "multiboot",
+ "raw-cpuid 11.6.0",
+ "uart_16550",
+ "x86_64",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 
-use explat::mem::MemoryRegionFlags;
+use exarch::mem::MemoryRegionFlags;
 use memory_addr::{MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange};
 use memory_range_set::{RangeSet, TryInsertError};
 

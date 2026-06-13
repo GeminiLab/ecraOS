@@ -34,8 +34,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
-use explat::mem::MemoryRegionFlags;
 use exslab::{
     SlabAllocResult, SlabPoolDeallocResult, SlabPoolTrait,
     page::SlabPageHeader,

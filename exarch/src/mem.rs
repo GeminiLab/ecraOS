@@ -1,11 +1,9 @@
-use core::fmt;
+use core::{fmt, num::NonZeroU8};
 
-use exboot::{PhysAddrRange, PlatformBootArg};
+use exboot::PlatformBootArg;
 use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
-use memory_addr::VirtAddr;
-
-use crate::reexport::crate_interface::def_interface;
+use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
 
 bitflags::bitflags! {
     /// The flags for a memory region.
@@ -169,6 +167,26 @@ impl VirtAddrSpaceMode {
     const fn page_size(page_shift: u8) -> usize {
         1usize.wrapping_shl(page_shift as _)
     }
+
+    pub const fn upper_va_bits(self) -> Option<NonZeroU8> {
+        type P = VirtAddrSpaceProps;
+        match self {
+            VirtAddrSpaceMode::LowerOnly(P { .. }) => None,
+            VirtAddrSpaceMode::UpperOnly(P { va_bits, .. }) => NonZeroU8::new(va_bits),
+            VirtAddrSpaceMode::Independent { upper, .. } => NonZeroU8::new(upper.va_bits),
+            VirtAddrSpaceMode::Unified(P { va_bits, .. }) => NonZeroU8::new(va_bits - 1),
+        }
+    }
+
+    pub const fn upper_page_shift(self) -> Option<NonZeroU8> {
+        type P = VirtAddrSpaceProps;
+        match self {
+            VirtAddrSpaceMode::LowerOnly(P { .. }) => None,
+            VirtAddrSpaceMode::UpperOnly(P { page_shift, .. }) => NonZeroU8::new(page_shift),
+            VirtAddrSpaceMode::Independent { upper, .. } => NonZeroU8::new(upper.page_shift),
+            VirtAddrSpaceMode::Unified(P { page_shift, .. }) => NonZeroU8::new(page_shift),
+        }
+    }
 }
 
 impl fmt::Display for VirtAddrSpaceMode {
@@ -183,7 +201,7 @@ impl fmt::Display for VirtAddrSpaceMode {
                 let page_size = Self::page_size(page_shift);
                 write!(
                     f,
-                    "LowerOnly, {:#x}..={:#x}, page size {:#x}",
+                    "LowerOnly, {:#018x}..={:#018x}, page size {:#x}",
                     min, max, page_size
                 )
             }
@@ -195,7 +213,7 @@ impl fmt::Display for VirtAddrSpaceMode {
                 let page_size = Self::page_size(page_shift);
                 write!(
                     f,
-                    "UpperOnly, {:#x}..={:#x}, page size {:#x}",
+                    "UpperOnly, {:#018x}..={:#018x}, page size {:#x}",
                     min, max, page_size
                 )
             }
@@ -206,7 +224,7 @@ impl fmt::Display for VirtAddrSpaceMode {
                 let upage_size = Self::page_size(upper.page_shift);
                 write!(
                     f,
-                    "Independent, lower: {:#x}..={:#x}, lower page size {:#x}, upper: {:#x}..={:#x}, upper page size {:#x}",
+                    "Independent, lower: {:#018x}..={:#018x}, lower page size {:#x}, upper: {:#018x}..={:#018x}, upper page size {:#x}",
                     lmin, lmax, lpage_size, umin, umax, upage_size
                 )
             }
@@ -219,7 +237,7 @@ impl fmt::Display for VirtAddrSpaceMode {
                 let page_size = Self::page_size(page_shift);
                 write!(
                     f,
-                    "Unified, lower: {:#x}..={:#x}, upper: {:#x}..={:#x}, page size {:#x}",
+                    "Unified, lower: {:#018x}..={:#018x}, upper: {:#018x}..={:#018x}, page size {:#x}",
                     lmin, lmax, umin, umax, page_size
                 )
             }
@@ -258,37 +276,49 @@ impl VirtAddrSpaceModes {
     }
 }
 
-#[def_interface(gen_caller)]
-pub trait MemIf {
-    /// Collects the memory regions from the platform boot argument.
-    ///
-    /// The returned memory regions should not cantain the
-    /// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
-    /// kernel itself.
-    fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
+/// Collects the memory regions from the platform boot argument.
+///
+/// The returned memory regions should not cantain the
+/// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
+/// kernel itself.
+pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
+    crate::arch::current::mem::raw_mem_regions(arg)
+}
 
-    /// Gets the supported and current virtual address space modes.
-    fn virt_addr_space_modes() -> VirtAddrSpaceModes;
+/// Gets the supported and current virtual address space modes.
+pub fn virt_addr_space_modes() -> VirtAddrSpaceModes {
+    crate::arch::current::mem::virt_addr_space_modes()
+}
 
-    /// Sets the current virtual address space mode.
-    ///
-    /// It's guaranteed that this function will only be called when an identical mapping is
-    /// currently active. It's also required that when this function returns, a valid identical
-    /// mapping is active.
-    ///
-    /// # Panics
-    ///
-    /// This function will and should panic if the specified mode is not in the
-    /// list returned by [`virt_addr_space_modes`], and not supported by the
-    /// platform.
-    fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
+/// Sets the current virtual address space mode.
+///
+/// It's guaranteed that this function will only be called when an identical mapping is
+/// currently active. It's also required that when this function returns, a valid identical
+/// mapping is active.
+///
+/// # Panics
+///
+/// This function will and should panic if the specified mode is not in the
+/// list returned by [`virt_addr_space_modes`], and not supported by the
+/// platform.
+pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
+    crate::arch::current::mem::set_virt_addr_space_mode(mode)
+}
 
-    /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
-    ///
-    /// # Panics
-    ///
-    /// This function will and should panic if the specified mode is not in the
-    /// list returned by [`virt_addr_space_modes`], and not supported by the
-    /// platform.
-    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
+/// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
+///
+/// # Panics
+///
+/// This function will and should panic if the specified mode is not in the
+/// list returned by [`virt_addr_space_modes`], and not supported by the
+/// platform.
+pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+    crate::arch::current::mem::get_page_table_type(mode)
+}
+
+/// Sets the page table root for the current virtual address space mode.
+///
+/// [`VirtAddrSpaceMode::Independent`] is not supported yet.
+pub fn set_page_table_root(root: PhysAddr) {
+    crate::arch::current::mem::set_page_table_root(root)
 }

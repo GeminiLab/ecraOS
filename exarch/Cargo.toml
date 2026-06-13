@@ -1,0 +1,19 @@
+[package]
+name = "exarch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags = "2.11"
+exboot = { path = "../exboot/exboot" }
+expt = { path = "../expt" }
+explat = { path = "../explat/explat" }
+memory_addr.workspace = true
+heapless = "0.9"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+kspin = "0.2"
+multiboot = "0.8"
+raw-cpuid = "11.6"
+uart_16550 = "0.4"  # later versions cannot be used because of the lack of const constructors
+x86_64 = "0.15.4"

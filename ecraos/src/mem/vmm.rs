@@ -1,21 +1,19 @@
 //! Virtual memory management.
 
-use exboot::PhysAddr;
-use explat::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps};
+use exarch::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes};
+use expt::{
+    PagingHandler,
+    opaque::{OpaquePageTable, OpaquePageTableType},
+};
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
-use memory_addr::{VirtAddr, VirtAddrRange, pa, va};
+use memory_addr::{VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
-use crate::{kprintln, mem};
-
-pub struct VirtualAddressSpace {
-    layout: VirtualAddressSpaceLayout,
-    page_table_root: PhysAddr,
-    page_table_mutex: SpinNoIrq<()>,
-}
-
-static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
+use crate::{
+    kprintln,
+    mem::{self, pmm::MemoryRegions, region_flags_to_mapping},
+};
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpaceLayout {
@@ -26,38 +24,94 @@ pub struct VirtualAddressSpaceLayout {
     vmalloc_range: VirtAddrRange,
 }
 
-static VIRTUAL_ADDRESS_SPACE_LAYOUT: LazyInit<VirtualAddressSpaceLayout> = LazyInit::new();
+/// The virtual address space.
+pub struct VirtualAddressSpace {
+    layout: VirtualAddressSpaceLayout,
+    page_table_type: OpaquePageTableType<VirtAddr>,
+    page_table_mutex: SpinNoIrq<OpaquePageTable<VirtAddr>>,
+}
 
+static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
+
+#[inline]
+#[expect(unused)]
+pub fn mode() -> VirtAddrSpaceMode {
+    VIRTUAL_ADDRESS_SPACE.layout.mode
+}
+
+#[inline]
+pub fn page_size_shift() -> usize {
+    VIRTUAL_ADDRESS_SPACE.layout.page_shift as usize
+}
+
+#[inline]
 pub fn virt_phys_offset() -> usize {
-    VIRTUAL_ADDRESS_SPACE_LAYOUT
+    VIRTUAL_ADDRESS_SPACE
+        .layout
         .direct_mapping_range
         .start
         .as_usize()
 }
 
+#[inline]
 pub fn vmalloc_base() -> VirtAddr {
-    VIRTUAL_ADDRESS_SPACE_LAYOUT.vmalloc_range.start
+    VIRTUAL_ADDRESS_SPACE.layout.vmalloc_range.start
 }
 
-pub fn page_size_shift() -> usize {
-    VIRTUAL_ADDRESS_SPACE_LAYOUT.page_shift as usize
+#[inline]
+pub fn with_page_table<F, T>(f: F) -> T
+where
+    F: FnOnce(&mut OpaquePageTable<VirtAddr>) -> T,
+{
+    let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
+    f(&mut pt)
 }
 
+/// Initializes the virtual address space.
+///
+/// This function detects and selects the virtual address space mode, and then calculates the layout
+/// of the virtual address space.
 pub(super) fn init_vmm_layout() {
-    let va_modes = explat::mem::virt_addr_space_modes();
-
     kprintln!("Virtual address space:");
+
+    let mode = select_va_mode(exarch::mem::virt_addr_space_modes());
+    exarch::mem::set_virt_addr_space_mode(mode);
+    let layout = calculate_vmm_layout(mode);
+
+    VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
+        layout,
+        page_table_type: exarch::mem::get_page_table_type(mode),
+        page_table_mutex: SpinNoIrq::new(OpaquePageTable::dummy()),
+    });
+}
+
+fn select_va_mode(va_modes: VirtAddrSpaceModes) -> VirtAddrSpaceMode {
     kprintln!("  Platform virtual address space modes:");
     for mode in &va_modes.modes {
         kprintln!("    {}", *mode);
     }
 
-    let (mode, page_shift, upper_va_bits) = select_va_mode(&va_modes);
-    explat::mem::set_virt_addr_space_mode(mode);
+    // currently, we choose the largest unified mode
+    let mut chosen_index = None::<usize>;
+    for (index, mode) in va_modes.modes.iter().enumerate() {
+        if matches!(mode, VirtAddrSpaceMode::Unified(..)) {
+            if chosen_index
+                .map(|index| va_modes.modes[index].upper_va_bits() < mode.upper_va_bits())
+                .unwrap_or(true)
+            {
+                chosen_index = Some(index);
+            }
+        }
+    }
 
-    kprintln!("  Selected virtual address space mode:\n    {}", mode);
+    let chosen_index = chosen_index.expect("No good virtual address space mode found");
+    va_modes.modes[chosen_index]
+}
 
-    let upper_bits = upper_va_bits;
+/// Calculates the layout of the virtual address space based on the given mode.
+fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
+    let upper_bits = mode.upper_va_bits().unwrap().get();
+    let page_shift = mode.upper_page_shift().unwrap().get();
     let upper_start = va!((1usize << upper_bits).wrapping_neg());
 
     kprintln!("  Upper half start    : {:#x}", upper_start);
@@ -82,45 +136,60 @@ pub(super) fn init_vmm_layout() {
         vmalloc_range.size().size_display_wide()
     );
 
-    kprintln!();
-
-    VIRTUAL_ADDRESS_SPACE_LAYOUT.init_once(VirtualAddressSpaceLayout {
-        // TODO: read page size from the virtual address space status
+    VirtualAddressSpaceLayout {
         mode,
         page_shift,
         direct_mapping_range,
         vmalloc_range,
-    });
-}
-
-fn va_mode_good(mode: VirtAddrSpaceMode) -> Option<(VirtAddrSpaceMode, u8, u8)> {
-    // TODO: support other modes
-    match mode {
-        VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
-            page_shift,
-            va_bits,
-        }) => Some((mode, page_shift, va_bits - 1)),
-        _ => None,
     }
 }
 
-fn select_va_mode(va_modes: &VirtAddrSpaceModes) -> (VirtAddrSpaceMode, u8, u8) {
-    let current = va_modes.modes[va_modes.current_index];
-    if let Some(result) = va_mode_good(current) {
-        return result;
-    }
+/// Initializes the page table with both identical mappings and mappings
+/// to the direct mapping area.
+pub(super) fn init_vmm_mapping_early<H: PagingHandler>(phys_mem_regions: &MemoryRegions) {
+    let virt_phys_offset = virt_phys_offset();
+    let mut pt = VIRTUAL_ADDRESS_SPACE
+        .page_table_type
+        .new_pagetable_alloc::<H>()
+        .unwrap();
 
-    for mode in &va_modes.modes {
-        if let Some(result) = va_mode_good(*mode) {
-            return result;
+    // TODO: the physical memory regions are not guaranteed to be page-aligned,
+    // that may cause issues when mapping them. Luckily, it's not a serious or
+    // urgent issue now, becuase free memory regions and kernel sections are
+    // almost guaranteed to be page-aligned. We should fix this in the future.
+    //
+    // TODO: add a addrspace wrapper.
+    //
+    // TODO: select pagetable from vmm modes.
+    for region in phys_mem_regions {
+        let mapping_flags = region_flags_to_mapping(region.flags);
+        if mapping_flags.is_empty() {
+            continue;
         }
+
+        let paddr = region.range.start;
+        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+        let vaddr_high = vaddr_low + virt_phys_offset;
+        let size = region.range.size();
+
+        pt.map::<H>(vaddr_low, paddr, size, mapping_flags).unwrap();
+        pt.map::<H>(vaddr_high, paddr, size, mapping_flags).unwrap();
     }
 
-    panic!("No good virtual address space mode found");
+    *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
 }
 
-/// Temporary for page table root physical address.
-pub static mut TEMP_PAGE_TABLE_ROOT: memory_addr::PhysAddr = pa!(0);
+pub(super) fn init_vmm_mapping_after<H: PagingHandler>(phys_mem_regions: &MemoryRegions) {
+    let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
+
+    for region in phys_mem_regions {
+        let paddr = region.range.start;
+        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+        let size = region.range.size();
+
+        pt.unmap::<H>(vaddr_low, size).unwrap();
+    }
+}
 
 pub struct TmpGoodPagingHandler;
 

@@ -3,7 +3,7 @@
 use core::{cell::UnsafeCell, mem};
 
 use bitmaps::Bitmap;
-use explat::mem::{MemoryRegion, MemoryRegionFlags};
+use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::PagingHandler;
 use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, align_up};
 use size_disp::SizeDisplay;

@@ -4,7 +4,6 @@
 
 pub mod debug_console;
 pub mod init;
-pub mod mem;
 pub mod power;
 
 /// Re-export of crates that any `explat` implementation must depend on.
@@ -17,10 +16,5 @@ pub mod reexport {
     /// Re-export of the `memory_addr` crate.
     pub mod memery_addr {
         pub use memory_addr::*;
-    }
-
-    /// Re-export of the `expt` crate.
-    pub mod expt {
-        pub use expt::*;
     }
 }
