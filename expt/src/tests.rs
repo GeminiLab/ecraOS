@@ -314,9 +314,9 @@ fn cursor_maps_and_unmaps_single_base_page() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x3000),
                 PhysAddr::from_usize(0xa000),
                 TestMeta::PAGE_SIZE,
@@ -333,7 +333,7 @@ fn cursor_maps_and_unmaps_single_base_page() {
 
         cursor.flush();
         cursor
-            .unmap(VirtAddr::from_usize(0x3000), TestMeta::PAGE_SIZE)
+            .unmap::<TestPagingHandler>(VirtAddr::from_usize(0x3000), TestMeta::PAGE_SIZE)
             .unwrap();
     }
 
@@ -350,9 +350,9 @@ fn cursor_unmaps_empty_range_without_flush_or_mapping() {
     assert!(table_slice(&table, table.root_paddr(), TestMeta::LEVELS - 1)[root_index].is_unused());
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .unmap(VirtAddr::from_usize(0x4000), TestMeta::PAGE_SIZE)
+            .unmap::<TestPagingHandler>(VirtAddr::from_usize(0x4000), TestMeta::PAGE_SIZE)
             .unwrap();
         assert_unmapped(&*cursor.table, 0x4000);
     }
@@ -373,9 +373,9 @@ fn cursor_maps_unaligned_range_with_virtual_physical_offset() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x1803),
                 PhysAddr::from_usize(0x9803),
                 0x2800,
@@ -408,9 +408,9 @@ fn cursor_uses_largest_possible_page_levels() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x10000),
                 PhysAddr::from_usize(0x20000),
                 TestMeta::LEVEL_PAGE_SIZE[2],
@@ -418,7 +418,7 @@ fn cursor_uses_largest_possible_page_levels() {
             )
             .unwrap();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x4000),
                 PhysAddr::from_usize(0x30000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -450,9 +450,9 @@ fn cursor_overwrites_existing_mappings() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x8000),
                 PhysAddr::from_usize(0x18000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -460,7 +460,7 @@ fn cursor_overwrites_existing_mappings() {
             )
             .unwrap();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x8000),
                 PhysAddr::from_usize(0x28000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -485,10 +485,10 @@ fn cursor_overwrites_lower_level_table_with_huge_mapping() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         for (vaddr, paddr) in [(0xc000, 0x100000), (0xd000, 0x101000), (0xe000, 0x102000)] {
             cursor
-                .map(
+                .map::<TestPagingHandler>(
                     VirtAddr::from_usize(vaddr),
                     PhysAddr::from_usize(paddr),
                     TestMeta::PAGE_SIZE,
@@ -497,7 +497,7 @@ fn cursor_overwrites_lower_level_table_with_huge_mapping() {
                 .unwrap();
         }
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0xc000),
                 PhysAddr::from_usize(0x200000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -524,9 +524,9 @@ fn splitting_huge_page_preserves_unaffected_subpages_and_full_flushes() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x0000),
                 PhysAddr::from_usize(0x40000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -537,7 +537,7 @@ fn splitting_huge_page_preserves_unaffected_subpages_and_full_flushes() {
         clear_flush_log();
 
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x2000),
                 PhysAddr::from_usize(0x90000),
                 TestMeta::PAGE_SIZE,
@@ -584,9 +584,9 @@ fn unmapping_huge_leaf_records_full_flush() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x4000),
                 PhysAddr::from_usize(0x50000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -597,7 +597,7 @@ fn unmapping_huge_leaf_records_full_flush() {
         clear_flush_log();
 
         cursor
-            .unmap(VirtAddr::from_usize(0x4000), TestMeta::LEVEL_PAGE_SIZE[1])
+            .unmap::<TestPagingHandler>(VirtAddr::from_usize(0x4000), TestMeta::LEVEL_PAGE_SIZE[1])
             .unwrap();
     }
 
@@ -612,9 +612,9 @@ fn unmapping_base_page_inside_huge_page_splits_and_full_flushes() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x8000),
                 PhysAddr::from_usize(0xa0000),
                 TestMeta::LEVEL_PAGE_SIZE[1],
@@ -625,7 +625,7 @@ fn unmapping_base_page_inside_huge_page_splits_and_full_flushes() {
         clear_flush_log();
 
         cursor
-            .unmap(VirtAddr::from_usize(0xa000), TestMeta::PAGE_SIZE)
+            .unmap::<TestPagingHandler>(VirtAddr::from_usize(0xa000), TestMeta::PAGE_SIZE)
             .unwrap();
     }
 
@@ -656,9 +656,9 @@ fn cursor_drop_flushes_single_page() {
     let paddr = PhysAddr::from_usize(0x8000);
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 vaddr,
                 paddr,
                 TestMeta::PAGE_SIZE,
@@ -686,9 +686,9 @@ fn cursor_manual_flush_is_idempotent_with_drop() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         cursor
-            .map(
+            .map::<TestPagingHandler>(
                 VirtAddr::from_usize(0x2000),
                 PhysAddr::from_usize(0x9000),
                 TestMeta::PAGE_SIZE,
@@ -709,10 +709,10 @@ fn cursor_flush_threshold_falls_back_to_full_flush() {
     let mut table = new_table();
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
         for page in 0..=SMALL_FLUSH_THRESHOLD {
             cursor
-                .map(
+                .map::<TestPagingHandler>(
                     VirtAddr::from_usize(page * TestMeta::PAGE_SIZE),
                     PhysAddr::from_usize(0x100000 + page * TestMeta::PAGE_SIZE),
                     TestMeta::PAGE_SIZE,
@@ -734,8 +734,8 @@ fn partial_success_still_flushes_on_drop_after_error() {
     fail_on_alloc(2);
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
-        let result = cursor.map(
+        let mut cursor = table.cursor();
+        let result = cursor.map::<TestPagingHandler>(
             VirtAddr::from_usize(0x0000),
             PhysAddr::from_usize(0x800000),
             TestMeta::LEVEL_PAGE_SIZE[2] + TestMeta::PAGE_SIZE,
@@ -775,7 +775,7 @@ fn deterministic_pressure_matches_shadow_model() {
     let mut seed = 0x6d2b_79f5_aa34_1d29;
 
     {
-        let mut cursor = table.cursor::<TestPagingHandler>();
+        let mut cursor = table.cursor();
 
         for step in 0..256 {
             let map_operation = next(&mut seed) & 1 == 0;
@@ -787,7 +787,7 @@ fn deterministic_pressure_matches_shadow_model() {
             if map_operation {
                 let paddr = 0x400000 + step * 0x10000;
                 cursor
-                    .map(
+                    .map::<TestPagingHandler>(
                         VirtAddr::from_usize(vaddr),
                         PhysAddr::from_usize(paddr),
                         size,
@@ -799,7 +799,9 @@ fn deterministic_pressure_matches_shadow_model() {
                     shadow[start_page + offset] = Some(paddr + offset * TestMeta::PAGE_SIZE);
                 }
             } else {
-                cursor.unmap(VirtAddr::from_usize(vaddr), size).unwrap();
+                cursor
+                    .unmap::<TestPagingHandler>(VirtAddr::from_usize(vaddr), size)
+                    .unwrap();
 
                 for offset in 0..page_count {
                     shadow[start_page + offset] = None;

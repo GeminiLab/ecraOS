@@ -20,6 +20,7 @@ use core::{
 
 use dyn_static_traits::dyn_static_traits;
 use heapless::Vec as HeaplessVec;
+use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, MemoryAddr, PhysAddr, VirtAddr};
 
 pub use meta::PageTableMeta;
@@ -224,20 +225,16 @@ where
     }
 
     /// Allocates and initializes a new root page table through `H`.
-    // #[maybe_non_generic(new_alloc_dyn; H => handler: DynPagingHandler; Self::alloc_table => Self::alloc_table_dyn)]
+    #[maybe_non_generic(
+        new_alloc_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(Self::alloc_table => Self::alloc_table_dyn)
+    )]
     pub fn new_alloc<H: PagingHandler>() -> PagingResult<Self>
     where
         [(); M::LEVELS - 1]: Sized,
     {
         let paddr = Self::alloc_table::<{ M::LEVELS - 1 }, H>()?;
-        Ok(unsafe { Self::new_at(paddr) })
-    }
-
-    pub fn new_alloc_dyn(handler: DynPagingHandler) -> PagingResult<Self>
-    where
-        [(); M::LEVELS - 1]: Sized,
-    {
-        let paddr = Self::alloc_table_dyn::<{ M::LEVELS - 1 }>(handler)?;
         Ok(unsafe { Self::new_at(paddr) })
     }
 
@@ -268,9 +265,18 @@ where
     }
 
     /// Gets the table at level `LEVEL` from its physical address `paddr`.
-    // #[maybe_non_generic(table_of_mut_non_const; const LEVEL => level: usize)]
-    // #[maybe_non_generic(table_of_mut_dyn; H => handler: DynPagingHandler)]
-    // #[maybe_non_generic(table_of_mut_non_const_dyn; const LEVEL => level: usize, H => handler: DynPagingHandler)]
+    #[maybe_non_generic(table_of_mut_non_const, const(LEVEL => level: usize))]
+    #[maybe_non_generic(
+        table_of_mut_dyn,
+        type(H => handler: DynPagingHandler),
+        attr(allow(dead_code))
+    )]
+    #[maybe_non_generic(
+        table_of_mut_non_const_dyn,
+        const(LEVEL => level: usize),
+        type(H => handler: DynPagingHandler),
+        attr(allow(dead_code))
+    )]
     fn table_of_mut<'a, const LEVEL: usize, H: PagingHandler>(paddr: PhysAddr) -> &'a mut [PTE] {
         let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
 
@@ -280,41 +286,12 @@ where
         }
     }
 
-    /// Gets the table at level `level` from its physical address `paddr`.
-    ///
-    /// Basically the same as [`table_of_mut`], but the level is not a constant.
-    fn table_of_mut_non_const<'a, H: PagingHandler>(
-        paddr: PhysAddr,
-        level: usize,
-    ) -> &'a mut [PTE] {
-        let entry_count = M::LEVEL_TABLE_SIZE[level];
-
-        unsafe {
-            let ptr: *mut PTE = H::phys_to_virt(paddr).as_mut_ptr_of();
-            core::slice::from_raw_parts_mut(ptr, entry_count)
-        }
-    }
-
-    // #[maybe_non_generic(alloc_table_dyn; H => handler: DynPagingHandler)]
+    #[maybe_non_generic(alloc_table_dyn, type(H => handler: DynPagingHandler))]
     fn alloc_table<const LEVEL: usize, H: PagingHandler>() -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
         if let Some(paddr) = H::alloc_page_aligned(bytes_required) {
             let vaddr = H::phys_to_virt(paddr);
-            unsafe {
-                core::ptr::write_bytes(vaddr.as_mut_ptr(), 0, bytes_required);
-            }
-            Ok(paddr)
-        } else {
-            Err(PagingError::AllocationFailed)
-        }
-    }
-
-    fn alloc_table_dyn<const LEVEL: usize>(handler: DynPagingHandler) -> PagingResult<PhysAddr> {
-        let bytes_required = Self::table_size::<LEVEL>();
-
-        if let Some(paddr) = (handler.alloc_page_aligned)(bytes_required) {
-            let vaddr = (handler.phys_to_virt)(paddr);
             unsafe {
                 core::ptr::write_bytes(vaddr.as_mut_ptr(), 0, bytes_required);
             }
@@ -338,6 +315,13 @@ where
         self.pending_flushes.flush();
     }
 
+    #[maybe_non_generic(
+        get_page_entry_mut_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(self.clear_pte => self.clear_pte_dyn),
+        fn(self.next_table_mut => self.next_table_mut_dyn),
+        fn(PageTable::table_of_mut => PageTable::table_of_mut_dyn),
+    )]
     fn get_page_entry_mut<H: PagingHandler>(
         &mut self,
         vaddr: M::VirtAddr,
@@ -414,6 +398,13 @@ where
     }
 
     /// Gets the table at level `LEVEL` from a PTE of the level above.
+    #[maybe_non_generic(
+        next_table_mut_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(PageTable::alloc_table => PageTable::alloc_table_dyn),
+        fn(PageTable::table_of_mut => PageTable::table_of_mut_dyn),
+        attr(allow(dead_code))
+    )]
     fn next_table_mut<'a, const LEVEL: usize, H: PagingHandler>(
         &mut self,
         entry: &mut PTE,
@@ -455,11 +446,13 @@ where
         }
     }
 
-    // #[maybe_non_generic(
-    //      clear_pte_dyn;
-    //      H => handler: DynPagingHandler;
-    //      PageTable::table_of_mut_non_const => PageTable::table_of_mut_non_const_dyn
-    // )]
+    #[maybe_non_generic(
+        clear_pte_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(self.clear_pte => self.clear_pte_dyn),
+        fn(PageTable::table_of_mut_non_const => PageTable::table_of_mut_non_const_dyn),
+        attr(allow(dead_code))
+    )]
     fn clear_pte<H: PagingHandler>(
         &mut self,
         entry: &mut PTE,
@@ -503,6 +496,11 @@ where
     /// page is split into smaller pages.
     ///
     /// The range is aligned to the page size of the lowest level.
+    #[maybe_non_generic(
+        iter_pages_in_range_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(self.get_page_entry_mut => self.get_page_entry_mut_dyn),
+    )]
     fn iter_pages_in_range<F, H: PagingHandler>(
         &mut self,
         range: AddrRange<M::VirtAddr>,
@@ -538,6 +536,11 @@ where
     /// The range is rounded to base-page boundaries, existing mappings in the
     /// covered range are replaced, and the virtual-to-physical offset is
     /// preserved across the mapped range.
+    #[maybe_non_generic(
+        map_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(self.iter_pages_in_range => self.iter_pages_in_range_dyn),
+    )]
     pub fn map<H: PagingHandler>(
         &mut self,
         vaddr: M::VirtAddr,
@@ -561,6 +564,11 @@ where
     /// The range is rounded to base-page boundaries. Existing huge mappings may
     /// be split or cleared as needed, and any affected TLB entries are recorded
     /// for this cursor's next flush.
+    #[maybe_non_generic(
+        unmap_dyn,
+        type(H => handler: DynPagingHandler),
+        fn(self.iter_pages_in_range => self.iter_pages_in_range_dyn),
+    )]
     pub fn unmap<H: PagingHandler>(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult {
         self.iter_pages_in_range::<_, H>(
             AddrRange::new(vaddr, vaddr + size),

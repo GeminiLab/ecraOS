@@ -7,6 +7,7 @@ edition = "2024"
 cfg-if.workspace = true
 dyn_static_traits = { path = "../dyn_static_traits" }
 heapless = "0.9"
+maybe_non_generic = { path = "../maybe_non_generic" }
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
 thiserror.workspace = true

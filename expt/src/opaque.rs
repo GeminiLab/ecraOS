@@ -9,13 +9,14 @@ use crate::{DynPagingHandler, PageTable, PageTableMeta, PagingHandler, PagingRes
 struct PageTableMethods<A: MemoryAddr> {
     pub new_alloc: fn(handler: DynPagingHandler) -> PagingResult<PhysAddr>,
     pub map: fn(
+        root: PhysAddr,
         handler: DynPagingHandler,
         vaddr: A,
         paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult,
-    pub unmap: fn(handler: DynPagingHandler, vaddr: A, size: usize) -> PagingResult,
+    pub unmap: fn(root: PhysAddr, handler: DynPagingHandler, vaddr: A, size: usize) -> PagingResult,
 }
 
 pub struct OpaquePageTableType<A: MemoryAddr> {
@@ -30,9 +31,17 @@ impl<A: MemoryAddr> OpaquePageTableType<A> {
     {
         Self {
             methods: PageTableMethods {
-                new_alloc: |handler| PageTable::<M, PTE>::new_alloc_dyn(handler).map(|pt| pt.root),
-                map: |handler, vaddr, paddr, size, flags| todo!(),
-                unmap: |handler, vaddr, size| todo!(),
+                new_alloc: |handler| {
+                    PageTable::<M, PTE>::new_alloc_dyn(handler).map(|pt: PageTable<M, PTE>| pt.root)
+                },
+                map: |root, handler, vaddr, paddr, size, flags| {
+                    let mut pt = unsafe { PageTable::<M, PTE>::new_at(root) };
+                    pt.cursor().map_dyn(vaddr, paddr, size, flags, handler)
+                },
+                unmap: |root, handler, vaddr, size| {
+                    let mut pt = unsafe { PageTable::<M, PTE>::new_at(root) };
+                    pt.cursor().unmap_dyn(vaddr, size, handler)
+                },
             },
         }
     }
@@ -73,11 +82,18 @@ impl<A: MemoryAddr> OpaquePageTable<A> {
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult {
-        (self.methods.map)(DynPagingHandler::new::<H>(), vaddr, paddr, size, flags)
+        (self.methods.map)(
+            self.root,
+            DynPagingHandler::new::<H>(),
+            vaddr,
+            paddr,
+            size,
+            flags,
+        )
     }
 
     pub fn unmap<H: PagingHandler>(&mut self, vaddr: A, size: usize) -> PagingResult {
-        (self.methods.unmap)(DynPagingHandler::new::<H>(), vaddr, size)
+        (self.methods.unmap)(self.root, DynPagingHandler::new::<H>(), vaddr, size)
     }
 
     /// This method is not implemented yet.

@@ -185,6 +185,7 @@ dependencies = [
  "cfg-if",
  "dyn_static_traits",
  "heapless",
+ "maybe_non_generic",
  "memory_addr",
  "page_table_entry",
  "thiserror",
@@ -243,6 +244,15 @@ name = "lazyinit"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17f03abfebdaaf0fad16790237a0348baf84886d3ade460db13bae59e614a180"
+
+[[package]]
+name = "maybe_non_generic"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "memory_addr"
