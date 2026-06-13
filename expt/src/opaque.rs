@@ -31,6 +31,7 @@ impl<A: MemoryAddr> PageTableMethods<A> {
     }
 }
 
+#[derive(Clone)]
 pub struct OpaquePageTableType<A: MemoryAddr> {
     methods: PageTableMethods<A>,
 }

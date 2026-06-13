@@ -17,7 +17,6 @@ use crate::{
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpaceLayout {
-    #[expect(dead_code)]
     mode: VirtAddrSpaceMode,
     page_shift: u8,
     direct_mapping_range: VirtAddrRange,
@@ -27,7 +26,7 @@ pub struct VirtualAddressSpaceLayout {
 /// The virtual address space.
 pub struct VirtualAddressSpace {
     layout: VirtualAddressSpaceLayout,
-    page_table_type: OpaquePageTableType<VirtAddr>,
+    page_table_type_mutex: SpinNoIrq<OpaquePageTableType<VirtAddr>>,
     page_table_mutex: SpinNoIrq<OpaquePageTable<VirtAddr>>,
 }
 
@@ -80,7 +79,7 @@ pub(super) fn init_vmm_layout() {
 
     VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
         layout,
-        page_table_type: exarch::mem::get_page_table_type(mode),
+        page_table_type_mutex: SpinNoIrq::new(exarch::mem::get_page_table_type(mode)),
         page_table_mutex: SpinNoIrq::new(OpaquePageTable::dummy()),
     });
 }
@@ -94,13 +93,12 @@ fn select_va_mode(va_modes: VirtAddrSpaceModes) -> VirtAddrSpaceMode {
     // currently, we choose the largest unified mode
     let mut chosen_index = None::<usize>;
     for (index, mode) in va_modes.modes.iter().enumerate() {
-        if matches!(mode, VirtAddrSpaceMode::Unified(..)) {
-            if chosen_index
+        if matches!(mode, VirtAddrSpaceMode::Unified(..))
+            && chosen_index
                 .map(|index| va_modes.modes[index].upper_va_bits() < mode.upper_va_bits())
                 .unwrap_or(true)
-            {
-                chosen_index = Some(index);
-            }
+        {
+            chosen_index = Some(index);
         }
     }
 
@@ -149,7 +147,8 @@ fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
 pub(super) fn init_vmm_mapping_early<H: PagingHandler>(phys_mem_regions: &MemoryRegions) {
     let virt_phys_offset = virt_phys_offset();
     let mut pt = VIRTUAL_ADDRESS_SPACE
-        .page_table_type
+        .page_table_type_mutex
+        .lock()
         .new_pagetable_alloc::<H>()
         .unwrap();
 
@@ -180,7 +179,12 @@ pub(super) fn init_vmm_mapping_early<H: PagingHandler>(phys_mem_regions: &Memory
 }
 
 pub(super) fn init_vmm_mapping_after<H: PagingHandler>(phys_mem_regions: &MemoryRegions) {
-    let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
+    // Fix function addresses in the opaque page table type first.
+    let page_table_type = exarch::mem::get_page_table_type(VIRTUAL_ADDRESS_SPACE.layout.mode);
+    *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
+
+    let page_table_ref = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
+    let mut pt = unsafe { page_table_type.new_pagetable_at(page_table_ref.root_paddr()) };
 
     for region in phys_mem_regions {
         let paddr = region.range.start;
@@ -189,6 +193,8 @@ pub(super) fn init_vmm_mapping_after<H: PagingHandler>(phys_mem_regions: &Memory
 
         pt.unmap::<H>(vaddr_low, size).unwrap();
     }
+
+    *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
 }
 
 pub struct TmpGoodPagingHandler;

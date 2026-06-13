@@ -83,7 +83,7 @@ fn should_copy_attr(attr: &Attribute) -> bool {
     attr.path()
         .segments
         .last()
-        .map_or(true, |segment| segment.ident != "maybe_non_generic")
+        .is_none_or(|segment| segment.ident != "maybe_non_generic")
 }
 
 fn attrs_for_copy(original: &[Attribute], args: &MacroArgs) -> Vec<Attribute> {

@@ -4,12 +4,8 @@
 //! early page allocation, and the final buddy+slab allocator integration.
 
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
-use expt::{
-    arch::x86_64::X86Level4PageTableMeta,
-    opaque::OpaquePageTableType,
-    pte::{MappingFlags, x86_64::X64PTE},
-};
-use memory_addr::{VirtAddr, VirtAddrRange};
+use expt::pte::MappingFlags;
+use memory_addr::VirtAddrRange;
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -51,10 +47,11 @@ pub fn init_and_enable_vmm(
     let virt_phys_offset = vmm::virt_phys_offset();
     let page_size_shift = vmm::page_size_shift();
 
-    // Initialize the early page allocator using the final region table.
+    // Initialize the early page allocator using the final region table. It depends on the page
+    // size info.
     early::init_early_page_allocator();
 
-    // Create the page table and early mappings.
+    // Create the page table and early mappings. It depends on the early page allocator.
     vmm::init_vmm_mapping_early::<early::EarlyPagingHandler>(pmm::phys_mem_regions());
 
     // Allocate new stack for the BSP.

@@ -2,7 +2,7 @@
 .code64
 .global switch_page_level
 switch_page_level:
-    # Fill the GDT base
+    # Fill the GDT base in the GDT descriptor
     leaq    exarch_mem_gdt(%rip), %rax
     leaq    exarch_mem_gdt_desc(%rip), %rdx
     movl    %eax, 2(%rdx)
@@ -11,39 +11,36 @@ switch_page_level:
     lgdtq   (%rdx)
 
     # Fill the blank in the page tables
-    leaq    l4_pt_pdpt(%rip), %rax
+    leaq    exarch_pt_pdpt(%rip), %rax
     addq    $0x3, %rax
-    leaq    l4_pt_pml4(%rip), %rdx
+    leaq    exarch_pt_pml4(%rip), %rdx
     movq    %rax, (%rdx)
 
-    leaq    l5_pt_pml4(%rip), %rax
+    leaq    exarch_pt_pml4(%rip), %rax
     addq    $0x3, %rax
-    leaq    l5_pt_pml5(%rip), %rdx
+    leaq    exarch_pt_pml5(%rip), %rdx
     movq    %rax, (%rdx)
-
-    # Save the is_la57 argument to %rbx
-    movq    %rdi, %rbx
 
     # Load the page table addresses to %rcx here 
     # because IP-relative addressing doesn't work in 32-bit mode
-    cmpq    $0, %rbx
+    cmpq    $0, %rdi
     je      .Lload_pt_la48
 
 .Lload_pt_la57:
-    leaq    l5_pt_pml4(%rip), %rcx
+    leaq    exarch_pt_pml5(%rip), %rcx
     jmp     .Lload_pt_done
 
 .Lload_pt_la48:
-    leaq    l4_pt_pml4(%rip), %rcx
+    leaq    exarch_pt_pml4(%rip), %rcx
 
 .Lload_pt_done:
 
-    # Load 64-bit return address to %rdx
-    leaq    switch_page_level64(%rip), %rdx
+    # Load 64-bit return address to %rsi
+    leaq    switch_page_level64(%rip), %rsi
 
     # Exit long mode and jump to switch_page_level32
     pushq   $0x08
-    leaq    switch_page_level(%rip), %rax
+    leaq    switch_page_level32(%rip), %rax
     pushq   %rax
     lretq
 
@@ -64,7 +61,7 @@ switch_page_level32:
 
     # Update CR4.LA57
     movl    %cr4, %eax
-    cmpl    $0, %ebx
+    cmpl    $0, %edi
     je      .Lla48
 
 .Lla57:
@@ -93,7 +90,7 @@ switch_page_level32:
 
     # Return to 64-bit mode
     pushl   $0x10
-    pushl   %edx
+    pushl   %esi
     lretl
 
 .code64
@@ -125,34 +122,26 @@ exarch_mem_gdt:
     .quad 0x00cf93000000ffff    # 0x18: data segment (base=0, limit=0xfffff, type=32bit data read/write, DPL=0, 4k)
 exarch_mem_gdt_end:
 
-# The identical L4 and L5 page tables
+# The identical page tables
 .section .rodata
 .balign 4096
-l4_pt_pml4:
-    # 0x0000_0000 ~ 0x7f_ffff_ffff (512 GiB)
-    # .quad l4_pt_pdpt + 0x3        # PRESENT | WRITABLE | paddr(boot_pt_pdpt)
+exarch_pt_pml5:
+    # 0x0000_0000 ~ 0xffff_ffff_ffff (256 TiB)
+    # .quad exarch_pt_pml4 + 0x3    # PRESENT | WRITABLE | paddr(exarch_pt_pml4)
     .fill 0, 8, 0
     .fill 511, 8, 0
 
 .balign 4096
-l4_pt_pdpt:
+exarch_pt_pml4:
+    # 0x0000_0000 ~ 0x7f_ffff_ffff (512 GiB)
+    # .quad exarch_pt_pdpt + 0x3    # PRESENT | WRITABLE | paddr(exarch_pt_pdpt)
+    .fill 0, 8, 0
+    .fill 511, 8, 0
+
+.balign 4096
+exarch_pt_pdpt:
 .set i, 0
 .rept 512
     .quad 0x40000000 * i | 0x83     # PRESENT | WRITABLE | HUGE_PAGE | paddr(0x4000_0000 * i)
-    .set i, i + 1
-.endr
-
-.balign 4096
-l5_pt_pml5:
-    # 0x0000_0000 ~ 0xffff_ffff_ffff (256 TiB)
-    # .quad l5_pt_pml4 + 0x3        # PRESENT | WRITABLE | paddr(l5_pt_pdpt)
-    .fill 0, 8, 0
-    .fill 511, 8, 0
-
-.balign 4096
-l5_pt_pml4:
-.set i, 0
-.rept 512
-    .quad 0x8000000000 * i | 0x83   # PRESENT | WRITABLE | HUGE_PAGE | paddr(0x80_0000_0000 * i)
     .set i, i + 1
 .endr

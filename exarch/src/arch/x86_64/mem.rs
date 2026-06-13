@@ -148,7 +148,9 @@ pub fn virt_addr_space_modes() -> VirtAddrSpaceModes {
 }
 
 pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
-    unsafe extern "sysv64" { fn switch_page_level(is_la57: bool); }
+    unsafe extern "sysv64" {
+        fn switch_page_level(is_la57: bool);
+    }
 
     check_mode(
         mode,

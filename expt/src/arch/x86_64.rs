@@ -42,8 +42,8 @@ impl PageTableMeta for X86Level5PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
 
-    // Max page size 512GiB, at level 3 of levels 0-4.
-    const MAX_PAGE_LEVEL: usize = 3;
+    // Max page size 1GiB, at level 2 of levels 0-4.
+    const MAX_PAGE_LEVEL: usize = 2;
 
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
         flush_x86_tlb(vaddr);
