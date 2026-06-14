@@ -806,4 +806,14 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     pub const fn limit(&self) -> AddrRange<A> {
         self.limit
     }
+
+    /// Returns an iterator over the free ranges by address.
+    pub fn free_ranges_by_addr(&self) -> impl Iterator<Item = AddrRange<A>> {
+        self.free_ranges_by_addr.iter().map(|range| range.0)
+    }
+
+    /// Returns an iterator over the free ranges by size.
+    pub fn free_ranges_by_size(&self) -> impl Iterator<Item = AddrRange<A>> {
+        self.free_ranges_by_size.iter().map(|range| range.0)
+    }
 }

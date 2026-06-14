@@ -5,7 +5,6 @@
 
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
-use memory_addr::VirtAddrRange;
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -17,8 +16,6 @@ pub mod reloc;
 pub mod sections;
 pub mod vmalloc;
 pub mod vmm;
-
-const TEMP_KERNEL_STACK_SIZE: usize = 16384;
 
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
@@ -45,36 +42,24 @@ pub fn init_and_enable_vmm(
     // Determine the layout of the virtual address space.
     vmm::init_vmm_layout();
     let virt_phys_offset = vmm::virt_phys_offset();
-    let page_size_shift = vmm::page_size_shift();
 
     // Initialize the early page allocator using the final region table. It depends on the page
     // size info.
     early::init_early_page_allocator();
 
     // Create the page table and early mappings. It depends on the early page allocator.
-    vmm::init_vmm_mapping_early::<early::EarlyPagingHandler>(pmm::phys_mem_regions());
+    vmm::init_vmm_mapping_early::<early::EarlyPageAllocatorImpl>(pmm::phys_mem_regions());
 
-    // Allocate new stack for the BSP.
-    let kernel_stack_pages = TEMP_KERNEL_STACK_SIZE.div_ceil(1 << page_size_shift);
+    // Set up the BSP stack.
+    early::init_bsp_stack(vmm::vmalloc_base());
 
-    let kernel_stack_region_start = vmm::vmalloc_base();
-    let kernel_stack_start = kernel_stack_region_start + (1usize << page_size_shift);
-    let kernel_stack_end = kernel_stack_start + (kernel_stack_pages << page_size_shift);
-    let kernel_stack_region_end = kernel_stack_end + (1usize << page_size_shift);
-
-    unsafe {
-        vmm::TEMP_BSP_KERNEL_STACK =
-            VirtAddrRange::new_unchecked(kernel_stack_region_start, kernel_stack_region_end);
-    }
-
-    let kernel_stack_paddr = early::alloc_page_aligned(kernel_stack_pages << page_size_shift)
-        .expect("failed to allocate kernel stack");
+    let (_, bsp_range, bsp_pa_range) = early::bsp_stack();
 
     vmm::with_page_table(|pt| {
-        pt.map::<early::EarlyPagingHandler>(
-            kernel_stack_start,
-            kernel_stack_paddr,
-            kernel_stack_pages << page_size_shift,
+        pt.map::<early::EarlyPageAllocatorImpl>(
+            bsp_range.start,
+            bsp_pa_range.start,
+            bsp_range.size(),
             MappingFlags::READ | MappingFlags::WRITE,
         )
         .unwrap()
@@ -85,7 +70,7 @@ pub fn init_and_enable_vmm(
 
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        let new_stack_top = kernel_stack_end.as_usize();
+        let new_stack_top = bsp_range.end.as_usize();
         let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
         let arg = arg.byte_add(virt_phys_offset);
 
@@ -96,12 +81,23 @@ pub fn init_and_enable_vmm(
 pub fn init_after_enable_vmm() {
     print_kernel_location("Kernel location after VMM setup:");
 
+    let page_size_shift = vmm::page_size_shift();
+
     // TODO: recycle the loader memory region (as well as the bootstack).
     alloc::init_allocators();
 
     // Remove identical mappings. We cannot do this before the allocator is initialized, because
     // this will destroy the early allocator effectively.
     vmm::init_vmm_mapping_after::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
+
+    // Initialize the VMAllocator, and add the bsp stack to it.
+    vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
+
+    let (stack_range, alloc_range, pa_range) = early::bsp_stack();
+    vmalloc::VMALLOC
+        .lock()
+        .add_allocated_range(stack_range, alloc_range, pa_range)
+        .expect("failed to add bsp stack to vmalloc");
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

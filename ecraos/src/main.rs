@@ -33,6 +33,7 @@ macro_rules! kprintln {
     };
 }
 
+use expt::pte::MappingFlags;
 pub(crate) use kprintln;
 
 /// Banner line printed at startup.
@@ -105,6 +106,17 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
     kprintln!("\n\nHere we go!\n\n");
+
+    let mut vmalloc = mem::vmalloc::VMALLOC.lock();
+    let manual_range = vmalloc
+        .alloc_manual(1024)
+        .expect("failed to allocate manual range");
+    let alloc_range = vmalloc
+        .alloc_allocated(1024, 512, MappingFlags::READ | MappingFlags::WRITE)
+        .expect("failed to allocate allocated range");
+
+    kprintln!("manual_range: {:#x}", manual_range);
+    kprintln!("alloc_range: {:#x}", alloc_range);
 
     explat::power::poweroff()
 }

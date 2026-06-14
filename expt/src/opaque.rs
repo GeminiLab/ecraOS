@@ -1,20 +1,21 @@
+use expalloc_trait::{DynPageAllocator, PageAllocator};
 use memory_addr::{MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
-use crate::{DynPagingHandler, PageTable, PageTableMeta, PagingHandler, PagingResult};
+use crate::{PageTable, PageTableMeta, PagingResult};
 
 #[derive(Clone)]
 struct PageTableMethods<A: MemoryAddr> {
-    pub new_alloc: fn(handler: DynPagingHandler) -> PagingResult<PhysAddr>,
+    pub new_alloc: fn(handler: DynPageAllocator) -> PagingResult<PhysAddr>,
     pub map: fn(
         root: PhysAddr,
-        handler: DynPagingHandler,
+        handler: DynPageAllocator,
         vaddr: A,
         paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult,
-    pub unmap: fn(root: PhysAddr, handler: DynPagingHandler, vaddr: A, size: usize) -> PagingResult,
+    pub unmap: fn(root: PhysAddr, handler: DynPageAllocator, vaddr: A, size: usize) -> PagingResult,
 }
 
 impl<A: MemoryAddr> PageTableMethods<A> {
@@ -75,9 +76,9 @@ impl<A: MemoryAddr> OpaquePageTableType<A> {
         }
     }
 
-    pub fn new_pagetable_alloc<H: PagingHandler>(&self) -> PagingResult<OpaquePageTable<A>> {
+    pub fn new_pagetable_alloc<H: PageAllocator>(&self) -> PagingResult<OpaquePageTable<A>> {
         unsafe {
-            Ok(self.new_pagetable_at((self.methods.new_alloc)(DynPagingHandler::new::<H>())?))
+            Ok(self.new_pagetable_at((self.methods.new_alloc)(DynPageAllocator::new::<H>())?))
         }
     }
 }
@@ -99,7 +100,7 @@ impl<A: MemoryAddr> OpaquePageTable<A> {
         self.root
     }
 
-    pub fn map<H: PagingHandler>(
+    pub fn map<H: PageAllocator>(
         &mut self,
         vaddr: A,
         paddr: PhysAddr,
@@ -108,7 +109,7 @@ impl<A: MemoryAddr> OpaquePageTable<A> {
     ) -> PagingResult {
         (self.methods.map)(
             self.root,
-            DynPagingHandler::new::<H>(),
+            DynPageAllocator::new::<H>(),
             vaddr,
             paddr,
             size,
@@ -116,8 +117,8 @@ impl<A: MemoryAddr> OpaquePageTable<A> {
         )
     }
 
-    pub fn unmap<H: PagingHandler>(&mut self, vaddr: A, size: usize) -> PagingResult {
-        (self.methods.unmap)(self.root, DynPagingHandler::new::<H>(), vaddr, size)
+    pub fn unmap<H: PageAllocator>(&mut self, vaddr: A, size: usize) -> PagingResult {
+        (self.methods.unmap)(self.root, DynPageAllocator::new::<H>(), vaddr, size)
     }
 
     /// This method is not implemented yet.

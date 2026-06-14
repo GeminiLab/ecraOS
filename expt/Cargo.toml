@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 cfg-if.workspace = true
 dyn_static_traits = { path = "../dyn_static_traits" }
+expalloc_trait = { path = "../expalloc_trait" }
 heapless = "0.9"
 maybe_non_generic = { path = "../maybe_non_generic" }
 memory_addr.workspace = true

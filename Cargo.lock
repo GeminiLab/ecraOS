@@ -81,6 +81,7 @@ dependencies = [
  "exarch",
  "exboot",
  "exbuddy",
+ "expalloc_trait",
  "explat",
  "expt",
  "exslab",
@@ -152,6 +153,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "expalloc_trait"
+version = "0.1.0"
+dependencies = [
+ "dyn_static_traits",
+ "memory_addr",
+]
+
+[[package]]
 name = "expercpu"
 version = "0.1.0"
 dependencies = [
@@ -202,6 +211,7 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "dyn_static_traits",
+ "expalloc_trait",
  "heapless",
  "maybe_non_generic",
  "memory_addr",
