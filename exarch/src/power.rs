@@ -1,6 +1,6 @@
 //! Power management.
 
-use crate::reexport::crate_interface::def_interface;
+use crate_interface::def_interface;
 
 /// Power operations implemented by the platform.
 #[def_interface(gen_caller)]

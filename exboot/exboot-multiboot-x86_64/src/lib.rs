@@ -36,7 +36,7 @@ use exboot::call_kernel_entry;
 ///
 /// `_arg0` is the Multiboot magic value originally in `EAX` (currently unused). `arg1` is the
 /// physical address of the Multiboot information structure from `EBX`, forwarded as `usize` to
-/// [`explat::init::InitIf::init_early`].
+/// [`exarch::init::InitIf::init_early`].
 #[unsafe(no_mangle)]
 fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
     unsafe extern "C" {

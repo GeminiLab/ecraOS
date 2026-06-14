@@ -2,7 +2,7 @@
 
 pub use exboot::PlatformBootArg;
 
-use crate::reexport::crate_interface::def_interface;
+use crate_interface::def_interface;
 
 /// Platform initialization contract invoked from portable kernel code.
 #[def_interface(gen_caller)]

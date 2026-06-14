@@ -168,8 +168,8 @@ fn virt_range_to_id_phys_range(virt_range: VirtAddrRange) -> PhysAddrRange {
 /// The final memory regions contains:
 /// - All kernel sections with the [`MemoryRegionFlags::KERNEL`] flag set.
 /// - The loader range with the [`MemoryRegionFlags::BOOT_SERVICE`] flag set.
-/// - All reserved regions reported by [`explat::mem::raw_mem_regions`].
-/// - All free regions reported by [`explat::mem::raw_mem_regions`], with
+/// - All reserved regions reported by [`exarch::mem::raw_mem_regions`].
+/// - All free regions reported by [`exarch::mem::raw_mem_regions`], with
 ///   portions overlapping with other regions dropped.
 pub fn build_phys_mem_regions(raw_mem_regions: &RawMemoryRegions, loader_range: PhysAddrRange) {
     let mut final_mem_regions = MemoryRegions::new();

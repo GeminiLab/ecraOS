@@ -1,4 +1,4 @@
-//! Proc macros for marking and calling the explat kernel entry point from platform code.
+//! Proc macros for marking and calling the exboot kernel entry point from platform code.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -15,9 +15,9 @@ fn kernel_entry_export_ident() -> Ident {
     format_ident!("{}", kernel_entry_export_name())
 }
 
-/// Marks a function as the kernel entry function, which will be called by the
-/// platform crate by [`call_kernel_entry`] once the very early initialization
-/// is complete.
+/// Marks a function as the kernel entry function, which will be called by boot
+/// code through [`call_kernel_entry`] once the very early initialization is
+/// complete.
 ///
 /// The kernel entry function should then further initialize the platform by
 /// methods defined in `InitIf` trait.
@@ -54,14 +54,14 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// bootstrap processor) and `arg` (the architecture-and-platform-specific
 /// argument that will later be passed to the `InitIf::init_early` method).
 ///
-/// The kernel entry function should be called by the platform crate with the
+/// The kernel entry function should be called by boot code with the
 /// following conditions met:
 /// - A pagetable providing identical mapping and covering the whole kernel
 ///   image must be enabled on the bootstrap processor.
 /// - Interrupts must be globally disabled on the bootstrap processor.
 ///
-/// The platform crate must call the kernel entry function as early as possible
-/// before any other initialization code is executed.
+/// Boot code must call the kernel entry function as early as possible before
+/// any other initialization code is executed.
 #[proc_macro]
 pub fn call_kernel_entry(input: TokenStream) -> TokenStream {
     let input = TokenStream2::from(input);

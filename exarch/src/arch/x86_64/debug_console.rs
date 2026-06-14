@@ -3,7 +3,7 @@
 use kspin::SpinNoIrq;
 use uart_16550::SerialPort;
 
-use explat::{debug_console::DebugConsoleIf, reexport::crate_interface};
+use crate::debug_console::DebugConsoleIf;
 
 /// Standard PC COM1 I/O base port.
 const COM1_BASE: u16 = 0x3f8;
@@ -16,7 +16,7 @@ pub fn init() {
     COM1.lock().init();
 }
 
-/// Type tag for [`crate_interface::impl_interface`] wiring to [`explat::debug_console::DebugConsoleIf`].
+/// The implementation of the [`DebugConsoleIf`] trait.
 pub struct DebugConsoleImpl;
 
 #[crate_interface::impl_interface]

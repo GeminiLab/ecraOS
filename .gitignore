@@ -6,5 +6,6 @@
 *.tmp
 
 /refs
-/docs
-!/docs/analysis
+/docs/*
+!/docs/analysis/
+!/docs/analysis/**

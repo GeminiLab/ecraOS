@@ -132,12 +132,13 @@ fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
     // Top level memory areas:
     // - 1st half: direct mapping area
     // - 2nd half:
-    //   - 3rd quater: vmalloc area
-    //   - 4th quater: not used
+    //   - 3rd quarter: vmalloc area
+    //   - 4th quarter: not used
     // This scheme gives us at least the same size of these areas as Linux does.
-    let quater_size = 1usize << (upper_bits - 2);
-    let direct_mapping_range = VirtAddrRange::from_start_size(upper_start, quater_size * 2);
-    let vmalloc_range = VirtAddrRange::from_start_size(upper_start + quater_size * 2, quater_size);
+    let quarter_size = 1usize << (upper_bits - 2);
+    let direct_mapping_range = VirtAddrRange::from_start_size(upper_start, quarter_size * 2);
+    let vmalloc_range =
+        VirtAddrRange::from_start_size(upper_start + quarter_size * 2, quarter_size);
     kprintln!(
         "  Direct mapping area : {:x}, {}",
         direct_mapping_range,
@@ -169,7 +170,7 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
 
     // TODO: the physical memory regions are not guaranteed to be page-aligned,
     // that may cause issues when mapping them. Luckily, it's not a serious or
-    // urgent issue now, becuase free memory regions and kernel sections are
+    // urgent issue now, because free memory regions and kernel sections are
     // almost guaranteed to be page-aligned. We should fix this in the future.
     for region in phys_mem_regions {
         let mapping_flags = region_flags_to_mapping(region.flags);

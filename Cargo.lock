@@ -82,7 +82,6 @@ dependencies = [
  "exboot",
  "exbuddy",
  "expalloc_trait",
- "explat",
  "expt",
  "exslab",
  "heapless",
@@ -106,8 +105,8 @@ name = "exarch"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
+ "crate_interface",
  "exboot",
- "explat",
  "expt",
  "heapless",
  "kspin",
@@ -147,7 +146,6 @@ dependencies = [
 name = "exbuddy"
 version = "0.1.0"
 dependencies = [
- "explat",
  "memory_addr",
  "thiserror",
 ]
@@ -179,30 +177,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "explat"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.11.1",
- "crate_interface",
- "exboot",
- "expt",
- "heapless",
- "memory_addr",
-]
-
-[[package]]
-name = "explat-x86_64"
-version = "0.1.0"
-dependencies = [
- "explat",
- "kspin",
- "multiboot",
- "raw-cpuid 11.6.0",
- "uart_16550",
- "x86_64",
 ]
 
 [[package]]

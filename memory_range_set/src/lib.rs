@@ -112,7 +112,7 @@ mod arena {
 
             match self.chunks[chunk] {
                 Some(chunk) => {
-                    // SATETY: `index.chunk_offset()` has already checked that the offset is within the
+                    // SAFETY: `index.chunk_offset()` has already checked that the offset is within the
                     // chunk.
                     unsafe { Some(chunk.as_ptr().add(offset).as_ref_unchecked()) }
                 }
@@ -126,7 +126,7 @@ mod arena {
             };
             match self.chunks[chunk] {
                 Some(chunk) => {
-                    // SATETY: `index.chunk_offset()` has already checked that the offset is within the
+                    // SAFETY: `index.chunk_offset()` has already checked that the offset is within the
                     // chunk.
                     unsafe { Some(chunk.as_ptr().add(offset).as_mut_unchecked()) }
                 }

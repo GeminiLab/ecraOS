@@ -14,7 +14,6 @@ else
   PROFILE_ARG="--profile $PROFILE"
 fi
 
-PLAT="$ROOT/target/$TARGET/$PROFILE/libexplat_x86_64.rlib"
 KERNEL="$ROOT/target/$TARGET/$PROFILE/ecraos"
 KERNEL_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos.bin"
 BOOT="$ROOT/target/$TARGET/$PROFILE/libexboot_multiboot_x86_64.rlib"
@@ -26,11 +25,8 @@ if [ "$CLEAN" = "1" ]; then
   cargo clean
 fi
 
-echo "Building explat-x86_64..." >&2
-RUSTFLAGS="-C relocation-model=pie" cargo build -p explat-x86_64 --target $TARGET $PROFILE_ARG
-
 echo "Building ecraos..." >&2
-RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld --cfg building_ecraos --extern explat_impl=$PLAT" cargo build -p ecraos --target $TARGET $PROFILE_ARG
+RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld" cargo build -p ecraos --target $TARGET $PROFILE_ARG
 
 echo "Stripping ecraos..." >&2
 rust-objcopy "$KERNEL" --strip-all -O binary "$KERNEL_STRIPPED"

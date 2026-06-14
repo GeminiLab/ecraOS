@@ -2,8 +2,6 @@
 resolver = "3"
 members = [
     "ecraos",
-    "explat/explat",
-    "explat/explat-x86_64",
     "ecraos-loader",
     "exboot/exboot",
     "exboot/exboot-macros",

@@ -7,18 +7,6 @@
 #![no_std]
 #![no_main]
 
-/// Include the concrete platform implementation.
-///
-/// `building_ecraos` is a custom rustc config that will be set when building
-/// the kernel with a concrete platform implementation (by rustc flag
-/// `--extern explat_impl=<path-to-impl-lib>`).
-///
-/// This flag does not need to be set when checking code with `cargo check`,
-/// which means that `rust-analyzer` works perfectly fine when this is not
-/// present.
-#[cfg(building_ecraos)]
-extern crate explat_impl;
-
 /// The Rust standard allocator interface.
 ///
 /// Required for `alloc` crate types (`Box`, `Vec`, `String`, etc.) to be
@@ -29,7 +17,7 @@ mod mem;
 
 macro_rules! kprintln {
     ($($arg:tt)*) => {
-        explat::dbcn_println!($($arg)*)
+        exarch::dbcn_println!($($arg)*)
     };
 }
 
@@ -63,7 +51,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
 
-    explat::init::init_early(arg_ref.plat_arg);
+    exarch::init::init_early(arg_ref.plat_arg);
 
     kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
     kprintln!(
@@ -118,12 +106,12 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
     kprintln!("manual_range: {:#x}", manual_range);
     kprintln!("alloc_range: {:#x}", alloc_range);
 
-    explat::power::poweroff()
+    exarch::power::poweroff()
 }
 
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     kprintln!("Kernel panic: {}", info);
-    explat::power::poweroff()
+    exarch::power::poweroff()
 }

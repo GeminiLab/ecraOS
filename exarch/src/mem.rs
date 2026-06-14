@@ -1,5 +1,6 @@
 use core::{fmt, num::NonZeroU8};
 
+use crate_interface::def_interface;
 use exboot::PlatformBootArg;
 use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
@@ -276,49 +277,42 @@ impl VirtAddrSpaceModes {
     }
 }
 
-/// Collects the memory regions from the platform boot argument.
-///
-/// The returned memory regions should not cantain the
-/// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
-/// kernel itself.
-pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
-    crate::arch::current::mem::raw_mem_regions(arg)
-}
+#[def_interface(gen_caller)]
+pub trait MemIf {
+    /// Collects the memory regions from the platform boot argument.
+    ///
+    /// The returned memory regions should not contain the
+    /// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
+    /// kernel itself.
+    fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
 
-/// Gets the supported and current virtual address space modes.
-pub fn virt_addr_space_modes() -> VirtAddrSpaceModes {
-    crate::arch::current::mem::virt_addr_space_modes()
-}
+    /// Gets the supported and current virtual address space modes.
+    fn virt_addr_space_modes() -> VirtAddrSpaceModes;
 
-/// Sets the current virtual address space mode.
-///
-/// It's guaranteed that this function will only be called when an identical mapping is
-/// currently active. It's also required that when this function returns, a valid identical
-/// mapping is active.
-///
-/// # Panics
-///
-/// This function will and should panic if the specified mode is not in the
-/// list returned by [`virt_addr_space_modes`], and not supported by the
-/// platform.
-pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
-    crate::arch::current::mem::set_virt_addr_space_mode(mode)
-}
+    /// Sets the current virtual address space mode.
+    ///
+    /// It's guaranteed that this function will only be called when an identical mapping is
+    /// currently active. It's also required that when this function returns, a valid identical
+    /// mapping is active.
+    ///
+    /// # Panics
+    ///
+    /// This function will and should panic if the specified mode is not in the
+    /// list returned by [`virt_addr_space_modes`], and not supported by the
+    /// platform.
+    fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
 
-/// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
-///
-/// # Panics
-///
-/// This function will and should panic if the specified mode is not in the
-/// list returned by [`virt_addr_space_modes`], and not supported by the
-/// platform.
-pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
-    crate::arch::current::mem::get_page_table_type(mode)
-}
+    /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
+    ///
+    /// # Panics
+    ///
+    /// This function will and should panic if the specified mode is not in the
+    /// list returned by [`virt_addr_space_modes`], and not supported by the
+    /// platform.
+    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
 
-/// Sets the page table root for the current virtual address space mode.
-///
-/// [`VirtAddrSpaceMode::Independent`] is not supported yet.
-pub fn set_page_table_root(root: PhysAddr) {
-    crate::arch::current::mem::set_page_table_root(root)
+    /// Sets the page table root for the current virtual address space mode.
+    ///
+    /// [`VirtAddrSpaceMode::Independent`] is not supported yet.
+    fn set_page_table_root(root: PhysAddr);
 }

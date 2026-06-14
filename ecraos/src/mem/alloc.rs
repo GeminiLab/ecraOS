@@ -277,8 +277,8 @@ pub fn init_allocators() {
         }
 
         kprintln!("  Allocator region: {:x} ({})", region.range, region.desc);
-        // SATETY: we believe that the platform crate gives us a valid physical
-        // memory map.
+        // SAFETY: we trust exarch to provide a valid physical memory map for
+        // the active architecture.
         unsafe { buddy.add_section(region.range) }
             .expect("failed to add the previous region to buddy allocator");
     }
