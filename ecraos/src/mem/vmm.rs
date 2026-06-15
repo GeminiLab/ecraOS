@@ -43,6 +43,16 @@ pub fn page_size_shift() -> usize {
 }
 
 #[inline]
+pub fn page_size() -> usize {
+    1usize << page_size_shift()
+}
+
+#[inline]
+pub fn page_count_for_bytes(bytes: usize) -> usize {
+    bytes.div_ceil(page_size())
+}
+
+#[inline]
 pub fn virt_phys_offset() -> usize {
     VIRTUAL_ADDRESS_SPACE
         .layout

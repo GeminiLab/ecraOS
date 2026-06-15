@@ -13,6 +13,8 @@
 /// available in the kernel.
 extern crate alloc;
 
+use log::info;
+
 mod logging;
 mod mem;
 
@@ -23,7 +25,6 @@ macro_rules! kprintln {
 }
 
 pub(crate) use kprintln;
-use log::info;
 
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
@@ -101,6 +102,26 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
     kprintln!("\n\nHere we go!\n\n");
+
+    use mem::percpu::{BAR, FOO};
+
+    info!("PerCPU smoke test started");
+
+    info!("FOO offset: {:#x}", FOO.offset());
+    info!("FOO ptr: {:#p}", unsafe { FOO.current_ptr() });
+    info!("FOO value: {:#}", FOO.read_current());
+    FOO.write_current(2347828437);
+    info!("FOO value: {:#}", FOO.read_current());
+
+    info!("BAR offset: {:#x}", BAR.offset());
+    info!("BAR ptr: {:#p}", unsafe { BAR.current_ptr() });
+    info!("BAR value: {:?}", unsafe { *BAR.current_ptr() });
+    unsafe {
+        *BAR.current_ref_mut_raw() = (2347828437, 2347828437);
+    }
+    info!("BAR value: {:?}", unsafe { *BAR.current_ptr() });
+
+    info!("PerCPU smoke test completed");
 
     exarch::power::poweroff()
 }

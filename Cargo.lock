@@ -82,6 +82,7 @@ dependencies = [
  "exboot",
  "exbuddy",
  "expalloc_trait",
+ "expercpu",
  "expt",
  "exslab",
  "heapless",

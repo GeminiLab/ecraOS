@@ -12,6 +12,7 @@ use crate::kprintln;
 
 pub mod alloc;
 mod early;
+pub mod percpu;
 pub mod pmm;
 pub mod reloc;
 pub mod sections;
@@ -51,10 +52,12 @@ pub fn init_and_enable_vmm(
     // Create the page table and early mappings. It depends on the early page allocator.
     vmm::init_vmm_mapping_early::<early::EarlyPageAllocatorImpl>(pmm::phys_mem_regions());
 
-    // Set up the BSP stack.
+    // Allocate the BSP stack and percpu area.
     early::init_bsp_stack(vmm::vmalloc_base());
+    let (bsp_range_with_guards, bsp_range, bsp_pa_range) = early::bsp_stack();
 
-    let (_, bsp_range, bsp_pa_range) = early::bsp_stack();
+    early::init_bsp_percpu(bsp_range_with_guards.end);
+    let (_, percpu_range, percpu_pa_range) = early::bsp_percpu();
 
     vmm::with_page_table(|pt| {
         pt.map::<early::EarlyPageAllocatorImpl>(
@@ -63,7 +66,15 @@ pub fn init_and_enable_vmm(
             bsp_range.size(),
             MappingFlags::READ | MappingFlags::WRITE,
         )
-        .unwrap()
+        .unwrap();
+
+        pt.map::<early::EarlyPageAllocatorImpl>(
+            percpu_range.start,
+            percpu_pa_range.start,
+            percpu_range.size(),
+            MappingFlags::READ | MappingFlags::WRITE,
+        )
+        .unwrap();
     });
 
     // Load the early page table.
@@ -100,6 +111,17 @@ pub fn init_after_enable_vmm() {
         .lock()
         .add_allocated_range(stack_range, alloc_range, pa_range)
         .expect("failed to add bsp stack to vmalloc");
+
+    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
+    vmalloc::VMALLOC
+        .lock()
+        .add_allocated_range(percpu_range, percpu_alloc_range, percpu_pa_range)
+        .expect("failed to add bsp percpu area to vmalloc");
+
+    // SAFETY: The BSP per-CPU area is mapped writable in the active page table,
+    // sized from the linked per-CPU section, and used by this CPU before other
+    // CPUs exist.
+    unsafe { expercpu::init(percpu_alloc_range.start) };
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

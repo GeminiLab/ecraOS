@@ -82,6 +82,7 @@ macro_rules! sections {
 sections![
     text (text_aligned) => _stext .. _etext .. _ftext, text_flags: READ | EXECUTE,
     rodata (rodata_aligned) => _srodata .. _erodata .. _frodata, rodata_flag: READ,
+    percpu (percpu_aligned) => _spercpu .. _epercpu .. _fpercpu, percpu_flag: READ,
     data (data_aligned) => _sdata .. _edata .. _fdata, data_flag: READ | WRITE,
     rela_dyn (rela_dyn_aligned) => _srela_dyn .. _erela_dyn .. _frela_dyn, rela_dyn_flag: READ | WRITE,
     got (got_aligned) => _sgot .. _egot .. _fgot, got_flag: READ | WRITE,

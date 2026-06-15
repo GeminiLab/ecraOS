@@ -6,7 +6,7 @@
 
 extern crate expercpu_macros;
 
-use core::{alloc::Layout, ptr::addr_of};
+use core::alloc::Layout;
 
 use memory_addr::VirtAddr;
 
@@ -20,8 +20,7 @@ const PERCPU_AREA_ALIGN: usize = SIZE_64BIT;
 
 unsafe extern "C" {
     static _percpu_start: u8;
-    static _percpu_load_start: u8;
-    static _percpu_load_end: u8;
+    static _percpu_end: u8;
 }
 
 #[doc(hidden)]
@@ -43,8 +42,8 @@ const fn align_up_64(val: usize) -> usize {
 
 /// Returns the per-CPU data area size for one CPU.
 pub fn percpu_area_size() -> usize {
-    expercpu_macros::percpu_symbol_vma!(_percpu_load_end)
-        - expercpu_macros::percpu_symbol_vma!(_percpu_load_start)
+    expercpu_macros::percpu_symbol_vma!(_percpu_end)
+        - expercpu_macros::percpu_symbol_vma!(_percpu_start)
 }
 
 /// Returns the allocation layout for one per-CPU data area.
@@ -85,7 +84,8 @@ pub unsafe fn init(base: VirtAddr) {
     let size = percpu_area_size();
 
     unsafe {
-        core::ptr::copy_nonoverlapping(addr_of!(_percpu_start), base.as_mut_ptr(), size);
+        let percpu_start = expercpu_macros::percpu_symbol_vma!(_percpu_start) as *const u8;
+        core::ptr::copy_nonoverlapping(percpu_start, base.as_mut_ptr(), size);
         write_percpu_reg(base);
     }
 }
@@ -96,13 +96,7 @@ pub fn read_percpu_reg() -> VirtAddr {
     unsafe {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                tp = if cfg!(target_os = "linux") {
-                    SELF_PTR.read_current_raw()
-                } else if cfg!(target_os = "none") {
-                    x86::msr::rdmsr(x86::msr::IA32_GS_BASE) as usize
-                } else {
-                    unimplemented!()
-                };
+                core::arch::asm!("rdgsbase {}", out(reg) tp);
             } else if #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))] {
                 core::arch::asm!("mv {}, gp", out(reg) tp)
             } else if #[cfg(all(target_arch = "aarch64", not(feature = "arm-el2")))] {
@@ -118,7 +112,7 @@ pub fn read_percpu_reg() -> VirtAddr {
             }
         }
     }
-    VirtAddr::from_usize(tp + expercpu_macros::percpu_symbol_vma!(_percpu_load_start))
+    VirtAddr::from_usize(tp + expercpu_macros::percpu_symbol_vma!(_percpu_start))
 }
 
 /// Writes the architecture-specific per-CPU data register.
@@ -129,30 +123,12 @@ pub fn read_percpu_reg() -> VirtAddr {
 /// the architecture-specific per-CPU register to that base must be valid for
 /// the current execution context.
 pub unsafe fn write_percpu_reg(tp: VirtAddr) {
-    let tp = tp.as_usize() - expercpu_macros::percpu_symbol_vma!(_percpu_load_start);
+    let tp = tp.as_usize() - expercpu_macros::percpu_symbol_vma!(_percpu_start);
 
     unsafe {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                if cfg!(target_os = "linux") {
-                    const ARCH_SET_GS: usize = 0x1001;
-                    const SYS_ARCH_PRCTL: isize = 158;
-                    let ret: isize;
-                    core::arch::asm!(
-                        "syscall",
-                        inlateout("rax") SYS_ARCH_PRCTL => ret,
-                        in("rdi") ARCH_SET_GS,
-                        in("rsi") tp,
-                        lateout("rcx") _,
-                        lateout("r11") _,
-                    );
-                    assert_eq!(ret, 0, "arch_prctl(ARCH_SET_GS) failed");
-                } else if cfg!(target_os = "none") {
-                    x86::msr::wrmsr(x86::msr::IA32_GS_BASE, tp as u64);
-                } else {
-                    unimplemented!()
-                }
-                SELF_PTR.write_current_raw(tp);
+                core::arch::asm!("wrgsbase {}", in(reg) tp);
             } else if #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))] {
                 core::arch::asm!("mv gp, {}", in(reg) tp)
             } else if #[cfg(all(target_arch = "aarch64", not(feature = "arm-el2")))] {
@@ -172,8 +148,3 @@ pub unsafe fn write_percpu_reg(tp: VirtAddr) {
 
 #[allow(unused_imports)]
 use crate as expercpu;
-
-#[cfg(target_arch = "x86_64")]
-#[unsafe(no_mangle)]
-#[expercpu_macros::def_percpu]
-static SELF_PTR: usize = 0;

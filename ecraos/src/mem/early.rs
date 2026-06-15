@@ -1,6 +1,6 @@
 //! Early stage memory management.
 
-use core::{cell::UnsafeCell, mem};
+use core::cell::UnsafeCell;
 
 use bitmaps::Bitmap;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
@@ -9,7 +9,10 @@ use lazyinit::LazyInit;
 use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
-use crate::kprintln;
+use crate::{
+    kprintln,
+    mem::{percpu, pmm, vmm},
+};
 
 /// Early page allocator implementation used before the virtual address space is ready.
 pub struct EarlyPageAllocatorImpl;
@@ -37,11 +40,11 @@ static EARLY_PAGE_ALLOCATOR: EarlyPageAllocator = EarlyPageAllocator::new_uninit
 
 /// Initializes the early page allocator at the given physical base address.
 pub fn init_early_page_allocator() {
-    let range = find_early_page_allocator_range(super::pmm::phys_mem_regions())
+    let range = find_early_page_allocator_range(pmm::phys_mem_regions())
         .expect("Cannot find early page allocator range");
     let base_paddr = range.start;
 
-    let page_size_shift = super::vmm::page_size_shift();
+    let page_size_shift = vmm::page_size_shift();
     kprintln!(
         "Early page allocator:\n  Range: {:#x}\n  Size : {} ({} pages, {} each)\n",
         range,
@@ -59,7 +62,7 @@ pub fn init_early_page_allocator() {
 /// This function finds the last suitable range for the early page allocator, to
 /// avoid collisions with the metadata regions of the buddy page allocator.
 fn find_early_page_allocator_range(regions: &[MemoryRegion]) -> Option<PhysAddrRange> {
-    let page_size_shift = super::vmm::page_size_shift();
+    let page_size_shift = vmm::page_size_shift();
     let page_size = 1usize << page_size_shift;
     let total_size = EARLY_PAGE_ALLOCATOR_PAGES << page_size_shift;
 
@@ -173,7 +176,7 @@ impl EarlyPageAllocator {
     /// allocator is happening.
     pub unsafe fn destroy(&self) -> (Bitmap<EARLY_PAGE_ALLOCATOR_PAGES>, usize, PhysAddr) {
         // SAFETY: The caller promises it.
-        let original_value = mem::replace(
+        let original_value = core::mem::replace(
             unsafe { self.inner.get().as_mut_unchecked() },
             EarlyPageAllocatorInner::Destroyed,
         );
@@ -271,34 +274,57 @@ impl EarlyPageAllocator {
     }
 }
 
+fn early_vmalloc(
+    base: VirtAddr,
+    frame_count: usize,
+    guard_count: usize,
+) -> Option<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> {
+    let page_size = vmm::page_size();
+
+    debug_assert!(base.is_aligned(page_size));
+    debug_assert!(frame_count > 0);
+
+    let guard_start = base;
+    let real_start = guard_start + guard_count * page_size;
+    let real_end = real_start + frame_count * page_size;
+    let guard_end = real_end + guard_count * page_size;
+
+    let full_range = VirtAddrRange::new(guard_start, guard_end);
+    let alloc_range = VirtAddrRange::new(real_start, real_end);
+
+    let start_pa = EarlyPageAllocatorImpl::alloc_frames(frame_count)?;
+    let end_pa = start_pa + frame_count * page_size;
+    let pa_range = PhysAddrRange::new(start_pa, end_pa);
+
+    Some((full_range, alloc_range, pa_range))
+}
+
 static BSP_STACK: LazyInit<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> = LazyInit::new();
 
 pub const BSP_STACK_SIZE: usize = 16 * 1024;
 
 pub fn init_bsp_stack(base: VirtAddr) {
-    let page_size_shift = EarlyPageAllocatorImpl::page_size_shift();
-    let page_size = 1usize << page_size_shift;
+    let bsp_stack_pages = vmm::page_count_for_bytes(BSP_STACK_SIZE);
 
-    debug_assert!(base.is_aligned(page_size));
-
-    let frame_count = BSP_STACK_SIZE.div_ceil(page_size);
-
-    let guard_start = base;
-    let real_start = guard_start + page_size;
-    let real_end = real_start + frame_count * page_size;
-    let guard_end = real_end + page_size;
-
-    let full_range = VirtAddrRange::new(guard_start, guard_end);
-    let alloc_range = VirtAddrRange::new(real_start, real_end);
-
-    let start_pa =
-        EarlyPageAllocatorImpl::alloc_frames(frame_count).expect("failed to allocate kernel stack");
-    let end_pa = start_pa + frame_count * page_size;
-    let pa_range = PhysAddrRange::new(start_pa, end_pa);
-
-    BSP_STACK.init_once((full_range, alloc_range, pa_range));
+    BSP_STACK.init_once(
+        early_vmalloc(base, bsp_stack_pages, 1)
+            .expect("failed to allocate kernel stack for the BSP"),
+    );
 }
 
 pub fn bsp_stack() -> (VirtAddrRange, VirtAddrRange, PhysAddrRange) {
     *BSP_STACK
+}
+
+static BSP_PERCPU: LazyInit<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> = LazyInit::new();
+
+pub fn init_bsp_percpu(base: VirtAddr) {
+    let percpu_pages = vmm::page_count_for_bytes(percpu::section_size()).max(1);
+    BSP_PERCPU.init_once(
+        early_vmalloc(base, percpu_pages, 1).expect("failed to allocate percpu area for the BSP"),
+    );
+}
+
+pub fn bsp_percpu() -> (VirtAddrRange, VirtAddrRange, PhysAddrRange) {
+    *BSP_PERCPU
 }

@@ -37,6 +37,18 @@ SECTIONS {
     . = ALIGN(4K);
     _frodata = .;
 
+    /* PerCPU data sections */
+    .percpu : ALIGN(4K) {
+        _spercpu = .;
+        _percpu_start = .;
+        *(.percpu .percpu.*)
+        . = ALIGN(64);
+        _percpu_end = .;
+        _epercpu = .;
+        . = ALIGN(4K);
+        _fpercpu = .;
+    }
+
     /* Data sections */
     .data : ALIGN(4K) {
         _sdata = .;

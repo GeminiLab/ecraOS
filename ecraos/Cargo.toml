@@ -10,6 +10,7 @@ exarch = { path = "../exarch" }
 exboot = { path = "../exboot/exboot" }
 exbuddy = { path = "../exbuddy" }
 expalloc_trait = { path = "../expalloc_trait" }
+expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
 exslab = { path = "../exslab" }
 kspin = "0.2"

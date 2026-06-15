@@ -40,6 +40,13 @@ KERNEL_BIN="$KERNEL_STRIPPED" RUSTFLAGS="-C relocation-model=static -C link-arg=
 echo "Stripping ecraos-loader..." >&2
 rust-objcopy "$LOADER" --strip-all -O binary "$LOADER_STRIPPED"
 
+NORUN="${NORUN:-0}"
+
+if [ "$NORUN" = "1" ]; then
+  echo "Skipping run..." >&2
+  exit 0
+fi
+
 TIMEOUT_SEC="${TIMEOUT_SEC:-8}"
 QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 
