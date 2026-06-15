@@ -4,6 +4,7 @@ use exboot::PhysAddrRange;
 use expt::pte::MappingFlags;
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
+use log::info;
 use memory_addr::{MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange};
 use memory_range_set::{RangeSet, TryInsertError};
 
@@ -223,6 +224,7 @@ impl VMAllocator {
 pub static VMALLOC: LazyInit<SpinNoIrq<VMAllocator>> = LazyInit::new();
 
 pub(super) fn init_vmalloc(vmalloc_range: VirtAddrRange, page_size_shift: usize) {
+    info!("Initializing VMAllocator...");
     VMALLOC.init_once(SpinNoIrq::new(
         VMAllocator::new(vmalloc_range, page_size_shift).unwrap(),
     ));

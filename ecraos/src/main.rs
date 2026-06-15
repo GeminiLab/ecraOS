@@ -13,6 +13,7 @@
 /// available in the kernel.
 extern crate alloc;
 
+mod logging;
 mod mem;
 
 macro_rules! kprintln {
@@ -21,8 +22,8 @@ macro_rules! kprintln {
     };
 }
 
-use expt::pte::MappingFlags;
 pub(crate) use kprintln;
+use log::info;
 
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
@@ -77,6 +78,12 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
         hart_id
     );
 
+    // Initialize logging.
+    logging::init();
+
+    info!("Logger initialized");
+
+    // Finish memory initialization after enabling VMM.
     mem::init_after_enable_vmm();
 
     let rsp: usize;
@@ -94,17 +101,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
     kprintln!("\n\nHere we go!\n\n");
-
-    let mut vmalloc = mem::vmalloc::VMALLOC.lock();
-    let manual_range = vmalloc
-        .alloc_manual(1024)
-        .expect("failed to allocate manual range");
-    let alloc_range = vmalloc
-        .alloc_allocated(1024, 512, MappingFlags::READ | MappingFlags::WRITE)
-        .expect("failed to allocate allocated range");
-
-    kprintln!("manual_range: {:#x}", manual_range);
-    kprintln!("alloc_range: {:#x}", alloc_range);
 
     exarch::power::poweroff()
 }

@@ -5,6 +5,7 @@ use expalloc_trait::PageAllocator;
 use expt::opaque::{OpaquePageTable, OpaquePageTableType};
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
+use log::info;
 use memory_addr::{PhysAddr, VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
@@ -190,7 +191,9 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
     *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
 }
 
-pub(super) fn init_vmm_mapping_after<H: PageAllocator>(phys_mem_regions: &MemoryRegions) {
+pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &MemoryRegions) {
+    info!("Removing identical mappings...");
+
     // Fix function addresses in the opaque page table type first.
     let page_table_type = exarch::mem::get_page_table_type(VIRTUAL_ADDRESS_SPACE.layout.mode);
     *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();

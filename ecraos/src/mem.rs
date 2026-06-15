@@ -5,6 +5,7 @@
 
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
+use log::info;
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -79,18 +80,19 @@ pub fn init_and_enable_vmm(
 }
 
 pub fn init_after_enable_vmm() {
-    print_kernel_location("Kernel location after VMM setup:");
+    print_kernel_location("Kernel location:");
 
-    let page_size_shift = vmm::page_size_shift();
+    info!("Performing later memory initialization after enabling VMM...");
 
     // TODO: recycle the loader memory region (as well as the bootstack).
     alloc::init_allocators();
 
     // Remove identical mappings. We cannot do this before the allocator is initialized, because
     // this will destroy the early allocator effectively.
-    vmm::init_vmm_mapping_after::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
+    vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 
     // Initialize the VMAllocator, and add the bsp stack to it.
+    let page_size_shift = vmm::page_size_shift();
     vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
 
     let (stack_range, alloc_range, pa_range) = early::bsp_stack();

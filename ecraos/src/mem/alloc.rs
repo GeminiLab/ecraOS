@@ -42,6 +42,7 @@ use exslab::{
     slab::{PerCpuSlab, StaticSlabPool},
 };
 use kspin::SpinNoIrq;
+use log::{debug, info};
 use memory_addr::{PhysAddr, VirtAddr};
 use size_disp::SizeDisplay;
 
@@ -245,12 +246,17 @@ pub fn init_allocators() {
     let page_size = 1usize << page_size_shift;
     let vpo = mem::vmm::virt_phys_offset();
 
-    // Step 1: Destroy the early page allocator.
+    info!("Initializing page allocator...");
+
     let early_alloc_range = mem::early::phys_addr_range();
     let (early_alloc_bitmap, _, early_allocbase_paddr) = mem::early::destroy_early_page_allocator();
 
-    // Step 2: Iterate FREE regions from the final region table and add to buddy.
-    kprintln!("Initializing allocator, early page allocator destroyed:");
+    debug!(
+        "Early page allocator at {:x} destroyed, {} pages allocated",
+        early_alloc_range.start,
+        early_alloc_bitmap.len()
+    );
+
     let mut buddy = BUDDY.lock();
     // SAFETY: we believe that we have mapped the physical memory to the virtual
     // memory correctly.
@@ -276,7 +282,10 @@ pub fn init_allocators() {
             }
         }
 
-        kprintln!("  Allocator region: {:x} ({})", region.range, region.desc);
+        debug!(
+            "Adding region {:x} ({}) to buddy allocator",
+            region.range, region.desc
+        );
         // SAFETY: we trust exarch to provide a valid physical memory map for
         // the active architecture.
         unsafe { buddy.add_section(region.range) }
@@ -288,54 +297,21 @@ pub fn init_allocators() {
         "no usable memory region found for buddy allocator"
     );
 
-    // Step 3: Mark early allocator's in-use pages as allocated in the buddy.
-    for page_index_early_allocated in &early_alloc_bitmap {
+    debug!("Marking early allocator's in-use pages as allocated in the buddy");
+    for index in &early_alloc_bitmap {
         buddy
-            .alloc_blocks_at(
-                early_allocbase_paddr + (page_index_early_allocated * page_size),
-                1,
-            )
+            .alloc_blocks_at(early_allocbase_paddr + (index * page_size), 1)
             .expect("failed to mark early allocator page as in-use");
     }
-    let early_alloc_page_count = early_alloc_bitmap.len();
-    kprintln!(
-        "  Marked {} page allocated by the early allocator as in-use",
-        early_alloc_page_count,
-    );
-
-    // Step 4: Print the allocator stats.
-    kprintln!("  Initial buddy allocator stats:");
-    kprintln!(
-        "    Total pages    : {: <10}({})",
-        buddy.stats().total_pages(),
-        (buddy.stats().total_pages() << page_size_shift).size_display_wide()
-    );
-    kprintln!(
-        "    Metadata pages : {: <10}({})",
-        buddy.stats().meta_pages(),
-        (buddy.stats().meta_pages() << page_size_shift).size_display_wide()
-    );
-    kprintln!(
-        "    Heap pages     : {: <10}({})",
-        buddy.stats().heap_pages(),
-        (buddy.stats().heap_pages() << page_size_shift).size_display_wide()
-    );
-    kprintln!(
-        "      Used pages   : {: <10}({})",
-        buddy.stats().used_pages(),
-        (buddy.stats().used_pages() << page_size_shift).size_display_wide()
-    );
-    kprintln!(
-        "      Free pages   : {: <10}({})",
-        buddy.stats().free_pages(),
-        (buddy.stats().free_pages() << page_size_shift).size_display_wide()
-    );
-    kprintln!(
-        "    Unused pages   : {: <10}({})",
-        buddy.stats().unused_pages(),
-        (buddy.stats().unused_pages() << page_size_shift).size_display_wide()
-    );
     drop(buddy);
+
+    info!(
+        "Page allocator initialized, {} pages allocatable in total",
+        stats().heap_pages()
+    );
+    print_buddy_stats("Initial buddy allocator stats");
+
+    info!("Initializing slab allocator...");
 
     // Step 5: Create the slab pool (1 CPU, cpu_id = 0).
     let slab_pool = StaticSlabPool::new([PerCpuSlab::new(0, page_size)], || 0, page_size);
@@ -347,8 +323,6 @@ pub fn init_allocators() {
         core::ptr::addr_of_mut!(SLAB_POOL).write(Some(pool_ref));
         core::ptr::addr_of_mut!(VIRT_PHYS_OFFSET).write(vpo);
     }
-
-    kprintln!();
 
     INITIALIZED.store(true, Ordering::Release);
 }
@@ -408,4 +382,47 @@ pub fn is_allocated(addr: PhysAddr) -> exbuddy::BuddyResult<bool> {
 /// Returns usage statistics for the buddy allocator.
 pub fn stats() -> AllocatorStats {
     BUDDY.lock().stats()
+}
+
+pub fn print_buddy_stats(heading: &str) {
+    let stats = stats();
+    let page_size_shift = mem::vmm::page_size_shift();
+    let total = stats.total_pages();
+    let meta = stats.meta_pages();
+    let heap = stats.heap_pages();
+    let used = stats.used_pages();
+    let free = stats.free_pages();
+    let unused = stats.unused_pages();
+
+    kprintln!("{heading}:");
+    kprintln!(
+        "  Total pages      : {: <10}({})",
+        total,
+        (total << page_size_shift).size_display_wide()
+    );
+    kprintln!(
+        "    Metadata pages : {: <10}({})",
+        meta,
+        (meta << page_size_shift).size_display_wide()
+    );
+    kprintln!(
+        "    Heap pages     : {: <10}({})",
+        heap,
+        (heap << page_size_shift).size_display_wide()
+    );
+    kprintln!(
+        "      Used pages   : {: <10}({})",
+        used,
+        (used << page_size_shift).size_display_wide()
+    );
+    kprintln!(
+        "      Free pages   : {: <10}({})",
+        free,
+        (free << page_size_shift).size_display_wide()
+    );
+    kprintln!(
+        "    Unused pages   : {: <10}({})",
+        unused,
+        (unused << page_size_shift).size_display_wide()
+    );
 }
