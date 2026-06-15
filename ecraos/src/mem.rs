@@ -102,7 +102,14 @@ pub fn init_after_enable_vmm() {
     // this will destroy the early allocator effectively.
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 
-    // Initialize the VMAllocator, and add the bsp stack to it.
+    // Initialize the BSP per-CPU area.
+    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
+    unsafe { expercpu::init(percpu_alloc_range.start) };
+
+    // The initialization of the memory allocators (slab) should be moved here.
+    // alloc::init_malloc();
+
+    // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
     vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
 
@@ -112,16 +119,11 @@ pub fn init_after_enable_vmm() {
         .add_allocated_range(stack_range, alloc_range, pa_range)
         .expect("failed to add bsp stack to vmalloc");
 
-    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
     vmalloc::VMALLOC
         .lock()
         .add_allocated_range(percpu_range, percpu_alloc_range, percpu_pa_range)
         .expect("failed to add bsp percpu area to vmalloc");
 
-    // SAFETY: The BSP per-CPU area is mapped writable in the active page table,
-    // sized from the linked per-CPU section, and used by this CPU before other
-    // CPUs exist.
-    unsafe { expercpu::init(percpu_alloc_range.start) };
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.
