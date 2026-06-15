@@ -1,13 +1,15 @@
 pub mod debug_console;
 pub mod imp;
+pub mod device;
 pub mod init;
 pub mod mem;
 pub mod power;
 pub mod reloc_hook;
 pub mod time;
 
-/// Runs platform-local early initialization (currently COM1) before portable `InitIf` work.
+/// Runs platform-local early initialization work.
 pub fn init_early() {
+    // Initialize the debug console.
     debug_console::init();
     crate::dbcn_println!("\n\n");
 

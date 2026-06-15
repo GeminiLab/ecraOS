@@ -284,9 +284,13 @@ pub trait MemIf {
     /// The returned memory regions should not contain the
     /// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
     /// kernel itself.
+    ///
+    /// When this function is called, allocation is not available.
     fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
 
     /// Gets the supported and current virtual address space modes.
+    ///
+    /// When this function is called, allocation is not available.
     fn virt_addr_space_modes() -> VirtAddrSpaceModes;
 
     /// Sets the current virtual address space mode.
@@ -294,6 +298,8 @@ pub trait MemIf {
     /// It's guaranteed that this function will only be called when an identical mapping is
     /// currently active. It's also required that when this function returns, a valid identical
     /// mapping is active.
+    ///
+    /// When this function is called, allocation is not available.
     ///
     /// # Panics
     ///
@@ -303,6 +309,8 @@ pub trait MemIf {
     fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
 
     /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
+    ///
+    /// When this function is called, allocation is not available.
     ///
     /// # Panics
     ///

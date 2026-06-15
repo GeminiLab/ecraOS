@@ -17,6 +17,7 @@ extern crate alloc;
 use log::{error, info};
 
 mod logging;
+mod device;
 mod mem;
 mod percpu;
 

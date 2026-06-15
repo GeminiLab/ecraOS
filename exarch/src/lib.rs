@@ -3,8 +3,11 @@
 #![no_std]
 #![feature(linkage)]
 
+extern crate alloc;
+
 mod arch;
 pub mod debug_console;
+pub mod device;
 pub mod init;
 pub mod mem;
 pub mod power;

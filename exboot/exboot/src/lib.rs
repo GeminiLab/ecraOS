@@ -12,6 +12,8 @@ pub const BOOTSTACK_SIZE: usize = 16 * 1024;
 pub enum PlatformBootArg {
     /// The Multiboot information structure.
     Multiboot(PhysAddr),
+    /// The Device Tree.
+    DeviceTree(PhysAddr),
     /// No argument provided.
     None,
 }
