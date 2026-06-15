@@ -191,7 +191,22 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let early_slot = if cfg!(feature = "early-slot") {
+        let early_slot_name = &format_ident!("__PERCPU_EARLY_SLOT_{}", name);
+        let type_size = quote! { ::core::mem::size_of::<#ty>() };
+
+        quote! {
+            #[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".pes"))] // unimplemented on macos
+            #[used]
+            static #early_slot_name: [u8; #type_size] = [0u8; #type_size];
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
+        #early_slot
+
         #[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".percpu"))] // unimplemented on macos
         #(#attrs)*
         static mut #inner_symbol_name: #ty = #init_expr;

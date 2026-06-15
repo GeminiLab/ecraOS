@@ -8,12 +8,10 @@ extern crate expercpu_macros;
 
 use core::alloc::Layout;
 
-use memory_addr::VirtAddr;
-
-pub use expercpu_macros::def_percpu;
-
 #[cfg(feature = "remote-access")]
 use crate_interface::def_interface;
+pub use expercpu_macros::def_percpu;
+use memory_addr::VirtAddr;
 
 const SIZE_64BIT: usize = 64;
 const PERCPU_AREA_ALIGN: usize = SIZE_64BIT;
@@ -21,6 +19,10 @@ const PERCPU_AREA_ALIGN: usize = SIZE_64BIT;
 unsafe extern "C" {
     static _percpu_start: u8;
     static _percpu_end: u8;
+    #[cfg(feature = "early-slot")]
+    static _percpu_early_slot_start: u8;
+    #[cfg(feature = "early-slot")]
+    static _percpu_early_slot_end: u8;
 }
 
 #[doc(hidden)]
@@ -80,12 +82,52 @@ fn validate_percpu_base(base: VirtAddr) {
 /// - setting the current CPU's per-CPU register to this base is valid for the
 ///   current execution context.
 pub unsafe fn init(base: VirtAddr) {
+    let percpu_start = VirtAddr::from_usize(expercpu_macros::percpu_symbol_vma!(_percpu_start));
+    unsafe {
+        init_from(base, percpu_start);
+    }
+}
+
+/// Initializes the current CPU's per-CPU data area using the early slot.
+///
+/// # Safety
+///
+/// The caller must ensure that the early slot is included in the binary, and is not used by other
+/// cores.
+#[cfg(feature = "early-slot")]
+pub unsafe fn init_in_early_slot() {
+    let early_slot_start = expercpu_macros::percpu_symbol_vma!(_percpu_early_slot_start);
+    let early_slot_end = expercpu_macros::percpu_symbol_vma!(_percpu_early_slot_end);
+
+    debug_assert!(
+        early_slot_end - early_slot_start >= percpu_area_size(),
+        "early slot is too small"
+    );
+
+    unsafe {
+        init(VirtAddr::from_usize(early_slot_start));
+    }
+}
+
+/// Initializes the current CPU's per-CPU data area, copying from the early slot.
+///
+/// # Safety
+///
+/// See the safety requirements of [`init`] for more details.
+#[cfg(feature = "early-slot")]
+pub unsafe fn init_from_early_slot(base: VirtAddr) {
+    let early_slot_start = VirtAddr::from_usize(expercpu_macros::percpu_symbol_vma!(
+        _percpu_early_slot_start
+    ));
+    unsafe { init_from(base, early_slot_start) };
+}
+
+unsafe fn init_from(base: VirtAddr, from: VirtAddr) {
     validate_percpu_base(base);
     let size = percpu_area_size();
 
     unsafe {
-        let percpu_start = expercpu_macros::percpu_symbol_vma!(_percpu_start) as *const u8;
-        core::ptr::copy_nonoverlapping(percpu_start, base.as_mut_ptr(), size);
+        core::ptr::copy_nonoverlapping(from.as_mut_ptr(), base.as_mut_ptr(), size);
         write_percpu_reg(base);
     }
 }

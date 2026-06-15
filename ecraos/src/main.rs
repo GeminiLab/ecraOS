@@ -47,12 +47,20 @@ const HLINE: &str = "-----------------------------------------------------------
 /// This function should never be called directly.
 #[exboot::kernel_entry]
 pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
+    // Relocate the kernel image.
     unsafe { mem::reloc::relocate_me() };
+
+    // Clear the BSS.
     mem::clear_bss();
+
+    // Initialize the per-CPU data area using the early slot. It maybe used while initializing
+    // interrupts and timers.
+    mem::percpu::init_early();
 
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
 
+    // TODO: add irq/timer initialization.
     exarch::init::init_early(arg_ref.plat_arg);
 
     kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
@@ -61,6 +69,9 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         hart_id,
         arg_ref
     );
+
+    kprintln!("FOO: {:}", mem::percpu::FOO.read_current());
+    mem::percpu::FOO.write_current(12345);
 
     mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }

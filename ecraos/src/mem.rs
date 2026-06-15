@@ -96,16 +96,16 @@ pub fn init_after_enable_vmm() {
 
     info!("Performing later memory initialization after enabling VMM...");
 
+    // Initialize the per-CPU data area for the BSP.
+    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
+    percpu::init_bsp(percpu_alloc_range.start);
+
     // Initialize the page allocator.
     // TODO: recycle the loader memory region (as well as the bootstack).
     palloc::init_palloc();
 
     // Remove identical mappings.
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
-
-    // Initialize the percpu data.
-    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
-    unsafe { expercpu::init(percpu_alloc_range.start) };
 
     // Initialize the small object allocator.
     malloc::init_malloc();
@@ -114,10 +114,10 @@ pub fn init_after_enable_vmm() {
     let page_size_shift = vmm::page_size_shift();
     vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
 
-    let (stack_range, alloc_range, pa_range) = early::bsp_stack();
+    let (stack_range, stack_alloc_range, stack_pa_range) = early::bsp_stack();
     vmalloc::VMALLOC
         .lock()
-        .add_allocated_range(stack_range, alloc_range, pa_range)
+        .add_allocated_range(stack_range, stack_alloc_range, stack_pa_range)
         .expect("failed to add bsp stack to vmalloc");
 
     vmalloc::VMALLOC

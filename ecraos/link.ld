@@ -42,11 +42,21 @@ SECTIONS {
         _spercpu = .;
         _percpu_start = .;
         *(.percpu .percpu.*)
-        . = ALIGN(64);
         _percpu_end = .;
         _epercpu = .;
         . = ALIGN(4K);
         _fpercpu = .;
+    }
+
+    /* PerCPU early slot sections */
+    .pes : ALIGN(4K) {
+        _spes = .;
+        _percpu_early_slot_start = .;
+        *(.pes .pes.*)
+        _percpu_early_slot_end = .;
+        _epes = .;
+        . = ALIGN(4K);
+        _fpes = .;
     }
 
     /* Data sections */
