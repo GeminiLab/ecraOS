@@ -115,7 +115,8 @@ impl VMAllocator {
         let mut phys_pages = Vec::with_capacity(page_count);
         for index in 0..page_count {
             let virt_addr = allocated_range.start + (index << self.page_size_shift);
-            let phys_addr = mem::alloc::alloc_frame().map_err(|_| VMAllocError::AllocationError)?;
+            let phys_addr =
+                mem::palloc::alloc_frame().map_err(|_| VMAllocError::AllocationError)?;
 
             phys_pages.push(phys_addr);
             mem::vmm::with_page_table(|pt| {

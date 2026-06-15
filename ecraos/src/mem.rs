@@ -10,8 +10,9 @@ use size_disp::SizeDisplay;
 
 use crate::kprintln;
 
-pub mod alloc;
 mod early;
+pub mod malloc;
+pub mod palloc;
 pub mod percpu;
 pub mod pmm;
 pub mod reloc;
@@ -95,19 +96,19 @@ pub fn init_after_enable_vmm() {
 
     info!("Performing later memory initialization after enabling VMM...");
 
+    // Initialize the page allocator.
     // TODO: recycle the loader memory region (as well as the bootstack).
-    alloc::init_allocators();
+    palloc::init_palloc();
 
-    // Remove identical mappings. We cannot do this before the allocator is initialized, because
-    // this will destroy the early allocator effectively.
+    // Remove identical mappings.
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 
-    // Initialize the BSP per-CPU area.
+    // Initialize the percpu data.
     let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
     unsafe { expercpu::init(percpu_alloc_range.start) };
 
-    // The initialization of the memory allocators (slab) should be moved here.
-    // alloc::init_malloc();
+    // Initialize the small object allocator.
+    malloc::init_malloc();
 
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
@@ -124,6 +125,7 @@ pub fn init_after_enable_vmm() {
         .add_allocated_range(percpu_range, percpu_alloc_range, percpu_pa_range)
         .expect("failed to add bsp percpu area to vmalloc");
 
+    info!("Later memory initialization completed");
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

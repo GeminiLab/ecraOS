@@ -230,19 +230,19 @@ impl PageAllocator for TmpGoodPagingHandler {
     }
 
     fn alloc_frame() -> Option<PhysAddr> {
-        mem::alloc::alloc_frame().ok()
+        mem::palloc::alloc_frame().ok()
     }
 
     fn alloc_frames(page_count: usize) -> Option<PhysAddr> {
-        mem::alloc::alloc_frames(page_count, 1 << page_size_shift()).ok()
+        mem::palloc::alloc_frames(page_count, 1 << page_size_shift()).ok()
     }
 
     fn dealloc_frame(addr: PhysAddr) {
-        mem::alloc::dealloc_frame(addr).unwrap();
+        mem::palloc::dealloc_frame(addr).unwrap();
     }
 
     fn dealloc_frames(addr: PhysAddr, page_count: usize) {
-        mem::alloc::dealloc_frames(addr, page_count).unwrap();
+        mem::palloc::dealloc_frames(addr, page_count).unwrap();
     }
 
     fn phys_to_virt(addr: exboot::PhysAddr) -> VirtAddr {
