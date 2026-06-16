@@ -13,6 +13,9 @@ pub static FOO: usize = 21867;
 #[def_percpu]
 pub static BAR: (usize, usize) = (123, 456);
 
+#[def_percpu]
+pub static CPU_ID: usize = 0;
+
 /// Initializes the per-CPU data area using the early slot.
 pub fn init_early() {
     unsafe { expercpu::init_in_early_slot() };

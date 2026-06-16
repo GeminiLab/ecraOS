@@ -48,17 +48,6 @@ SECTIONS {
         _fpercpu = .;
     }
 
-    /* PerCPU early slot sections */
-    .pes : ALIGN(4K) {
-        _spes = .;
-        _percpu_early_slot_start = .;
-        *(.pes .pes.*)
-        _percpu_early_slot_end = .;
-        _epes = .;
-        . = ALIGN(4K);
-        _fpes = .;
-    }
-
     /* Data sections */
     .data : ALIGN(4K) {
         _sdata = .;
@@ -88,6 +77,12 @@ SECTIONS {
     /* BSS sections */
     .bss : ALIGN(4K) {
         _sbss = .;
+
+        /* PerCPU early slot sections */
+        _percpu_early_slot_start = .;
+        *(.pes .pes.*)
+        _percpu_early_slot_end = .;
+
         *(.bss .bss.*)
         _ebss = .;
         . = ALIGN(4K);

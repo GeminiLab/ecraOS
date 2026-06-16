@@ -26,6 +26,8 @@ macro_rules! kprintln {
 
 pub(crate) use kprintln;
 
+use crate::mem::percpu;
+
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 /// Attribution line printed at startup.
@@ -72,6 +74,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 
     kprintln!("FOO: {:}", mem::percpu::FOO.read_current());
     mem::percpu::FOO.write_current(12345);
+    percpu::CPU_ID.write_current(hart_id);
 
     mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
