@@ -9,6 +9,7 @@ use raw_cpuid::CpuId;
 use x86_64::registers::control::{Cr4, Cr4Flags};
 
 use crate::{
+    arch::x86_64::imp::gdt::GdtStruct,
     init::PlatformBootArg,
     mem::{
         DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS, MemIf,
@@ -111,7 +112,13 @@ where
     }
 }
 
-core::arch::global_asm!(include_str!("mem.S"), options(att_syntax));
+core::arch::global_asm!(
+    include_str!("mem.S"),
+    options(att_syntax),
+    code32_selector = const GdtStruct::KCODE32_SELECTOR.0,
+    code64_selector = const GdtStruct::KCODE64_SELECTOR.0,
+    data_selector = const GdtStruct::KDATA_SELECTOR.0,
+);
 
 /// The implementation of the [`MemIf`] trait.
 struct MemImpl;

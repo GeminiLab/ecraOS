@@ -16,7 +16,9 @@ pub enum VMAllocRange {
     Manual,
     /// A range whose mapping is allocated by the [`VMAllocator`].
     Allocated {
+        #[expect(unused)]
         allocated_range: VirtAddrRange,
+        #[expect(unused)]
         pages: Box<[PhysAddr]>,
     },
 }
@@ -73,6 +75,7 @@ impl VMAllocator {
         })
     }
 
+    #[expect(unused)]
     pub fn alloc_manual(&mut self, page_count: usize) -> Result<VirtAddrRange, VMAllocError> {
         let size = page_count << self.page_size_shift;
         let range = self
@@ -91,6 +94,7 @@ impl VMAllocator {
         Ok(range)
     }
 
+    #[expect(unused)]
     pub fn alloc_allocated(
         &mut self,
         page_count: usize,
@@ -145,6 +149,7 @@ impl VMAllocator {
         Ok(allocated_range)
     }
 
+    #[expect(unused)]
     pub fn add_manual(&mut self, range: VirtAddrRange) -> Result<(), VMAllocError> {
         Self::validate_range(range, self.page_size())?;
         self.ranges.try_insert(range, VMAllocRange::Manual)?;

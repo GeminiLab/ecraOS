@@ -116,10 +116,16 @@ pub unsafe fn init_in_early_slot() {
 /// See the safety requirements of [`init`] for more details.
 #[cfg(feature = "early-slot")]
 pub unsafe fn init_from_early_slot(base: VirtAddr) {
-    let early_slot_start = VirtAddr::from_usize(expercpu_macros::percpu_symbol_vma!(
+    unsafe { init_from(base, early_slot_start()) };
+}
+
+/// Returns the start address of the early slot.
+#[cfg(feature = "early-slot")]
+#[inline]
+pub fn early_slot_start() -> VirtAddr {
+    VirtAddr::from_usize(expercpu_macros::percpu_symbol_vma!(
         _percpu_early_slot_start
-    ));
-    unsafe { init_from(base, early_slot_start) };
+    ))
 }
 
 unsafe fn init_from(base: VirtAddr, from: VirtAddr) {
@@ -127,7 +133,7 @@ unsafe fn init_from(base: VirtAddr, from: VirtAddr) {
     let size = percpu_area_size();
 
     unsafe {
-        core::ptr::copy_nonoverlapping(from.as_mut_ptr(), base.as_mut_ptr(), size);
+        core::ptr::copy(from.as_mut_ptr(), base.as_mut_ptr(), size);
         write_percpu_reg(base);
     }
 }

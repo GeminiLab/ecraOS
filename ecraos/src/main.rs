@@ -6,6 +6,7 @@
 
 #![no_std]
 #![no_main]
+#![deny(unfulfilled_lint_expectations)]
 
 /// The Rust standard allocator interface.
 ///
@@ -13,10 +14,11 @@
 /// available in the kernel.
 extern crate alloc;
 
-use log::info;
+use log::{error, info};
 
 mod logging;
 mod mem;
+mod percpu;
 
 macro_rules! kprintln {
     ($($arg:tt)*) => {
@@ -25,8 +27,6 @@ macro_rules! kprintln {
 }
 
 pub(crate) use kprintln;
-
-use crate::mem::percpu;
 
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
@@ -57,7 +57,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 
     // Initialize the per-CPU data area using the early slot. It maybe used while initializing
     // interrupts and timers.
-    mem::percpu::init_early();
+    percpu::init_early();
 
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
@@ -72,8 +72,6 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         arg_ref
     );
 
-    kprintln!("FOO: {:}", mem::percpu::FOO.read_current());
-    mem::percpu::FOO.write_current(12345);
     percpu::CPU_ID.write_current(hart_id);
 
     mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
@@ -87,6 +85,12 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 /// [`mem::init_vmm`], and should never be called directly.
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
+
+    // Re-initialize the per-CPU data area pointer after relocation.
+    percpu::init_bsp_after_reloc();
+
+    // Call the relocation hook.
+    exarch::reloc_hook::after_reloc();
 
     kprintln!(
         "{HLINE}\necraOS now in VMM world...\n{HLINE}\nVMM enabled on hart_id: {:#x}\n",
@@ -115,27 +119,31 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
     }
 
     kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
-    kprintln!("\n\nHere we go!\n\n");
 
-    use mem::percpu::{BAR, FOO};
+    // Is IDT correct now?
+    unsafe { core::arch::asm!("int3", options(att_syntax)) }
 
-    info!("PerCPU smoke test started");
-
-    info!("FOO offset: {:#x}", FOO.offset());
-    info!("FOO ptr: {:#p}", unsafe { FOO.current_ptr() });
-    info!("FOO value: {:#}", FOO.read_current());
-    FOO.write_current(2347828437);
-    info!("FOO value: {:#}", FOO.read_current());
-
-    info!("BAR offset: {:#x}", BAR.offset());
-    info!("BAR ptr: {:#p}", unsafe { BAR.current_ptr() });
-    info!("BAR value: {:?}", unsafe { *BAR.current_ptr() });
+    // Is GDT correct now?
     unsafe {
-        *BAR.current_ref_mut_raw() = (2347828437, 2347828437);
-    }
-    info!("BAR value: {:?}", unsafe { *BAR.current_ptr() });
+        let cs: usize;
+        let rip: usize;
 
-    info!("PerCPU smoke test completed");
+        core::arch::asm!(
+            "mov %cs, {0}",
+            "pushq {0}",
+            "leaq 2f(%rip), {1}",
+            "pushq {1}",
+            "lretq",
+            "2:",
+            out(reg) cs,
+            out(reg) rip,
+            options(att_syntax),
+        );
+
+        kprintln!("cs: {:#x}, rip: {:#x}", cs, rip);
+    }
+
+    kprintln!("\n\nHere we go!\n\n");
 
     exarch::power::poweroff()
 }
@@ -143,6 +151,11 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    kprintln!("Kernel panic: {}", info);
+    if logging::is_inited() {
+        error!("Kernel panic: {}", info);
+    } else {
+        kprintln!("Kernel panic: {}", info);
+    }
+
     exarch::power::poweroff()
 }

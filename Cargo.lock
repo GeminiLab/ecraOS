@@ -109,13 +109,18 @@ dependencies = [
  "bitflags 2.11.1",
  "crate_interface",
  "exboot",
+ "expercpu",
  "expt",
  "heapless",
  "kspin",
+ "lazyinit",
+ "log",
  "memory_addr",
  "multiboot",
+ "page_table_entry",
  "raw-cpuid 11.6.0",
  "uart_16550",
+ "x86",
  "x86_64",
 ]
 

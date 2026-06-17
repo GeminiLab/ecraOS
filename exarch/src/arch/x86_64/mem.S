@@ -2,13 +2,8 @@
 .code64
 .global switch_page_level
 switch_page_level:
-    # Fill the GDT base in the GDT descriptor
-    leaq    exarch_mem_gdt(%rip), %rax
-    leaq    exarch_mem_gdt_desc(%rip), %rdx
-    movl    %eax, 2(%rdx)
-
-    # Load our GDT
-    lgdtq   (%rdx)
+    # Save callee-saved register %rbx
+    pushq   %rbx
 
     # Fill the blank in the page tables
     leaq    exarch_pt_pdpt(%rip), %rax
@@ -39,7 +34,7 @@ switch_page_level:
     leaq    switch_page_level64(%rip), %rsi
 
     # Exit long mode and jump to switch_page_level32
-    pushq   $0x08
+    pushq   ${code32_selector}
     leaq    switch_page_level32(%rip), %rax
     pushq   %rax
     lretq
@@ -47,7 +42,7 @@ switch_page_level:
 .code32
 switch_page_level32:
     # Initialize data segments
-    movw    $0x18, %ax
+    movw    ${data_selector}, %ax
     movw    %ax, %ds
     movw    %ax, %es
     movw    %ax, %fs
@@ -89,7 +84,7 @@ switch_page_level32:
     wrmsr
 
     # Return to 64-bit mode
-    pushl   $0x10
+    pushl   ${code64_selector}
     pushl   %esi
     lretl
 
@@ -103,27 +98,14 @@ switch_page_level64:
     movw    %ax, %gs
     movw    %ax, %ss
 
+    # Restore callee-saved register %rbx
+    popq    %rbx
+
     # Return to the caller
     retq
 
-# The GDT
-.section .rodata
-.balign 8
-exarch_mem_gdt_desc:
-    .word   exarch_mem_gdt_end - exarch_mem_gdt - 1     # GDT limit
-    # .long   exarch_mem_gdt                            # GDT base
-    .long   0
-
-.balign 16
-exarch_mem_gdt:
-    .quad 0x0000000000000000    # 0x00: null
-    .quad 0x00cf9b000000ffff    # 0x08: code segment (base=0, limit=0xfffff, type=32bit code exec/read, DPL=0, 4k)
-    .quad 0x00af9b000000ffff    # 0x10: code segment (base=0, limit=0xfffff, type=64bit code exec/read, DPL=0, 4k)
-    .quad 0x00cf93000000ffff    # 0x18: data segment (base=0, limit=0xfffff, type=32bit data read/write, DPL=0, 4k)
-exarch_mem_gdt_end:
-
 # The identical page tables
-.section .rodata
+.section .data
 .balign 4096
 exarch_pt_pml5:
     # 0x0000_0000 ~ 0xffff_ffff_ffff (256 TiB)

@@ -1,6 +1,10 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use log::{Level, Log};
 
 use crate::{kprintln, logging::colors::ColorForLevel};
+
+static INITED: AtomicBool = AtomicBool::new(false);
 
 #[allow(dead_code)]
 mod colors {
@@ -113,4 +117,10 @@ impl Log for Logger {
 pub fn init() {
     log::set_logger(&Logger).unwrap();
     log::set_max_level(log::LevelFilter::Trace);
+
+    INITED.store(true, Ordering::Release);
+}
+
+pub fn is_inited() -> bool {
+    INITED.load(Ordering::Acquire)
 }

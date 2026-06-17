@@ -5,15 +5,20 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.11"
-crate_interface = "0.3"
+crate_interface = { version = "0.3", features = ["weak_default"] }
 exboot = { path = "../exboot/exboot" }
+expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
+kspin.workspace = true
+lazyinit.workspace = true
+log.workspace = true
 memory_addr.workspace = true
+page_table_entry = "0.6.1"
 heapless = "0.9"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-kspin = "0.2"
 multiboot = "0.8"
 raw-cpuid = "11.6"
 uart_16550 = "0.4"  # later versions cannot be used because of the lack of const constructors
+x86 = "0.52"
 x86_64 = "0.15.4"

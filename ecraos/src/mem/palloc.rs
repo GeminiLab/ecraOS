@@ -89,7 +89,8 @@ pub fn alloc_frames(count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr
     BUDDY.lock().alloc_frames(count, align.max(page_size))
 }
 
-pub fn alloc_frames_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
+#[expect(unused)]
+pub fn alloc_blocks_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
     BUDDY.lock().alloc_blocks_at(paddr, count)?;
     Ok(paddr)
 }
@@ -102,10 +103,12 @@ pub fn dealloc_frame(addr: PhysAddr) -> exbuddy::BuddyResult {
     BUDDY.lock().dealloc_frame(addr)
 }
 
+#[expect(unused)]
 pub fn dealloc_blocks_at(addr: PhysAddr, count: usize) -> exbuddy::BuddyResult {
     BUDDY.lock().dealloc_blocks_at(addr, count)
 }
 
+#[expect(unused)]
 pub fn is_allocated(addr: PhysAddr) -> exbuddy::BuddyResult<bool> {
     BUDDY.lock().is_allocated(addr)
 }

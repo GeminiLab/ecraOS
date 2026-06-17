@@ -11,7 +11,7 @@ use size_disp::SizeDisplay;
 
 use crate::{
     kprintln,
-    mem::{percpu, pmm, vmm},
+    mem::{pmm, vmm},
 };
 
 /// Early page allocator implementation used before the virtual address space is ready.
@@ -274,11 +274,21 @@ impl EarlyPageAllocator {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EarlyVMAllocResult {
+    /// The full range of the virtual address space.
+    pub full_range: VirtAddrRange,
+    /// The range of the virtual address space that is allocated.
+    pub alloc_range: VirtAddrRange,
+    /// The range of the physical address space that is allocated.
+    pub pa_range: PhysAddrRange,
+}
+
 fn early_vmalloc(
     base: VirtAddr,
     frame_count: usize,
     guard_count: usize,
-) -> Option<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> {
+) -> Option<EarlyVMAllocResult> {
     let page_size = vmm::page_size();
 
     debug_assert!(base.is_aligned(page_size));
@@ -296,10 +306,14 @@ fn early_vmalloc(
     let end_pa = start_pa + frame_count * page_size;
     let pa_range = PhysAddrRange::new(start_pa, end_pa);
 
-    Some((full_range, alloc_range, pa_range))
+    Some(EarlyVMAllocResult {
+        full_range,
+        alloc_range,
+        pa_range,
+    })
 }
 
-static BSP_STACK: LazyInit<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> = LazyInit::new();
+static BSP_STACK: LazyInit<EarlyVMAllocResult> = LazyInit::new();
 
 pub const BSP_STACK_SIZE: usize = 16 * 1024;
 
@@ -312,19 +326,6 @@ pub fn init_bsp_stack(base: VirtAddr) {
     );
 }
 
-pub fn bsp_stack() -> (VirtAddrRange, VirtAddrRange, PhysAddrRange) {
+pub fn bsp_stack() -> EarlyVMAllocResult {
     *BSP_STACK
-}
-
-static BSP_PERCPU: LazyInit<(VirtAddrRange, VirtAddrRange, PhysAddrRange)> = LazyInit::new();
-
-pub fn init_bsp_percpu(base: VirtAddr) {
-    let percpu_pages = vmm::page_count_for_bytes(percpu::section_size()).max(1);
-    BSP_PERCPU.init_once(
-        early_vmalloc(base, percpu_pages, 1).expect("failed to allocate percpu area for the BSP"),
-    );
-}
-
-pub fn bsp_percpu() -> (VirtAddrRange, VirtAddrRange, PhysAddrRange) {
-    *BSP_PERCPU
 }

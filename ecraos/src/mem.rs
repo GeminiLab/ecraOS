@@ -13,7 +13,6 @@ use crate::kprintln;
 mod early;
 pub mod malloc;
 pub mod palloc;
-pub mod percpu;
 pub mod pmm;
 pub mod reloc;
 pub mod sections;
@@ -55,24 +54,13 @@ pub fn init_and_enable_vmm(
 
     // Allocate the BSP stack and percpu area.
     early::init_bsp_stack(vmm::vmalloc_base());
-    let (bsp_range_with_guards, bsp_range, bsp_pa_range) = early::bsp_stack();
-
-    early::init_bsp_percpu(bsp_range_with_guards.end);
-    let (_, percpu_range, percpu_pa_range) = early::bsp_percpu();
+    let bsp_stack = early::bsp_stack();
 
     vmm::with_page_table(|pt| {
         pt.map::<early::EarlyPageAllocatorImpl>(
-            bsp_range.start,
-            bsp_pa_range.start,
-            bsp_range.size(),
-            MappingFlags::READ | MappingFlags::WRITE,
-        )
-        .unwrap();
-
-        pt.map::<early::EarlyPageAllocatorImpl>(
-            percpu_range.start,
-            percpu_pa_range.start,
-            percpu_range.size(),
+            bsp_stack.alloc_range.start,
+            bsp_stack.pa_range.start,
+            bsp_stack.alloc_range.size(),
             MappingFlags::READ | MappingFlags::WRITE,
         )
         .unwrap();
@@ -81,9 +69,12 @@ pub fn init_and_enable_vmm(
     // Load the early page table.
     exarch::mem::set_page_table_root(vmm::with_page_table(|pt| pt.root_paddr()));
 
+    // Call the relocation hook.
+    exarch::reloc_hook::before_reloc();
+
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
-        let new_stack_top = bsp_range.end.as_usize();
+        let new_stack_top = bsp_stack.alloc_range.end.as_usize();
         let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
         let arg = arg.byte_add(virt_phys_offset);
 
@@ -95,10 +86,6 @@ pub fn init_after_enable_vmm() {
     print_kernel_location("Kernel location:");
 
     info!("Performing later memory initialization after enabling VMM...");
-
-    // Initialize the per-CPU data area for the BSP.
-    let (percpu_range, percpu_alloc_range, percpu_pa_range) = early::bsp_percpu();
-    percpu::init_bsp(percpu_alloc_range.start);
 
     // Initialize the page allocator.
     // TODO: recycle the loader memory region (as well as the bootstack).
@@ -114,16 +101,15 @@ pub fn init_after_enable_vmm() {
     let page_size_shift = vmm::page_size_shift();
     vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
 
-    let (stack_range, stack_alloc_range, stack_pa_range) = early::bsp_stack();
+    let early_bsp_stack = early::bsp_stack();
     vmalloc::VMALLOC
         .lock()
-        .add_allocated_range(stack_range, stack_alloc_range, stack_pa_range)
+        .add_allocated_range(
+            early_bsp_stack.full_range,
+            early_bsp_stack.alloc_range,
+            early_bsp_stack.pa_range,
+        )
         .expect("failed to add bsp stack to vmalloc");
-
-    vmalloc::VMALLOC
-        .lock()
-        .add_allocated_range(percpu_range, percpu_alloc_range, percpu_pa_range)
-        .expect("failed to add bsp percpu area to vmalloc");
 
     info!("Later memory initialization completed");
 }

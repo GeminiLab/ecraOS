@@ -19,10 +19,14 @@ pub trait InitIf {
     ///   the x86-64 architecture).
     /// - Virtual memory and paging are enabled with an identity mapping.
     /// - Allocation is not yet available.
+    /// - PerCPU data area for the BSP is available.
     /// - Interrupts are disabled.
     ///
     /// This method should:
     /// - Initialize the debug console.
+    /// - Initialize the interrupt controller and interrupt handling, while keeping interrupts
+    ///   disabled.
+    /// - Initialize the timer.
     /// - Prepare for calling other initialization functions.
     fn init_early(arg: PlatformBootArg);
     /// Later platform initialization. Yet to be implemented.
