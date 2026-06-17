@@ -24,16 +24,16 @@ pub struct IdtStruct {
 unsafe impl Sync for IdtStruct {}
 
 impl IdtStruct {
-    /// Constructs a new IDT struct that filled with entries from
-    /// `trap_handler_table`.
+    /// Constructs a new IDT struct with no entries set.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let idt = Self {
             table: UnsafeCell::new(InterruptDescriptorTable::new()),
         };
 
-        // SAFETY: We are creating `idt` as a local variable, so it is not shared between threads.
-        unsafe { idt.fill_handlers() };
+        // We should not fill the IDT with the current virtual address of the trap handlers here,
+        // because the local variable `idt` may be **NOT** properly aligned for some mysterious
+        // reason, which has been observed in practice.
 
         idt
     }
@@ -51,10 +51,10 @@ impl IdtStruct {
             static OFFSETS: [usize; NUM_INT];
             fn _trap_handlers();
         }
-
         // SAFETY: The caller promises it.
         let entries = unsafe {
-            core::slice::from_raw_parts_mut(self.table.get() as *mut Entry<HandlerFunc>, NUM_INT)
+            let ptr = self.table.get() as *mut Entry<HandlerFunc>;
+            core::slice::from_raw_parts_mut(ptr, NUM_INT)
         };
 
         for i in 0..NUM_INT {
@@ -104,7 +104,11 @@ impl fmt::Debug for IdtStruct {
 /// Initializes the global IDT and loads it into the current CPU.
 pub fn init_idt() {
     IDT.call_once(IdtStruct::new);
-    unsafe { IDT.load() };
+    // SAFETY: Initialization runs in early single-threaded context before the IDT is loaded.
+    unsafe {
+        IDT.fill_handlers();
+        IDT.load()
+    };
 }
 
 pub fn reload_idt() {
