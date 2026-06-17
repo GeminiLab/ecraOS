@@ -4,17 +4,39 @@ pub mod init;
 pub mod mem;
 pub mod power;
 pub mod reloc_hook;
+pub mod time;
 
 /// Runs platform-local early initialization (currently COM1) before portable `InitIf` work.
 pub fn init_early() {
+    debug_console::init();
+    crate::dbcn_println!("\n\n");
+
+    check_required_features();
+
     imp::gdt::init_gdt();
     imp::idt::init_idt();
-    debug_console::init();
+
+    time::init_early();
 }
 
 pub fn after_reloc() {
     imp::gdt::reload_gdt();
     imp::idt::reload_idt();
+}
+
+fn check_required_features() {
+    use raw_cpuid::CpuId;
+
+    let cpu_id = CpuId::new();
+    let feature_info = cpu_id.get_feature_info().unwrap();
+
+    if !feature_info.has_tsc() {
+        panic!("TSC not supported");
+    }
+
+    if !feature_info.has_x2apic() {
+        panic!("X2APIC not supported");
+    }
 }
 
 // TODO: remove this

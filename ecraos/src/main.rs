@@ -145,6 +145,13 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("\n\nHere we go!\n\n");
 
+    info!("Timer: 0");
+    let start = exarch::time::monotonic_time();
+    for sec in 1..=120 {
+        exarch::time::spin_wait_until(start + exarch::time::Duration::from_secs(sec));
+        info!("Timer: {sec}");
+    }
+
     exarch::power::poweroff()
 }
 

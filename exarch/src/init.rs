@@ -26,7 +26,7 @@ pub trait InitIf {
     /// - Initialize the debug console.
     /// - Initialize the interrupt controller and interrupt handling, while keeping interrupts
     ///   disabled.
-    /// - Initialize the timer.
+    /// - Initialize the time module.
     /// - Prepare for calling other initialization functions.
     fn init_early(arg: PlatformBootArg);
     /// Later platform initialization. Yet to be implemented.

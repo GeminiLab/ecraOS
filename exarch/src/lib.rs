@@ -9,6 +9,7 @@ pub mod init;
 pub mod mem;
 pub mod power;
 pub mod reloc_hook;
+pub mod time;
 pub mod trap;
 
 // TODO: remove this

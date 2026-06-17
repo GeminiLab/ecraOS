@@ -99,6 +99,10 @@ impl Log for Logger {
         let target = record.target();
         let line = record.line().unwrap_or(0);
 
+        let mono_time = exarch::time::monotonic_time();
+        let secs = mono_time.as_secs();
+        let micros = mono_time.subsec_micros();
+
         let level_str = fixed_width_level(level);
         let ColorForLevel {
             level_str_color,
@@ -107,7 +111,7 @@ impl Log for Logger {
         } = colors::color_for_level(level);
 
         kprintln!(
-            "[{level_str_color}{level_str}{reset_color} {target}:{line}] {content_color}{args}{reset_color}"
+            "[{level_str_color}{level_str}{reset_color} {secs: >3}.{micros:06} {target}:{line}] {content_color}{args}{reset_color}"
         );
     }
 
