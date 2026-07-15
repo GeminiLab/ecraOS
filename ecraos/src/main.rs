@@ -161,7 +161,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus();
 
-    // mem::remove_identical_mappings();
+    mem::remove_identical_mappings();
 
     info!("Timer: 0");
     let start = exarch::time::monotonic_time();

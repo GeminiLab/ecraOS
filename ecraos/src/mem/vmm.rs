@@ -214,7 +214,7 @@ pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &Memo
     let page_table_type = exarch::mem::get_page_table_type(VIRTUAL_ADDRESS_SPACE.layout.mode);
     *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
 
-    let page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
+    let mut page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
     let mut pt = unsafe { page_table_type.new_pagetable_at(page_table_guard.root_paddr()) };
 
     for region in phys_mem_regions {
@@ -225,7 +225,9 @@ pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &Memo
         pt.unmap::<H>(vaddr_low, size).unwrap();
     }
 
-    *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
+    // Write back through the same guard. Locking `page_table_mutex` again here would
+    // deadlock now that `kspin` is built with the `smp` feature (non-recursive).
+    *page_table_guard = pt;
 }
 
 pub struct TmpGoodPagingHandler;
