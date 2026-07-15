@@ -16,9 +16,10 @@ extern crate alloc;
 
 use log::{error, info};
 
-mod logging;
 mod device;
+mod logging;
 mod mem;
+mod mp;
 mod percpu;
 
 macro_rules! kprintln {
@@ -58,22 +59,23 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 
     // Initialize the per-CPU data area using the early slot. It maybe used while initializing
     // interrupts and timers.
-    percpu::init_early();
+    percpu::init_bsp_early();
+
+    // Initialize the CPU ID for the BSP.
+    mp::init_cpu_id_bsp(hart_id);
 
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
 
-    // TODO: add irq/timer initialization.
+    // Perform early platform initialization.
     exarch::init::init_early(arg_ref.plat_arg);
 
     kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
     kprintln!(
-        "Kernel entry on hart_id: {:#x}, arg: {:x?}\n",
+        "Kernel entry on BSP(hart_id: {:#x}), arg: {:x?}\n",
         hart_id,
         arg_ref
     );
-
-    percpu::CPU_ID.write_current(hart_id);
 
     mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
@@ -84,7 +86,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 ///
 /// This function should only be called by the [`kernel_entry`] function, via
 /// [`mem::init_vmm`], and should never be called directly.
-pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg) -> ! {
+pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
     // Re-initialize the per-CPU data area pointer after relocation.
@@ -106,6 +108,14 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
     // Finish memory initialization after enabling VMM.
     mem::init_after_enable_vmm();
 
+    // Perform later platform initialization.
+    let boot_arg = unsafe { arg.as_ref_unchecked() };
+    exarch::init::init_later(boot_arg.plat_arg);
+
+    // Probe devices.
+    device::probe_devices(boot_arg.plat_arg);
+
+    // Are we in the right place?
     let rsp: usize;
     let rip: usize;
 
@@ -146,14 +156,56 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, _arg: *const exboot::BootArg
 
     kprintln!("\n\nHere we go!\n\n");
 
+    exarch::init::init_later(boot_arg.plat_arg);
+
+    info!("Starting up secondary CPUs...");
+    mp::start_secondary_cpus();
+
+    // mem::remove_identical_mappings();
+
     info!("Timer: 0");
     let start = exarch::time::monotonic_time();
-    for sec in 1..=120 {
+    for sec in 1..=12 {
         exarch::time::spin_wait_until(start + exarch::time::Duration::from_secs(sec));
         info!("Timer: {sec}");
     }
 
     exarch::power::poweroff()
+}
+
+/// The kernel entry function for the AP.
+///
+/// # Safety
+///
+/// This function should never be called directly.
+pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
+    let cpu_id = mp::phys_to_logi_id(phys_id);
+
+    // Mark the AP as up.
+    mp::mark_ap_up(cpu_id);
+
+    // Initialize the per-CPU data area for the AP.
+    percpu::init_ap(cpu_id);
+
+    // Initialize the CPU ID for the AP.
+    mp::init_cpu_id_ap(phys_id);
+
+    info!(
+        "Kernel entry on AP {}(hart_id: {})",
+        mp::current_cpu_id(),
+        phys_id
+    );
+
+    // Perform early platform initialization for the AP.
+    exarch::init::init_early_ap();
+
+    // Is IDT correct now?
+    unsafe { core::arch::asm!("int3", options(att_syntax)) }
+
+    // Spin forever.
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.

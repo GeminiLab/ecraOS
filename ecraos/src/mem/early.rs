@@ -315,7 +315,7 @@ fn early_vmalloc(
 
 static BSP_STACK: LazyInit<EarlyVMAllocResult> = LazyInit::new();
 
-pub const BSP_STACK_SIZE: usize = 16 * 1024;
+pub const BSP_STACK_SIZE: usize = 64 * 1024;
 
 pub fn init_bsp_stack(base: VirtAddr) {
     let bsp_stack_pages = vmm::page_count_for_bytes(BSP_STACK_SIZE);

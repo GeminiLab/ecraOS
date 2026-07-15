@@ -1,7 +1,12 @@
-use crate::device::DeviceIf;
+use alloc::vec::Vec;
 
-#[expect(dead_code)]
+use crate::device::{DeviceIf, DeviceInfoSource};
+
 struct DeviceImpl;
 
 #[crate_interface::impl_interface]
-impl DeviceIf for DeviceImpl {}
+impl DeviceIf for DeviceImpl {
+    fn probe_device_info_sources(_arg: exboot::PlatformBootArg) -> Vec<DeviceInfoSource> {
+        unimplemented!();
+    }
+}

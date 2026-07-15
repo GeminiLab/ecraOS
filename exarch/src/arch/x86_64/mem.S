@@ -107,6 +107,7 @@ switch_page_level64:
 # The identical page tables
 .section .data
 .balign 4096
+.global exarch_pt_pml5
 exarch_pt_pml5:
     # 0x0000_0000 ~ 0xffff_ffff_ffff (256 TiB)
     # .quad exarch_pt_pml4 + 0x3    # PRESENT | WRITABLE | paddr(exarch_pt_pml4)
@@ -114,6 +115,7 @@ exarch_pt_pml5:
     .fill 511, 8, 0
 
 .balign 4096
+.global exarch_pt_pml4
 exarch_pt_pml4:
     # 0x0000_0000 ~ 0x7f_ffff_ffff (512 GiB)
     # .quad exarch_pt_pdpt + 0x3    # PRESENT | WRITABLE | paddr(exarch_pt_pdpt)

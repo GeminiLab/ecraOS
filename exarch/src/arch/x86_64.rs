@@ -1,6 +1,6 @@
 pub mod debug_console;
-pub mod imp;
 pub mod device;
+pub mod imp;
 pub mod init;
 pub mod mem;
 pub mod power;
@@ -9,16 +9,28 @@ pub mod time;
 
 /// Runs platform-local early initialization work.
 pub fn init_early() {
-    // Initialize the debug console.
+    // Initialize the debug console
     debug_console::init();
     crate::dbcn_println!("\n\n");
 
+    // Check if the required features are supported
     check_required_features();
 
+    // Initialize the GDT and IDT
     imp::gdt::init_gdt();
     imp::idt::init_idt();
 
+    // Initialize the time module
     time::init_early();
+}
+
+pub fn init_later() {
+    imp::apic::init_primary();
+}
+
+pub fn init_early_ap() {
+    imp::gdt::init_gdt();
+    imp::idt::init_idt();
 }
 
 pub fn after_reloc() {

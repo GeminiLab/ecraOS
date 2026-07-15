@@ -94,7 +94,6 @@ impl VMAllocator {
         Ok(range)
     }
 
-    #[expect(unused)]
     pub fn alloc_allocated(
         &mut self,
         page_count: usize,

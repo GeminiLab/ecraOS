@@ -11,5 +11,11 @@ impl InitIf for InitImpl {
         super::init_early();
     }
 
-    fn init_later() {}
+    fn init_later(_arg: PlatformBootArg) {
+        super::init_later();
+    }
+
+    fn init_early_ap() {
+        super::init_early_ap();
+    }
 }

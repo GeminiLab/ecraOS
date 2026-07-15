@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use crate_interface::def_interface;
 use memory_addr::PhysAddr;
 
@@ -7,5 +9,9 @@ pub enum DeviceInfoSource {
     ACPI(PhysAddr),
 }
 
+pub struct DeviceInfoToBeImplemented {}
+
 #[def_interface(gen_caller)]
-pub trait DeviceIf {}
+pub trait DeviceIf {
+    fn probe_device_info_sources(arg: exboot::PlatformBootArg) -> Vec<DeviceInfoSource>;
+}

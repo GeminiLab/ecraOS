@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use kspin::SpinNoIrq;
 use log::{Level, Log};
 
 use crate::{kprintln, logging::colors::ColorForLevel};
@@ -88,12 +89,16 @@ const fn fixed_width_level(level: Level) -> &'static str {
 
 struct Logger;
 
+static LOGGER_LOCK: SpinNoIrq<()> = SpinNoIrq::new(());
+
 impl Log for Logger {
     fn enabled(&self, _metadata: &log::Metadata) -> bool {
         true
     }
 
     fn log(&self, record: &log::Record) {
+        let lock = LOGGER_LOCK.lock();
+
         let level = record.level();
         let args = record.args();
         let target = record.target();
@@ -103,6 +108,8 @@ impl Log for Logger {
         let secs = mono_time.as_secs();
         let micros = mono_time.subsec_micros();
 
+        let cpu_id: usize = crate::mp::current_cpu_id();
+
         let level_str = fixed_width_level(level);
         let ColorForLevel {
             level_str_color,
@@ -111,8 +118,10 @@ impl Log for Logger {
         } = colors::color_for_level(level);
 
         kprintln!(
-            "[{level_str_color}{level_str}{reset_color} {secs: >3}.{micros:06} {target}:{line}] {content_color}{args}{reset_color}"
+            "[{level_str_color}{level_str}{reset_color} {secs: >3}.{micros:06} {cpu_id} {target}:{line}] {content_color}{args}{reset_color}"
         );
+
+        drop(lock);
     }
 
     fn flush(&self) {}
@@ -120,7 +129,7 @@ impl Log for Logger {
 
 pub fn init() {
     log::set_logger(&Logger).unwrap();
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Debug);
 
     INITED.store(true, Ordering::Release);
 }

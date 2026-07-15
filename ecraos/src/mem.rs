@@ -19,6 +19,8 @@ pub mod sections;
 pub mod vmalloc;
 pub mod vmm;
 
+pub use early::BSP_STACK_SIZE;
+
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
@@ -67,7 +69,7 @@ pub fn init_and_enable_vmm(
     });
 
     // Load the early page table.
-    exarch::mem::set_page_table_root(vmm::with_page_table(|pt| pt.root_paddr()));
+    exarch::mem::set_page_table_root(vmm::page_table_root());
 
     // Call the relocation hook.
     exarch::reloc_hook::before_reloc();
@@ -91,9 +93,6 @@ pub fn init_after_enable_vmm() {
     // TODO: recycle the loader memory region (as well as the bootstack).
     palloc::init_palloc();
 
-    // Remove identical mappings.
-    vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
-
     // Initialize the small object allocator.
     malloc::init_malloc();
 
@@ -112,6 +111,13 @@ pub fn init_after_enable_vmm() {
         .expect("failed to add bsp stack to vmalloc");
 
     info!("Later memory initialization completed");
+}
+
+pub fn remove_identical_mappings() {
+    info!("Removing identical mappings...");
+
+    // Remove identical mappings.
+    vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

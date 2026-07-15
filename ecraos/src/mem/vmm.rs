@@ -80,6 +80,12 @@ where
     f(&mut pt)
 }
 
+/// Returns the root page table address.
+#[inline]
+pub fn page_table_root() -> PhysAddr {
+    with_page_table(|pt| pt.root_paddr())
+}
+
 /// Initializes the virtual address space.
 ///
 /// This function detects and selects the virtual address space mode, and then calculates the layout

@@ -132,7 +132,9 @@ pub fn calibrate_tsc_early() -> Option<u64> {
     }
 
     // Get CPU frequency and use it as TSC frequency
-    if let Some(freq_info) = cpu_id.get_processor_frequency_info() {
+    if let Some(freq_info) = cpu_id.get_processor_frequency_info()
+        && freq_info.processor_base_frequency() > 0
+    {
         let freq_mhz = freq_info.processor_base_frequency() as u64;
         dbcn_println!(
             "CPU frequency from CPUID: {} kHz, use it as TSC frequency",

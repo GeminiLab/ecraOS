@@ -13,7 +13,7 @@ expalloc_trait = { path = "../expalloc_trait" }
 expercpu = { path = "../expercpu/expercpu", features = ["early-slot"] }
 expt = { path = "../expt" }
 exslab = { path = "../exslab" }
-kspin = "0.2"
+kspin = { version = "0.2", features = ["smp"] }
 lazyinit.workspace = true
 log.workspace = true
 memory_addr.workspace = true
