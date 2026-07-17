@@ -116,45 +116,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
     // Probe devices.
     device::probe_devices(boot_arg.plat_arg);
 
-    // Are we in the right place?
-    let rsp: usize;
-    let rip: usize;
-
-    unsafe {
-        core::arch::asm!(
-            "lea {rip}, [rip]",
-            "mov {rsp}, rsp",
-            rip = out(reg) rip,
-            rsp = out(reg) rsp,
-            options(nomem, preserves_flags),
-        );
-    }
-
-    kprintln!("rip: {:#x}, rsp: {:#x}", rip, rsp);
-
-    // Is IDT correct now?
-    unsafe { core::arch::asm!("int3", options(att_syntax)) }
-
-    // Is GDT correct now?
-    unsafe {
-        let cs: usize;
-        let rip: usize;
-
-        core::arch::asm!(
-            "mov %cs, {0}",
-            "pushq {0}",
-            "leaq 2f(%rip), {1}",
-            "pushq {1}",
-            "lretq",
-            "2:",
-            out(reg) cs,
-            out(reg) rip,
-            options(att_syntax),
-        );
-
-        kprintln!("cs: {:#x}, rip: {:#x}", cs, rip);
-    }
-
     kprintln!("\n\nHere we go!\n\n");
 
     exarch::init::init_later(boot_arg.plat_arg);
@@ -206,12 +167,6 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     mem::init_ap();
 
     smoke::remote_slab_free_ap();
-
-    let mut v = alloc::vec![1usize, 2, 3, 4];
-    for _ in 0..100 {
-        v.push(mp::current_cpu_id());
-    }
-    warn!("AP {} allocated a vector: {:x?}", mp::current_cpu_id(), v);
 
     // Spin forever.
     loop {
