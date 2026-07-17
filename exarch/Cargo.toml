@@ -23,3 +23,6 @@ uart_16550 = "0.4"  # later versions cannot be used because of the lack of const
 x2apic = "0.5"
 x86 = "0.52"
 x86_64 = "0.15.4"
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+sbi-rt = { version = "0.0.4", features = ["legacy"] }

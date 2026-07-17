@@ -16,4 +16,5 @@ pub mod time;
 pub mod trap;
 
 // TODO: remove this
+#[cfg(target_arch = "x86_64")]
 pub use arch::current::TrapFrame;

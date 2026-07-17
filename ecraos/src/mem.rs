@@ -21,6 +21,7 @@ pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
 
+#[cfg(target_arch = "x86_64")]
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
@@ -142,6 +143,7 @@ fn region_flags_to_mapping(flags: MemoryRegionFlags) -> MappingFlags {
     mapping
 }
 
+#[cfg(target_arch = "x86_64")]
 unsafe fn call_fn_new_stack_arg2(
     fn_ptr: *const fn(usize, usize) -> !,
     arg1: usize,

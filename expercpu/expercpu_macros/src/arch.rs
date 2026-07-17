@@ -23,7 +23,13 @@ pub fn gen_symbol_vma(symbol: &Ident) -> proc_macro2::TokenStream {
                 out(reg) value,
                 VAR = sym #symbol,
             );
-            #[cfg(not(target_arch = "x86_64"))]
+            #[cfg(target_arch = "riscv64")]
+            ::core::arch::asm!(
+                "lla {result}, {symbol}",
+                result = out(reg) value,
+                symbol = sym #symbol,
+            );
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
             { unimplemented!() }
             // #[cfg(target_arch = "aarch64")]
             // ::core::arch::asm!(
@@ -42,13 +48,6 @@ pub fn gen_symbol_vma(symbol: &Ident) -> proc_macro2::TokenStream {
             //     );
             //     value = offset as usize;
             // }
-            // #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-            // ::core::arch::asm!(
-            //     "lui {0}, %hi({VAR})",
-            //     "addi {0}, {0}, %lo({VAR})", // Requires offset <= 0xffff_ffff
-            //     out(reg) value,
-            //     VAR = sym #symbol,
-            // );
             // #[cfg(any(target_arch = "loongarch64"))]
             // ::core::arch::asm!(
             //     "lu12i.w {0}, %abs_hi20({VAR})",
@@ -103,7 +102,19 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
             );
             ptr
         }
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(target_arch = "riscv64")]
+        {
+            let ptr: *const #ty;
+            ::core::arch::asm!(
+                "lla {ptr}, {VAR}",
+                "add {ptr}, {ptr}, gp",
+                ptr = out(reg) ptr,
+                VAR = sym #symbol,
+                options(nostack, readonly),
+            );
+            ptr
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
         { unimplemented!() }
         // #[cfg(not(target_arch = "x86_64"))]
         // {
@@ -126,22 +137,38 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
 /// The type of the variable must be one of the following: `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
 pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
     let ty_str = quote!(#ty).to_string();
-    // let rv64_op = match ty_str.as_str() {
-    //     "u8" | "bool" => "lbu",
-    //     "u16" => "lhu",
-    //     "u32" => "lwu",
-    //     "u64" | "usize" => "ld",
-    //     _ => unreachable!(),
-    // };
-    // let rv64_asm = quote! {
-    //     ::core::arch::asm!(
-    //         "lui {0}, %hi({VAR})",
-    //         "add {0}, {0}, gp",
-    //         concat!(#rv64_op, " {0}, %lo({VAR})({0})"),
-    //         out(reg) value,
-    //         VAR = sym #symbol,
-    //     )
-    // };
+    let rv64_op = match ty_str.as_str() {
+        "u8" | "bool" => "lbu",
+        "u16" => "lhu",
+        "u32" => "lwu",
+        "u64" | "usize" => "ld",
+        _ => unreachable!(),
+    };
+    let rv64_convert = match ty_str.as_str() {
+        "bool" => quote! { value != 0 },
+        "u8" => quote! { value as u8 },
+        "u16" => quote! { value as u16 },
+        "u32" => quote! { value as u32 },
+        "u64" => quote! { value as u64 },
+        "usize" => quote! { value },
+        _ => unreachable!(),
+    };
+    let rv64_code = quote! {
+        {
+            let addr: usize;
+            let value: usize;
+            ::core::arch::asm!(
+                "lla {addr}, {VAR}",
+                "add {addr}, {addr}, gp",
+                concat!(#rv64_op, " {value}, 0({addr})"),
+                addr = out(reg) addr,
+                value = out(reg) value,
+                VAR = sym #symbol,
+                options(nostack, readonly),
+            );
+            #rv64_convert
+        }
+    };
 
     // // https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.html#_ldx_buhuwud_stx_bhwd
     // let la64_op = match ty_str.as_str() {
@@ -204,17 +231,16 @@ pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStre
         }
     };
 
-    // let rv64_code = gen_code(rv64_asm);
     // let la64_code = gen_code(la64_asm);
     let x64_code = gen_code(x64_asm);
     macos_unimplemented(quote! {
-        // #[cfg(target_arch = "riscv64")]
-        // { #rv64_code }
+        #[cfg(target_arch = "riscv64")]
+        { #rv64_code }
         // #[cfg(target_arch = "loongarch64")]
         // { #la64_code }
         #[cfg(target_arch = "x86_64")]
         { #x64_code }
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64")))]
         { unimplemented!() }
         // #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64", target_arch = "x86_64")))]
         // { *self.current_ptr() }
@@ -233,23 +259,27 @@ pub fn gen_write_current_raw(symbol: &Ident, val: &Ident, ty: &Type) -> proc_mac
         format_ident!("{}", ty_str)
     };
 
-    // let rv64_op = match ty_str.as_str() {
-    //     "u8" | "bool" => "sb",
-    //     "u16" => "sh",
-    //     "u32" => "sw",
-    //     "u64" | "usize" => "sd",
-    //     _ => unreachable!(),
-    // };
-    // let rv64_code = quote! {
-    //     ::core::arch::asm!(
-    //         "lui {0}, %hi({VAR})",
-    //         "add {0}, {0}, gp",
-    //         concat!(#rv64_op, " {1}, %lo({VAR})({0})"),
-    //         out(reg) _,
-    //         in(reg) #val as #ty_fixup,
-    //         VAR = sym #symbol,
-    //     );
-    // };
+    let rv64_op = match ty_str.as_str() {
+        "u8" | "bool" => "sb",
+        "u16" => "sh",
+        "u32" => "sw",
+        "u64" | "usize" => "sd",
+        _ => unreachable!(),
+    };
+    let rv64_code = quote! {
+        {
+            let addr: usize;
+            ::core::arch::asm!(
+                "lla {addr}, {VAR}",
+                "add {addr}, {addr}, gp",
+                concat!(#rv64_op, " {value}, 0({addr})"),
+                addr = out(reg) addr,
+                value = in(reg) #val as #ty_fixup,
+                VAR = sym #symbol,
+                options(nostack),
+            );
+        }
+    };
 
     // // https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.html#common-memory-access-instructions
     // let la64_op = match ty_str.as_str() {
@@ -298,13 +328,13 @@ pub fn gen_write_current_raw(symbol: &Ident, val: &Ident, ty: &Type) -> proc_mac
     };
 
     macos_unimplemented(quote! {
-        // #[cfg(target_arch = "riscv64")]
-        // { #rv64_code }
+        #[cfg(target_arch = "riscv64")]
+        { #rv64_code }
         // #[cfg(target_arch = "loongarch64")]
         // { #la64_code }
         #[cfg(target_arch = "x86_64")]
         { #x64_code }
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64")))]
         { unimplemented!() }
         // #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64", target_arch = "x86_64")))]
         // { *(self.current_ptr() as *mut #ty) = #val }

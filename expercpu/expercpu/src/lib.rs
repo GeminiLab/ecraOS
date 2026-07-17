@@ -146,6 +146,8 @@ pub fn read_percpu_reg() -> VirtAddr {
             if #[cfg(target_arch = "x86_64")] {
                 core::arch::asm!("rdgsbase {}", out(reg) tp);
             } else if #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))] {
+                // RISC-V `tp` may be a better long-term per-CPU base, but keep `gp`
+                // for compatibility with the current design.
                 core::arch::asm!("mv {}, gp", out(reg) tp)
             } else if #[cfg(all(target_arch = "aarch64", not(feature = "arm-el2")))] {
                 core::arch::asm!("mrs {}, TPIDR_EL1", out(reg) tp)

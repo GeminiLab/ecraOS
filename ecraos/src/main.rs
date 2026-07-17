@@ -16,6 +16,7 @@ extern crate alloc;
 
 use log::{error, info, warn};
 
+#[cfg(target_arch = "x86_64")]
 mod device;
 mod logging;
 mod mem;
@@ -78,7 +79,13 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         arg_ref
     );
 
-    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
+    #[cfg(target_arch = "x86_64")]
+    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg);
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        exarch::power::poweroff();
+    }
 }
 
 /// The later kernel entry function that runs after the VMM is initialized.
@@ -87,6 +94,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 ///
 /// This function should only be called by the [`kernel_entry`] function, via
 /// [`mem::init_vmm`], and should never be called directly.
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
@@ -143,31 +151,33 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
 ///
 /// This function should never be called directly.
 pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
-    let cpu_id = mp::phys_to_logi_id(phys_id);
+    #[cfg(target_arch = "x86_64")]
+    {
+        let cpu_id = mp::phys_to_logi_id(phys_id);
 
-    // Mark the AP as up.
-    mp::mark_ap_up(cpu_id);
+        // Mark the AP as up.
+        mp::mark_ap_up(cpu_id);
 
-    // Initialize the per-CPU data area for the AP.
-    percpu::init_ap(cpu_id);
+        // Initialize the per-CPU data area for the AP.
+        percpu::init_ap(cpu_id);
 
-    // Initialize the CPU ID for the AP.
-    mp::init_cpu_id_ap(phys_id);
+        // Initialize the CPU ID for the AP.
+        mp::init_cpu_id_ap(phys_id);
 
-    info!(
-        "Kernel entry on AP {}(hart_id: {})",
-        mp::current_cpu_id(),
-        phys_id
-    );
+        info!(
+            "Kernel entry on AP {}(hart_id: {})",
+            mp::current_cpu_id(),
+            phys_id
+        );
 
-    // Perform early platform initialization for the AP.
-    exarch::init::init_early_ap();
+        // Perform early platform initialization for the AP.
+        exarch::init::init_early_ap();
 
-    // Initialize memory for the AP.
-    mem::init_ap();
+        // Initialize memory for the AP.
+        mem::init_ap();
 
-    smoke::remote_slab_free_ap();
-
+        smoke::remote_slab_free_ap();
+    }
     // Spin forever.
     loop {
         core::hint::spin_loop();

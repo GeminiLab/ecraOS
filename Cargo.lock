@@ -141,6 +141,7 @@ dependencies = [
  "multiboot",
  "page_table_entry",
  "raw-cpuid 11.6.0",
+ "sbi-rt",
  "uart_16550",
  "x2apic",
  "x86",
@@ -170,6 +171,13 @@ version = "0.1.0"
 dependencies = [
  "exboot",
  "x86_64",
+]
+
+[[package]]
+name = "exboot-none-riscv64"
+version = "0.1.0"
+dependencies = [
+ "exboot",
 ]
 
 [[package]]
@@ -399,6 +407,24 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "sbi-rt"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48f7bf85822c8b453d7e3fca7de39684032f5c06c1ed338ad8d47f4a79c1d49a"
+dependencies = [
+ "sbi-spec",
+]
+
+[[package]]
+name = "sbi-spec"
+version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "785b91fcc41c7426fc07510be49ed1db44f002b45d45c175ec7f155c3cd447a9"
+dependencies = [
+ "bitflags 2.11.1",
+]
 
 [[package]]
 name = "scopeguard"

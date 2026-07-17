@@ -3,6 +3,7 @@
 use crate_interface::def_interface;
 use memory_addr::VirtAddr;
 
+#[cfg(target_arch = "x86_64")]
 pub use crate::TrapFrame;
 pub use page_table_entry::MappingFlags as PageFaultFlags;
 

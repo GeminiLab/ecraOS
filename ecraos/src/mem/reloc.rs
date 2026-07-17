@@ -29,7 +29,7 @@ macro_rules! get_symbol_addr {
 
         #[cfg(target_arch = "riscv64")]
         core::arch::asm!(
-            "la {result}, {symbol}",
+            "lla {result}, {symbol}",
             result = out(reg) addr,
             symbol = sym $symbol,
             options(nostack, preserves_flags, readonly)

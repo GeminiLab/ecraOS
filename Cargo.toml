@@ -6,7 +6,7 @@ members = [
     "exboot/exboot",
     "exboot/exboot-macros",
     "exboot/exboot-multiboot-x86_64", "exbuddy", "exslab", "expt", "size-disp", "memory_range_set", "expercpu/expercpu", "expercpu/expercpu_macros"
-, "dyn_static_traits", "maybe_non_generic", "exarch", "expalloc_trait"]
+, "dyn_static_traits", "maybe_non_generic", "exarch", "expalloc_trait", "exboot/exboot-none-riscv64"]
 
 [workspace.dependencies]
 cfg-if = "1.0"

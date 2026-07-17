@@ -1,6 +1,7 @@
 //! Multiboot 1 boot module for x86-64.
 
 #![no_std]
+#![cfg(target_arch = "x86_64")]
 
 use core::arch::global_asm;
 

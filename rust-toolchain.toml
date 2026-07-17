@@ -1,4 +1,7 @@
 [toolchain]
 channel = "nightly-2026-05-02"
 components = ["rustc", "cargo", "rustfmt", "rust-std", "rust-analyzer", "clippy", "llvm-tools"]
-targets = ["x86_64-unknown-none"]
+targets = [
+    "x86_64-unknown-none",
+    "riscv64gc-unknown-none-elf",
+]

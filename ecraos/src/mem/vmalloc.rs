@@ -16,9 +16,7 @@ pub enum VMAllocRange {
     Manual,
     /// A range whose mapping is allocated by the [`VMAllocator`].
     Allocated {
-        #[expect(unused)]
         allocated_range: VirtAddrRange,
-        #[expect(unused)]
         pages: Box<[PhysAddr]>,
     },
 }
