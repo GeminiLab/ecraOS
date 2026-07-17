@@ -10,9 +10,10 @@ exarch = { path = "../exarch" }
 exboot = { path = "../exboot/exboot" }
 exbuddy = { path = "../exbuddy" }
 expalloc_trait = { path = "../expalloc_trait" }
-expercpu = { path = "../expercpu/expercpu", features = ["early-slot"] }
+expercpu = { path = "../expercpu/expercpu", features = ["early-slot", "remote-access"] }
 expt = { path = "../expt" }
 exslab = { path = "../exslab" }
+crate_interface = { version = "0.3", features = ["weak_default"] }
 kspin = { version = "0.2", features = ["smp"] }
 lazyinit.workspace = true
 log.workspace = true

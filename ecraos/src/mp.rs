@@ -1,8 +1,4 @@
-use alloc::{
-    boxed::Box,
-    collections::BTreeMap,
-    vec::{self, Vec},
-};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use core::{
     cmp,
     ops::Deref,

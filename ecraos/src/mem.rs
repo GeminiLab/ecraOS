@@ -94,7 +94,7 @@ pub fn init_after_enable_vmm() {
     palloc::init_palloc();
 
     // Initialize the small object allocator.
-    malloc::init_malloc();
+    malloc::init_malloc_current_cpu();
 
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
@@ -113,10 +113,11 @@ pub fn init_after_enable_vmm() {
     info!("Later memory initialization completed");
 }
 
-pub fn remove_identical_mappings() {
-    info!("Removing identical mappings...");
+pub fn init_ap() {
+    malloc::init_malloc_current_cpu();
+}
 
-    // Remove identical mappings.
+pub fn remove_identical_mappings() {
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 }
 

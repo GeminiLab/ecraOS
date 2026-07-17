@@ -138,6 +138,8 @@ pub struct SlabAllocator {
 pub struct PerCpuSlab {
     /// Logical CPU id of the owner CPU.
     cpu_id: u16,
+    /// Page size used by this allocator.
+    page_size: usize,
     /// The inner slab allocator protected by a spinlock.
     inner: SpinNoIrq<SlabAllocator>,
 }
@@ -158,14 +160,14 @@ impl PerCpuSlab {
     pub const fn new(cpu_id: u16, page_size: usize) -> Self {
         Self {
             cpu_id,
+            page_size,
             inner: SpinNoIrq::new(SlabAllocator::new(page_size)),
         }
     }
 
     /// Resets the inner slab allocator to an empty state.
     pub fn reset(&self) {
-        let page_size = self.inner.lock().page_size;
-        *self.inner.lock() = SlabAllocator::new(page_size);
+        *self.inner.lock() = SlabAllocator::new(self.page_size);
     }
 
     /// Returns this slab's logical CPU id.
@@ -192,8 +194,7 @@ impl PerCpuSlab {
 
     /// Queues an object onto this slab's remote-free list.
     pub fn dealloc_remote(&self, ptr: NonNull<u8>) {
-        let page_size = self.inner.lock().page_size;
-        unsafe { SlabPageHeader::remote_free_object(ptr, self.cpu_id, page_size) };
+        unsafe { SlabPageHeader::remote_free_object(ptr, self.cpu_id, self.page_size) };
     }
 }
 
@@ -293,7 +294,7 @@ impl SlabTrait for PerCpuSlab {
     }
 
     fn page_size(&self) -> usize {
-        self.inner.lock().page_size
+        self.page_size
     }
 
     fn alloc(&self, layout: Layout) -> AllocResult<SlabAllocResult> {

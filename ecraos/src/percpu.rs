@@ -8,6 +8,19 @@ use crate::{mem, mp::LogicalCpuId};
 
 static PERCPU_AREAS: LazyInit<Box<[VirtAddr]>> = LazyInit::new();
 
+struct PerCpuAreaIfImpl;
+
+#[crate_interface::impl_interface]
+impl expercpu::PerCPUAreaIf for PerCpuAreaIfImpl {
+    fn percpu_area_base_for(cpu_id: usize) -> VirtAddr {
+        *PERCPU_AREAS
+            .get()
+            .expect("percpu areas must be initialized before remote access")
+            .get(cpu_id)
+            .expect("invalid remote percpu cpu id")
+    }
+}
+
 pub fn section_size() -> usize {
     mem::sections::percpu_aligned().size()
 }

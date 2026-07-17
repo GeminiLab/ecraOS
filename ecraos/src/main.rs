@@ -14,13 +14,14 @@
 /// available in the kernel.
 extern crate alloc;
 
-use log::{error, info};
+use log::{error, info, warn};
 
 mod device;
 mod logging;
 mod mem;
 mod mp;
 mod percpu;
+mod smoke;
 
 macro_rules! kprintln {
     ($($arg:tt)*) => {
@@ -161,6 +162,8 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus();
 
+    smoke::remote_slab_free_bsp();
+
     mem::remove_identical_mappings();
 
     info!("Timer: 0");
@@ -199,8 +202,16 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     // Perform early platform initialization for the AP.
     exarch::init::init_early_ap();
 
-    // Is IDT correct now?
-    unsafe { core::arch::asm!("int3", options(att_syntax)) }
+    // Initialize memory for the AP.
+    mem::init_ap();
+
+    smoke::remote_slab_free_ap();
+
+    let mut v = alloc::vec![1usize, 2, 3, 4];
+    for _ in 0..100 {
+        v.push(mp::current_cpu_id());
+    }
+    warn!("AP {} allocated a vector: {:x?}", mp::current_cpu_id(), v);
 
     // Spin forever.
     loop {

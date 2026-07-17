@@ -1,5 +1,6 @@
 use core::{
     alloc::{GlobalAlloc, Layout},
+    ops::Deref,
     ptr::NonNull,
 };
 
@@ -13,9 +14,7 @@ use lazyinit::LazyInit;
 use log::info;
 use memory_addr::{PhysAddr, VirtAddr};
 
-use crate::mem;
-
-const BSP_CPU_ID: u16 = 0;
+use crate::{mem, mp};
 
 #[def_percpu]
 static CURRENT_SLAB: LazyInit<PerCpuSlab> = LazyInit::new();
@@ -24,14 +23,13 @@ fn with_current_slab<R>(f: impl FnOnce(&PerCpuSlab) -> R) -> R {
     CURRENT_SLAB.with_current(|slot| f(&*slot))
 }
 
-pub fn init_malloc() {
+pub fn init_malloc_current_cpu() {
+    let cpu_id = crate::mp::current_cpu_id();
+
     CURRENT_SLAB.with_current(|slot| {
-        slot.init_once(PerCpuSlab::new(BSP_CPU_ID, mem::vmm::page_size()));
+        slot.init_once(PerCpuSlab::new(cpu_id as _, mem::vmm::page_size()));
     });
-    info!(
-        "Small object allocator initialized for BSP CPU {}",
-        BSP_CPU_ID
-    );
+    info!("Small object allocator initialized for CPU {}", cpu_id);
 }
 
 fn alloc_small(layout: Layout) -> *mut u8 {
@@ -74,12 +72,12 @@ fn dealloc_small(ptr: *mut u8, layout: Layout) {
         return;
     };
 
-    let owner_cpu = unsafe { (*(base as *const SlabPageHeader)).owner_cpu };
+    let owner_cpu = unsafe { (*(base as *const SlabPageHeader)).owner_cpu as usize };
     let Some(nn_ptr) = NonNull::new(ptr) else {
         return;
     };
 
-    if owner_cpu == BSP_CPU_ID {
+    if owner_cpu == mp::current_cpu_id() {
         match with_current_slab(|slab| slab.dealloc_local(nn_ptr, layout)) {
             SlabDeallocResult::Done => {}
             SlabDeallocResult::FreeSlab { base, pages } => {
@@ -89,7 +87,8 @@ fn dealloc_small(ptr: *mut u8, layout: Layout) {
         }
     } else {
         unsafe {
-            SlabPageHeader::remote_free_object(nn_ptr, owner_cpu, page_size);
+            let owner_slab = CURRENT_SLAB.remote_ref_raw(owner_cpu);
+            owner_slab.deref().dealloc_remote(nn_ptr);
         }
     }
 }
