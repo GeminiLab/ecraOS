@@ -12,10 +12,10 @@ impl PowerIf for PowerImpl {
     }
 
     fn cpu_up(
-        phys_id: PhysicalCpuId,
-        page_table_root: PhysAddr,
-        boot_stack_top: VirtAddr,
-        entry: APEntry,
+        _phys_id: PhysicalCpuId,
+        _page_table_root: PhysAddr,
+        _boot_stack_top: VirtAddr,
+        _entry: APEntry,
     ) {
         todo!()
     }

@@ -4,6 +4,7 @@
 use core::fmt::Write;
 
 use crate_interface::def_interface;
+use memory_addr::{PhysAddr, VirtAddr};
 
 /// Low-level debug console operations implemented by the platform.
 ///
@@ -17,6 +18,13 @@ pub trait DebugConsoleIf {
     ///
     /// Returns how many bytes were read (may be less than `bytes.len()` if the input is idle).
     fn read_bytes(bytes: &mut [u8]) -> usize;
+}
+
+/// Address translation used by firmware-backed debug consoles.
+#[def_interface(gen_caller)]
+pub trait DebugConsoleVirtToPhysIf {
+    /// Converts an address in the current kernel address space to a physical address.
+    fn virt_to_phys(addr: VirtAddr) -> PhysAddr;
 }
 
 /// Writes a UTF-8 string to the debug console.

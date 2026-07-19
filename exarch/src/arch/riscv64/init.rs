@@ -8,10 +8,12 @@ pub struct InitImpl;
 #[crate_interface::impl_interface]
 impl InitIf for InitImpl {
     /// Runs early platform initialization.
-    fn init_early(_arg: PlatformBootArg) {}
+    fn init_early(arg: PlatformBootArg) {
+        super::init_early_bsp(arg)
+    }
 
     /// Runs later platform initialization.
-    fn init_later(_arg: PlatformBootArg) {}
+    fn init_later() {}
 
     /// Runs early application-processor initialization.
     fn init_early_ap() {}

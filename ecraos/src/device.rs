@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use core::{mem as core_mem, ptr::NonNull, slice, str::FromStr, time::Duration};
 
+#[cfg(target_arch = "x86_64")]
 use acpi::{AmlTable, Handler, PhysicalMapping};
 use exarch::{device::DeviceInfoSource, time};
 use log::{error, info, warn};
@@ -85,6 +86,7 @@ unsafe fn out_u32(port: u16, value: u32) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn pci_config_address(address: acpi::PciAddress, offset: u16) -> u32 {
     0x8000_0000
         | ((address.bus() as u32) << 16)
@@ -93,9 +95,11 @@ fn pci_config_address(address: acpi::PciAddress, offset: u16) -> u32 {
         | ((offset as u32) & 0xfc)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AcpiHandler;
 
+#[cfg(target_arch = "x86_64")]
 impl Handler for AcpiHandler {
     unsafe fn map_physical_region<T>(
         &self,

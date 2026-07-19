@@ -202,6 +202,26 @@ impl VMAllocator {
         self.add_allocated_pages(range, allocated_range, pages.into_boxed_slice())
     }
 
+    pub fn virt_to_phys(&self, addr: VirtAddr) -> Option<PhysAddr> {
+        let (_, range) = self.ranges.find(addr)?;
+        let VMAllocRange::Allocated {
+            allocated_range,
+            pages,
+        } = range
+        else {
+            return None;
+        };
+
+        if !allocated_range.contains(addr) {
+            return None;
+        }
+
+        let offset = addr.as_usize() - allocated_range.start.as_usize();
+        let page_index = offset >> self.page_size_shift;
+        let page_offset = offset & (self.page_size() - 1);
+        pages.get(page_index).map(|page| *page + page_offset)
+    }
+
     #[inline]
     fn page_size(&self) -> usize {
         1usize << self.page_size_shift
@@ -231,4 +251,8 @@ pub(super) fn init_vmalloc(vmalloc_range: VirtAddrRange, page_size_shift: usize)
     VMALLOC.init_once(SpinNoIrq::new(
         VMAllocator::new(vmalloc_range, page_size_shift).unwrap(),
     ));
+}
+
+pub fn virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
+    VMALLOC.get()?.lock().virt_to_phys(addr)
 }

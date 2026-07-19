@@ -18,14 +18,12 @@ case "$TARGET" in
   "x86_64-unknown-none")
     BOOT_CRATE="exboot-multiboot-x86_64"
     QEMU="qemu-system-x86_64"
-    KERNEL_RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld"
     KERNEL_CARGO_ARGS=()
     QEMU_DEFAULT_ARGS=()
     ;;
   "riscv64gc-unknown-none-elf")
     BOOT_CRATE="exboot-none-riscv64"
     QEMU="qemu-system-riscv64"
-    KERNEL_RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld -C link-arg=-pie"
     KERNEL_CARGO_ARGS=(-Z build-std=core,alloc,compiler_builtins)
     QEMU_DEFAULT_ARGS=(-machine virt)
     ;;
@@ -47,7 +45,8 @@ if [ "$CLEAN" = "1" ]; then
 fi
 
 echo "Building ecraos..." >&2
-RUSTFLAGS="$KERNEL_RUSTFLAGS" cargo build "${KERNEL_CARGO_ARGS[@]}" -p ecraos --target $TARGET $PROFILE_ARG
+RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld -C link-arg=-pie" \
+  cargo build "${KERNEL_CARGO_ARGS[@]}" -p ecraos --target $TARGET $PROFILE_ARG
 
 echo "Stripping ecraos..." >&2
 rust-objcopy "$KERNEL" --strip-all -O binary "$KERNEL_STRIPPED"
@@ -56,7 +55,9 @@ echo "Building $BOOT_CRATE..." >&2
 RUSTFLAGS="-C relocation-model=static" cargo build -p $BOOT_CRATE --target $TARGET $PROFILE_ARG
 
 echo "Building ecraos-loader..." >&2
-KERNEL_BIN="$KERNEL_STRIPPED" RUSTFLAGS="-C relocation-model=static -C link-arg=-Tecraos-loader/link.ld --cfg building_ecraos_loader --extern exboot_impl=$BOOT" cargo build -p ecraos-loader --target $TARGET $PROFILE_ARG
+KERNEL_BIN="$KERNEL_STRIPPED" \
+  RUSTFLAGS="-C relocation-model=static -C link-arg=-Tecraos-loader/link.ld --cfg building_ecraos_loader --extern exboot_impl=$BOOT" \
+  cargo build -p ecraos-loader --target $TARGET $PROFILE_ARG
 
 echo "Stripping ecraos-loader..." >&2
 rust-objcopy "$LOADER" --strip-all -O binary "$LOADER_STRIPPED"

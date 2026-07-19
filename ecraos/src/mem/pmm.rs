@@ -27,6 +27,11 @@ pub fn phys_mem_regions() -> &'static MemoryRegions {
     PHYS_MEM_REGIONS.as_ref()
 }
 
+/// Retrieves the physical memory regions if they have been initialized.
+pub fn try_phys_mem_regions() -> Option<&'static MemoryRegions> {
+    PHYS_MEM_REGIONS.get()
+}
+
 /// Pushes a physical memory region into a [`MemoryRegions`], panicking if the
 /// region overlaps with any existing region.
 ///

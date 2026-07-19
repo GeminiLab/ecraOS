@@ -151,6 +151,15 @@ pub struct PageTable<M: PageTableMeta, PTE: GenericPTE> {
     _phantom: PhantomData<(PTE, M)>,
 }
 
+fn checked_page_end<A: MemoryAddr>(start: A, end: A, page_size: usize) -> Option<A> {
+    let next = usize::checked_add(start.into(), page_size)?;
+    if next <= end.into() {
+        Some(A::from(next))
+    } else {
+        None
+    }
+}
+
 impl<M: PageTableMeta, PTE: GenericPTE> PageTable<M, PTE>
 where
     [(); M::LEVELS]: Sized,
@@ -454,14 +463,19 @@ where
         while start_vaddr < end_vaddr {
             for level in (0..=M::MAX_PAGE_LEVEL).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
-                if start_vaddr.is_aligned(page_size) && (start_vaddr + page_size) <= end_vaddr {
+                if start_vaddr.is_aligned(page_size) {
+                    let Some(next_vaddr) = checked_page_end(start_vaddr, end_vaddr, page_size)
+                    else {
+                        continue;
+                    };
+
                     let flush = {
                         let (entry, index) =
                             self.get_page_entry_mut::<H>(start_vaddr, level, true, true)?;
                         f(level, index, start_vaddr, entry)?
                     };
                     self.pending_flushes += flush;
-                    start_vaddr = start_vaddr + page_size;
+                    start_vaddr = next_vaddr;
                     break;
                 }
             }

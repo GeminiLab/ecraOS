@@ -71,6 +71,17 @@ pub fn vmalloc_range() -> VirtAddrRange {
     VIRTUAL_ADDRESS_SPACE.layout.vmalloc_range
 }
 
+pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
+    let addr_space = VIRTUAL_ADDRESS_SPACE.get()?;
+    if !addr_space.layout.direct_mapping_range.contains(addr) {
+        return None;
+    }
+
+    Some(PhysAddr::from_usize(
+        addr.as_usize() - addr_space.layout.direct_mapping_range.start.as_usize(),
+    ))
+}
+
 #[inline]
 pub fn with_page_table<F, T>(f: F) -> T
 where

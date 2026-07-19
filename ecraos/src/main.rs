@@ -16,7 +16,6 @@ extern crate alloc;
 
 use log::{error, info, warn};
 
-#[cfg(target_arch = "x86_64")]
 mod device;
 mod logging;
 mod mem;
@@ -38,6 +37,15 @@ const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 const DISCLAIMER: &str = "ecraOS is a derivative of the ArceOS project.";
 /// Horizontal line printed at startup.
 const HLINE: &str = "------------------------------------------------------------";
+
+fn print_hello_banner() {
+    kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}");
+    kprintln!(
+        "Target triple: {}\nHost triple  : {}\n{HLINE}\n",
+        target_triple::TARGET,
+        target_triple::HOST
+    );
+}
 
 /// Kernel entry called by specified boot modules through
 /// [`call_kernel_entry`](exboot::call_kernel_entry).
@@ -72,20 +80,14 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     // Perform early platform initialization.
     exarch::init::init_early(arg_ref.plat_arg);
 
-    kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}\n");
+    print_hello_banner();
     kprintln!(
         "Kernel entry on BSP(hart_id: {:#x}), arg: {:x?}\n",
         hart_id,
         arg_ref
     );
 
-    #[cfg(target_arch = "x86_64")]
-    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg);
-
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        exarch::power::poweroff();
-    }
+    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
 
 /// The later kernel entry function that runs after the VMM is initialized.
@@ -94,7 +96,6 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 ///
 /// This function should only be called by the [`kernel_entry`] function, via
 /// [`mem::init_vmm`], and should never be called directly.
-#[cfg(target_arch = "x86_64")]
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
@@ -119,21 +120,22 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
 
     // Perform later platform initialization.
     let boot_arg = unsafe { arg.as_ref_unchecked() };
-    exarch::init::init_later(boot_arg.plat_arg);
+    exarch::init::init_later();
 
     // Probe devices.
     device::probe_devices(boot_arg.plat_arg);
 
     kprintln!("\n\nHere we go!\n\n");
 
-    exarch::init::init_later(boot_arg.plat_arg);
+    #[cfg(target_arch = "x86_64")]
+    {
+        info!("Starting up secondary CPUs...");
+        mp::start_secondary_cpus();
 
-    info!("Starting up secondary CPUs...");
-    mp::start_secondary_cpus();
+        smoke::remote_slab_free_bsp();
 
-    smoke::remote_slab_free_bsp();
-
-    mem::remove_identical_mappings();
+        mem::remove_identical_mappings();
+    }
 
     info!("Timer: 0");
     let start = exarch::time::monotonic_time();

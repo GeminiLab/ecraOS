@@ -30,7 +30,7 @@ pub trait InitIf {
     /// - Prepare for calling other initialization functions.
     fn init_early(arg: PlatformBootArg);
     /// Later platform initialization. Yet to be implemented.
-    fn init_later(arg: PlatformBootArg);
+    fn init_later();
 
     fn init_early_ap();
 }

@@ -6,6 +6,7 @@
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
 use log::info;
+use memory_addr::{PhysAddr, VirtAddr};
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -21,7 +22,49 @@ pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
 
-#[cfg(target_arch = "x86_64")]
+struct DebugConsoleVirtToPhysIfImpl;
+
+#[crate_interface::impl_interface]
+impl exarch::debug_console::DebugConsoleVirtToPhysIf for DebugConsoleVirtToPhysIfImpl {
+    fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
+        virt_to_phys(addr)
+    }
+}
+
+pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
+    try_virt_to_phys(addr).unwrap_or_else(|| PhysAddr::from_usize(addr.as_usize()))
+}
+
+fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
+    let low_identity = PhysAddr::from_usize(addr.as_usize());
+    if phys_addr_is_known(low_identity) {
+        return Some(low_identity);
+    }
+
+    if let Some(paddr) = vmm::direct_mapping_virt_to_phys(addr)
+        && phys_addr_is_known(paddr)
+    {
+        return Some(paddr);
+    }
+
+    if let Some(stack) = early::try_bsp_stack()
+        && stack.alloc_range.contains(addr)
+    {
+        let offset = addr.as_usize() - stack.alloc_range.start.as_usize();
+        return Some(stack.pa_range.start + offset);
+    }
+
+    vmalloc::virt_to_phys(addr)
+}
+
+fn phys_addr_is_known(addr: PhysAddr) -> bool {
+    let Some(regions) = pmm::try_phys_mem_regions() else {
+        return true;
+    };
+
+    regions.iter().any(|region| region.range.contains(addr))
+}
+
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const exboot::KernelEntryType,
     hart_id: usize,
@@ -55,7 +98,7 @@ pub fn init_and_enable_vmm(
     // Create the page table and early mappings. It depends on the early page allocator.
     vmm::init_vmm_mapping_early::<early::EarlyPageAllocatorImpl>(pmm::phys_mem_regions());
 
-    // Allocate the BSP stack and percpu area.
+    // Allocate the BSP stack area.
     early::init_bsp_stack(vmm::vmalloc_base());
     let bsp_stack = early::bsp_stack();
 
@@ -143,7 +186,6 @@ fn region_flags_to_mapping(flags: MemoryRegionFlags) -> MappingFlags {
     mapping
 }
 
-#[cfg(target_arch = "x86_64")]
 unsafe fn call_fn_new_stack_arg2(
     fn_ptr: *const fn(usize, usize) -> !,
     arg1: usize,
@@ -151,6 +193,7 @@ unsafe fn call_fn_new_stack_arg2(
     stack_top: usize,
 ) -> ! {
     unsafe {
+        #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
             "mov rsp, {stack_top}",
             "call rax",
@@ -159,7 +202,18 @@ unsafe fn call_fn_new_stack_arg2(
             in("rsi") arg2,
             in("rax") fn_ptr,
             options(preserves_flags, noreturn),
-        )
+        );
+
+        #[cfg(target_arch = "riscv64")]
+        core::arch::asm!(
+            "mv sp, {stack_top}",
+            "jr a2",
+            stack_top = in(reg) stack_top,
+            in("a0") arg1,
+            in("a1") arg2,
+            in("a2") fn_ptr,
+            options(preserves_flags, noreturn),
+        );
     }
 }
 

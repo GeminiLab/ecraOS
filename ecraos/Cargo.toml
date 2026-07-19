@@ -20,6 +20,7 @@ log.workspace = true
 memory_addr.workspace = true
 memory_range_set = { path = "../memory_range_set" }
 size-disp = { path = "../size-disp" }
+target-triple = "1.0.1"
 thiserror.workspace = true
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]

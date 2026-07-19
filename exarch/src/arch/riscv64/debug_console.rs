@@ -1,16 +1,9 @@
-use memory_addr::{PhysAddr, VirtAddr};
+use memory_addr::VirtAddr;
 
-use crate::debug_console::DebugConsoleIf;
+use crate::debug_console::{DebugConsoleIf, virt_to_phys};
 
 /// The maximum number of bytes that can be read at once.
 const MAX_RW_SIZE: usize = 256;
-
-fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
-    // TODO: Implement this correctly
-    // TODO: Think how to handle address translation in exarch
-    // properly.
-    PhysAddr::from_usize(addr.as_usize())
-}
 
 /// Tries to write bytes to the console from input u8 slice.
 /// Returns the number of bytes written.

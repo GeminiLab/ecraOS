@@ -139,14 +139,19 @@ std::thread_local! {
 
 struct TestPagingHandler;
 
-impl PagingHandler for TestPagingHandler {
-    fn alloc_page_aligned(bytes_required: usize) -> Option<PhysAddr> {
+impl PageAllocator for TestPagingHandler {
+    fn page_size_shift() -> usize {
+        12
+    }
+
+    fn alloc_frames(page_count: usize) -> Option<PhysAddr> {
         ALLOC_STATE.with(|state| {
             let mut state = state.borrow_mut();
             state.alloc_count += 1;
             if state.fail_on_alloc == Some(state.alloc_count) {
                 return None;
             }
+            let bytes_required = page_count << Self::page_size_shift();
             let layout = Layout::from_size_align(bytes_required, 4096).ok()?;
             let ptr = unsafe { alloc(layout) };
             if ptr.is_null() {
@@ -159,7 +164,8 @@ impl PagingHandler for TestPagingHandler {
             Some(PhysAddr::from_usize(ptr as usize))
         })
     }
-    fn dealloc_page_aligned(addr: PhysAddr, bytes_deallocated: usize) {
+
+    fn dealloc_frames(addr: PhysAddr, page_count: usize) {
         ALLOC_STATE.with(|state| {
             let mut state = state.borrow_mut();
             let index = state
@@ -168,7 +174,7 @@ impl PagingHandler for TestPagingHandler {
                 .position(|record| record.ptr == addr.as_usize())
                 .expect("deallocating an unknown test page-table allocation");
             let record = state.allocations[index];
-            assert_eq!(record.layout.size(), bytes_deallocated);
+            assert_eq!(record.layout.size(), page_count << Self::page_size_shift());
             let record = state.allocations.remove(index);
             unsafe { dealloc(record.ptr as *mut u8, record.layout) };
         });
@@ -290,7 +296,7 @@ fn new_alloc_initializes_zeroed_root_table() {
     assert_ne!(root_paddr.as_usize(), 0);
     assert!(allocation_contains(
         root_paddr,
-        core::mem::size_of::<TestPte>() * TestMeta::LEVEL_TABLE_SIZE[TestMeta::LEVELS - 1]
+        1 << TestPagingHandler::page_size_shift()
     ));
     for entry in table_slice(&table, root_paddr, TestMeta::LEVELS - 1) {
         assert!(entry.is_unused());
@@ -442,6 +448,18 @@ fn cursor_uses_largest_possible_page_levels() {
         TestMeta::LEVEL_PAGE_SIZE[1],
     );
     reset_test_state();
+}
+
+#[test]
+fn page_level_selection_rejects_wrapping_end_addresses() {
+    let high_start = VirtAddr::from_usize(0xff00_0000_8000_0000);
+    let high_end = VirtAddr::from_usize(0xff00_0000_8800_0000);
+
+    assert_eq!(checked_page_end(high_start, high_end, 1usize << 56), None);
+    assert_eq!(
+        checked_page_end(high_start, high_end, 2 * 1024 * 1024),
+        Some(VirtAddr::from_usize(0xff00_0000_8020_0000))
+    );
 }
 
 #[test]

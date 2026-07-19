@@ -1,4 +1,8 @@
+/*
+    TODO: how to handle this?
+*/
 BASE_ADDRESS = 0x80200000;
+/* BASE_ADDRESS = 0x200000; */
 ENTRY(_start)
 
 SECTIONS {

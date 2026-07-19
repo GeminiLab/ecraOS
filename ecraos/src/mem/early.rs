@@ -329,3 +329,7 @@ pub fn init_bsp_stack(base: VirtAddr) {
 pub fn bsp_stack() -> EarlyVMAllocResult {
     *BSP_STACK
 }
+
+pub fn try_bsp_stack() -> Option<EarlyVMAllocResult> {
+    BSP_STACK.get().copied()
+}
