@@ -1,5 +1,12 @@
-use alloc::vec::Vec;
-use core::{mem as core_mem, ptr::NonNull, slice, str::FromStr, time::Duration};
+use alloc::{
+    alloc::{alloc, dealloc},
+    vec::Vec,
+};
+use core::{
+    alloc::GlobalAlloc, mem as core_mem, ptr::NonNull, slice, str::FromStr, time::Duration,
+};
+use exboot::PhysAddr;
+use memory_addr::va;
 
 #[cfg(target_arch = "x86_64")]
 use acpi::{AmlTable, Handler, PhysicalMapping};
@@ -528,7 +535,78 @@ pub fn probe_device_info_source(boot_arg: exboot::PlatformBootArg) -> Vec<Device
         }
     }
 
+    #[cfg(target_arch = "riscv64")]
+    {
+        if let exboot::PlatformBootArg::DeviceTree(dtb) = boot_arg {
+            log::info!("Found Device Tree at {:#x}", dtb.as_usize());
+            result.push(DeviceInfoSource::DeviceTree(dtb));
+        }
+    }
+
     result
+}
+
+fn probe_device_tree(addr: PhysAddr) {
+    use fdt_rs::{base::*, index::*, prelude::*};
+
+    // Only detect CPUs here
+    let vaddr = va!(addr.as_usize() + crate::mem::vmm::virt_phys_offset());
+
+    let dtb = unsafe { DevTree::from_raw_pointer(vaddr.as_ptr()).expect("failed to load dtb") };
+    let boot_cpuid_phys = dtb.boot_cpuid_phys();
+    info!("Boot CPU ID: {}", boot_cpuid_phys);
+
+    let layout = DevTreeIndex::get_layout(&dtb).expect("failed to get layout");
+    let buf_ptr = unsafe { alloc(layout) };
+    let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, layout.size()) };
+    let index = DevTreeIndex::new(dtb, buf).expect("failed to create index");
+
+    let _ = index;
+
+    let cpu_nodes = dtb.nodes().filter(|node| {
+        node.props()
+            .find(|p| {
+                if p.name()? != "device_type" {
+                    return Ok(false);
+                }
+                Ok(p.str()? == "cpu")
+            })
+            .map(|p| p.is_some())
+    });
+
+    let mut cpu_ids = Vec::new();
+    for node in cpu_nodes.iterator() {
+        let node = node.unwrap_or_else(|e| panic!("failed to get cpu node: {:?}", e));
+
+        let cpu_id = node
+            .props()
+            .find(|p| p.name().map(|name| name == "reg"))
+            .unwrap_or_else(|e| panic!("failed to get CPU node reg property: {:?}", e))
+            .unwrap_or_else(|| {
+                panic!(
+                    "CPU node {} has no reg property",
+                    node.name().unwrap_or_default()
+                )
+            })
+            .u32(0)
+            .unwrap_or_else(|e| panic!("failed to parse CPU node reg property: {:?}", e));
+
+        info!(
+            "Found CPU node {}: hart ID {:#x}",
+            node.name().unwrap_or_default(),
+            cpu_id
+        );
+        cpu_ids.push(cpu_id as _);
+    }
+
+    if cpu_ids.is_empty() {
+        panic!("no CPU nodes found in Device Tree");
+    }
+
+    drop(index);
+    unsafe { dealloc(buf_ptr, layout) };
+
+    crate::mp::init_cpu_list(cpu_ids.into_boxed_slice(), boot_cpuid_phys as _);
 }
 
 /// Probes and prints platform device information sources.
@@ -544,10 +622,7 @@ pub fn probe_devices(boot_arg: exboot::PlatformBootArg) {
             #[cfg(target_arch = "x86_64")]
             DeviceInfoSource::ACPI(rsdp) => probe_acpi(rsdp.as_usize()),
             DeviceInfoSource::DeviceTree(addr) => {
-                error!(
-                    "Device tree source at {:#x} is not probed yet",
-                    addr.as_usize()
-                );
+                probe_device_tree(addr);
             }
             #[cfg(not(target_arch = "x86_64"))]
             DeviceInfoSource::ACPI(addr) => {

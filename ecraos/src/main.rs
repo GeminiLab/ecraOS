@@ -127,15 +127,12 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
 
     kprintln!("\n\nHere we go!\n\n");
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        info!("Starting up secondary CPUs...");
-        mp::start_secondary_cpus();
+    info!("Starting up secondary CPUs...");
+    mp::start_secondary_cpus();
 
-        smoke::remote_slab_free_bsp();
+    smoke::remote_slab_free_bsp();
 
-        mem::remove_identical_mappings();
-    }
+    mem::remove_identical_mappings();
 
     info!("Timer: 0");
     let start = exarch::time::monotonic_time();
@@ -153,33 +150,38 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
 ///
 /// This function should never be called directly.
 pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
-    #[cfg(target_arch = "x86_64")]
-    {
-        let cpu_id = mp::phys_to_logi_id(phys_id);
+    let cpu_id = mp::phys_to_logi_id(phys_id);
 
-        // Mark the AP as up.
-        mp::mark_ap_up(cpu_id);
+    // Mark the AP as up.
+    mp::mark_ap_up(cpu_id);
 
-        // Initialize the per-CPU data area for the AP.
-        percpu::init_ap(cpu_id);
+    // Initialize the per-CPU data area for the AP.
+    percpu::init_ap(cpu_id);
 
-        // Initialize the CPU ID for the AP.
-        mp::init_cpu_id_ap(phys_id);
+    // Initialize the CPU ID for the AP.
+    mp::init_cpu_id_ap(phys_id);
 
-        info!(
-            "Kernel entry on AP {}(hart_id: {})",
-            mp::current_cpu_id(),
-            phys_id
-        );
+    info!(
+        "Kernel entry on AP {}(hart_id: {})",
+        mp::current_cpu_id(),
+        phys_id
+    );
 
-        // Perform early platform initialization for the AP.
-        exarch::init::init_early_ap();
+    // Perform early platform initialization for the AP.
+    exarch::init::init_early_ap();
 
-        // Initialize memory for the AP.
-        mem::init_ap();
+    // Initialize memory for the AP.
+    mem::init_ap();
 
-        smoke::remote_slab_free_ap();
+    smoke::remote_slab_free_ap();
+
+    info!("Timer: 0");
+    let start = exarch::time::monotonic_time();
+    for sec in 1..=12 {
+        exarch::time::spin_wait_until(start + exarch::time::Duration::from_secs(sec));
+        info!("Timer: {sec}");
     }
+
     // Spin forever.
     loop {
         core::hint::spin_loop();

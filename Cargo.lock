@@ -119,6 +119,7 @@ dependencies = [
  "expercpu",
  "expt",
  "exslab",
+ "fdt-rs",
  "heapless",
  "kspin",
  "lazyinit",

@@ -60,29 +60,13 @@ struct Elf64Rela {
 
 /// The value of R_<current_arch>_RELATIVE relocation type.
 const RELATIVE_TYPE: u32 = {
-    #[cfg(target_arch = "x86_64")]
-    {
-        8
-    } // R_X86_64_RELATIVE
-    #[cfg(target_arch = "aarch64")]
-    {
-        1027
-    } // R_AARCH64_RELATIVE
-    #[cfg(target_arch = "riscv64")]
-    {
-        3
-    } // R_RISCV_RELATIVE
-    #[cfg(target_arch = "loongarch64")]
-    {
-        3
-    } // R_LARCH_RELATIVE
-    #[cfg(not(any(
-        target_arch = "x86_64",
-        target_arch = "aarch64",
-        target_arch = "riscv64",
-        target_arch = "loongarch64",
-    )))]
-    panic!("Unsupported target architecture");
+    cfg_select! {
+        target_arch = "x86_64" => 8,        // R_X86_64_RELATIVE
+        target_arch = "aarch64" => 1027,    // R_AARCH64_RELATIVE
+        target_arch = "riscv64" => 3,       // R_RISCV_RELATIVE
+        target_arch = "loongarch64" => 3,   // R_LARCH_RELATIVE
+        _ => panic!("Unsupported target architecture"),
+    }
 };
 
 /// Handles the relocation of the kernel, by patching the kernel according to

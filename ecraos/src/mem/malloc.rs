@@ -93,9 +93,12 @@ fn dealloc_small(ptr: *mut u8, layout: Layout) {
     }
 }
 
-fn dealloc_large(ptr: *mut u8, _layout: Layout) {
+fn dealloc_large(ptr: *mut u8, layout: Layout) {
+    let page_size = mem::vmm::page_size();
+    let bytes = layout.size().max(layout.align());
+    let pages = bytes.div_ceil(page_size);
     let paddr = PhysAddr::from_usize(ptr as usize - mem::vmm::virt_phys_offset());
-    mem::palloc::dealloc_frame(paddr).expect("failed to dealloc frame");
+    mem::palloc::dealloc_frames(paddr, pages).expect("failed to dealloc frames");
 }
 
 struct EcraosGlobalAlloc;
