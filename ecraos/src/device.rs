@@ -553,8 +553,18 @@ fn probe_device_tree(addr: PhysAddr) {
     let vaddr = va!(addr.as_usize() + crate::mem::vmm::virt_phys_offset());
 
     let dtb = unsafe { DevTree::from_raw_pointer(vaddr.as_ptr()).expect("failed to load dtb") };
-    let boot_cpuid_phys = dtb.boot_cpuid_phys();
-    info!("Boot CPU ID: {}", boot_cpuid_phys);
+    let dtb_boot_cpuid_phys = dtb.boot_cpuid_phys();
+    let runtime_boot_cpuid_phys = crate::mp::current_cpu_phys_id();
+    info!(
+        "Boot CPU ID: runtime {:#x}, device tree {:#x}",
+        runtime_boot_cpuid_phys, dtb_boot_cpuid_phys
+    );
+    if runtime_boot_cpuid_phys != dtb_boot_cpuid_phys as usize {
+        warn!(
+            "Device Tree boot CPU ID {:#x} differs from runtime hart ID {:#x}; using runtime hart ID as BSP",
+            dtb_boot_cpuid_phys, runtime_boot_cpuid_phys
+        );
+    }
 
     let layout = DevTreeIndex::get_layout(&dtb).expect("failed to get layout");
     let buf_ptr = unsafe { alloc(layout) };
@@ -602,11 +612,17 @@ fn probe_device_tree(addr: PhysAddr) {
     if cpu_ids.is_empty() {
         panic!("no CPU nodes found in Device Tree");
     }
+    if !cpu_ids.contains(&runtime_boot_cpuid_phys) {
+        panic!(
+            "runtime BSP hart ID {:#x} is not present in Device Tree CPU nodes",
+            runtime_boot_cpuid_phys
+        );
+    }
 
     drop(index);
     unsafe { dealloc(buf_ptr, layout) };
 
-    crate::mp::init_cpu_list(cpu_ids.into_boxed_slice(), boot_cpuid_phys as _);
+    crate::mp::init_cpu_list(cpu_ids.into_boxed_slice(), runtime_boot_cpuid_phys);
 }
 
 /// Probes and prints platform device information sources.
