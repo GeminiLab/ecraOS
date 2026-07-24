@@ -95,42 +95,44 @@ pub fn alloc_frame() -> exbuddy::BuddyResult<PhysAddr> {
     with_allocator(|b| b.alloc_frame())
 }
 
-/// Allocates a buddy block that can contain at least `frame_count` frames.
+/// Allocates exactly `frame_count` contiguous physical frames.
 ///
-/// The returned block is aligned to at least `align` bytes. Since this uses the
-/// buddy allocator's frame API, the actual reserved block may be larger than
-/// `frame_count` when the count is not a power of two. The same `frame_count`
-/// must be passed back to [`dealloc_frames`].
+/// The returned frame range is aligned to at least `align` bytes. The same
+/// `frame_count` must be passed back to [`dealloc_frames`].
 pub fn alloc_frames(frame_count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr> {
     let page_size = vmm::page_size();
     with_allocator(|b| b.alloc_frames(frame_count, align.max(page_size)))
 }
 
-/// Marks exactly `frame_count` frames starting at `addr` as allocated.
+/// Allocates exactly `frame_count` physical frames at `addr`.
 ///
-/// Unlike [`alloc_frames`], this address-specific API operates on the exact
-/// range requested by the caller.
+/// The same `addr` and `frame_count` must be passed back to
+/// [`dealloc_frames_at`].
 #[expect(unused)]
-pub fn alloc_blocks_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult<PhysAddr> {
-    with_allocator(|b| b.alloc_blocks_at(addr, frame_count).map(|_| addr))
+pub fn alloc_frames_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult<PhysAddr> {
+    with_allocator(|b| b.alloc_frames_at(addr, frame_count).map(|_| addr))
 }
 
-/// Deallocates a single physical frame.
+/// Deallocates a single physical frame allocated with [`alloc_frame`].
 pub fn dealloc_frame(addr: PhysAddr) -> exbuddy::BuddyResult {
     with_allocator(|b| b.dealloc_frame(addr))
 }
 
-/// Deallocates a buddy block previously returned by [`alloc_frames`].
+/// Deallocates an exact frame range allocated with [`alloc_frames`].
 ///
-/// `frame_count` must match the count that was passed to [`alloc_frames`].
+/// The `addr` and `frame_count` arguments must match the corresponding
+/// [`alloc_frames`] call exactly.
 pub fn dealloc_frames(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
     with_allocator(|b| b.dealloc_frames(addr, frame_count))
 }
 
-/// Deallocates an exact frame range allocated with [`alloc_blocks_at`].
+/// Deallocates an exact frame range allocated with [`alloc_frames_at`].
+///
+/// The `addr` and `frame_count` arguments must match the corresponding
+/// [`alloc_frames_at`] call exactly.
 #[expect(unused)]
-pub fn dealloc_blocks_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
-    with_allocator(|b| b.dealloc_blocks_at(addr, frame_count))
+pub fn dealloc_frames_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
+    with_allocator(|b| b.dealloc_frames_at(addr, frame_count))
 }
 
 /// Returns whether the page containing `addr` is allocated.

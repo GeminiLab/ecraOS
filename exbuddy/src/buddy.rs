@@ -335,6 +335,9 @@ impl BuddyAllocator {
     /// Allocates multiple contiguous buddy blocks starting at the given
     /// physical address and having the given total page count.
     ///
+    /// The target range may span multiple buddy blocks and may exceed the size
+    /// of a single maximum-order buddy block.
+    ///
     /// The `addr` must be aligned to the page size, or this function will return an error.
     ///
     /// The specified address range must be free, or this function will return an error.
@@ -348,6 +351,9 @@ impl BuddyAllocator {
 
     /// Deallocates multiple contiguous buddy blocks starting at the given
     /// physical address and having the given total page count.
+    ///
+    /// The target range may span multiple buddy blocks and may exceed the size
+    /// of a single maximum-order buddy block.
     ///
     /// The `addr` must be aligned to the page size, or this function will return an error.
     ///
@@ -366,52 +372,77 @@ impl BuddyAllocator {
 impl BuddyAllocator {
     /// Allocates `count` contiguous physical frames with the given alignment.
     ///
-    /// This function is a convenience wrapper around [`alloc_block`](Self::alloc_block), and always
-    /// allocates a full buddy block.
+    /// This function allocates exactly `count` frames. It first searches for a
+    /// single suitable free buddy block, then falls back to a best-effort first-fit
+    /// search across adjacent free blocks. The actual metadata update is performed
+    /// by `alloc_blocks_at`.
+    ///
+    /// The returned frame range may span multiple buddy blocks, but never spans
+    /// multiple managed sections.
     pub fn alloc_frames(&mut self, count: usize, align: usize) -> BuddyResult<PhysAddr> {
         if count == 0 {
             return Err(BuddyError::InvalidPageCount);
         }
 
-        self.alloc_block(page_count_to_order_ceiling(count)?, align)
+        let page_size = self.page_size();
+        if !align.is_power_of_two() || align < page_size {
+            return Err(BuddyError::InvalidAlignment);
+        }
+
+        let required_bytes = count.checked_mul(page_size).ok_or(BuddyError::NoMemory)?;
+
+        // The fast path is to find a single free block.
+        let candidate = page_count_to_order_ceiling(count).ok().and_then(|order| {
+            self.section_iter()
+                .find_map(|section| section.find_free_block(order, align, self.page_size_shift))
+        });
+
+        // The slow path is to find a free range.
+        let candidate = candidate.or_else(|| {
+            self.section_iter().find_map(|section| {
+                section.find_free_range(required_bytes, align, self.page_size_shift)
+            })
+        });
+
+        let Some(addr) = candidate else {
+            return Err(BuddyError::NoMemory);
+        };
+
+        self.alloc_blocks_at(addr, count)?;
+        Ok(addr)
+    }
+
+    /// Frees physical frames previously obtained via `alloc_frames`.
+    ///
+    /// The `addr` and `count` arguments must match the corresponding
+    /// `alloc_frames` call exactly.
+    pub fn dealloc_frames(&mut self, addr: PhysAddr, count: usize) -> BuddyResult {
+        self.dealloc_blocks_at(addr, count)
     }
 
     /// Allocates a single physical frame.
     ///
-    /// This is a convenience wrapper around [`alloc_frames`](Self::alloc_frames).
+    /// This is the order-0 buddy block fast path.
     pub fn alloc_frame(&mut self) -> BuddyResult<PhysAddr> {
-        self.alloc_frames(1, self.page_size())
+        self.alloc_block(0, self.page_size())
     }
 
-    /// Frees physical frames previously obtained via [`alloc_frames`](Self::alloc_frames).
-    ///
-    /// This function is a convenience wrapper around [`dealloc_block`](Self::dealloc_block), and
-    /// expects the `count` to be the same as the one used when calling
-    /// [`alloc_frames`](Self::alloc_frames). Mismatched count **MAY** result in error.
-    pub fn dealloc_frames(&mut self, addr: PhysAddr, count: usize) -> BuddyResult {
-        self.dealloc_block(addr, page_count_to_order_ceiling(count)?)
-    }
-
-    /// Frees a single physical frame.
-    ///
-    /// This is a convenience wrapper around [`dealloc_frames`](Self::dealloc_frames).
+    /// Frees a single physical frame previously obtained via `alloc_frame`.
     pub fn dealloc_frame(&mut self, addr: PhysAddr) -> BuddyResult<()> {
-        self.dealloc_frames(addr, 1)
+        self.dealloc_block(addr, 0)
     }
 
-    /// Allocates `count` contiguous physical frames starting at the given physical address.
+    /// Allocates exactly `count` physical frames starting at the given physical address.
     ///
-    /// This function is merely a wrapper around [`alloc_blocks_at`](Self::alloc_blocks_at).
+    /// This function is a frame-oriented wrapper around `alloc_blocks_at`.
     pub fn alloc_frames_at(&mut self, addr: PhysAddr, count: usize) -> BuddyResult {
         self.alloc_blocks_at(addr, count)
     }
 
-    /// Frees `count` contiguous physical frames starting at the given physical address.
+    /// Frees exactly `count` physical frames starting at the given physical address.
     ///
-    /// This function is merely a wrapper around [`dealloc_blocks_at`](Self::dealloc_blocks_at).
-    /// `addr` and `count` are expected to match the ones that were used when calling
-    /// [`alloc_frames_at`](Self::alloc_frames_at). Mismatched `addr` and `count` **MAY** result in
-    /// error.
+    /// The `addr` and `count` arguments must match the corresponding
+    /// `alloc_frames_at` call exactly.
     pub fn dealloc_frames_at(&mut self, addr: PhysAddr, count: usize) -> BuddyResult {
         self.dealloc_blocks_at(addr, count)
     }

@@ -11,10 +11,7 @@ use std::{
 
 use memory_addr::{MemoryAddr, PhysAddrRange, pa};
 
-use crate::{
-    BuddyAllocator, BuddyError, BuddySection, MAX_ORDER, page_count_to_order_ceiling,
-    page_count_to_order_floor,
-};
+use crate::{BuddyAllocator, BuddyError, BuddySection, MAX_ORDER, page_count_to_order_floor};
 
 const PAGE_SHIFTS: [usize; 2] = [4, 5];
 const RANDOM_PHASES: usize = 3;
@@ -530,7 +527,10 @@ impl ShadowModel {
         if pages > 0 {
             let (section_index, page_index) = self.locate_range(addr, pages).unwrap();
             assert!(self.range_is_free(section_index, page_index, pages));
-            if matches!(family, ApiFamily::BlocksAt | ApiFamily::FramesAt) {
+            if matches!(
+                family,
+                ApiFamily::Frames | ApiFamily::BlocksAt | ApiFamily::FramesAt
+            ) {
                 self.mark_allocated_range(addr, pages);
             } else {
                 self.mark_block_allocated(section_index, page_index, order);
@@ -642,8 +642,8 @@ impl ShadowModel {
         let result = allocator.alloc_frames(count, align);
         match result {
             Ok(addr) => {
-                let order = page_count_to_order_ceiling(count).unwrap_or(0);
-                let pages = if count == 0 { 0 } else { 1usize << order };
+                let pages = count;
+                let order = page_count_to_order_floor(count).unwrap_or(0);
                 let addr = addr.as_usize();
                 assert_eq!(addr % self.page_size(), 0);
                 assert_eq!(addr % align, 0);
@@ -920,7 +920,7 @@ fn alloc_block_and_frame_boundaries() {
             (1usize << MAX_ORDER) + 1,
         ] {
             let result = model.alloc_frames_checked(&mut fixture.allocator, count, page_size);
-            if count == 0 || count > (1usize << MAX_ORDER) {
+            if count == 0 {
                 assert_eq!(result, Err(BuddyError::InvalidPageCount));
             } else {
                 assert!(result.is_ok() || result == Err(BuddyError::NoMemory));
@@ -929,11 +929,11 @@ fn alloc_block_and_frame_boundaries() {
         }
 
         let before = fixture.allocator.stats();
-        let rounded = fixture.allocator.alloc_frames(3, page_size).unwrap();
+        let exact = fixture.allocator.alloc_frames(3, page_size).unwrap();
         let after_alloc = fixture.allocator.stats();
-        assert_eq!(after_alloc.used_pages(), before.used_pages() + 4);
-        assert_eq!(after_alloc.free_pages(), before.free_pages() - 4);
-        fixture.allocator.dealloc_frames(rounded, 3).unwrap();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + 3);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - 3);
+        fixture.allocator.dealloc_frames(exact, 3).unwrap();
         let after_dealloc = fixture.allocator.stats();
         assert_eq!(after_dealloc.total_pages(), before.total_pages());
         assert_eq!(after_dealloc.meta_pages(), before.meta_pages());
@@ -941,6 +941,192 @@ fn alloc_block_and_frame_boundaries() {
         assert_eq!(after_dealloc.used_pages(), before.used_pages());
         assert_eq!(after_dealloc.free_pages(), before.free_pages());
         assert_eq!(after_dealloc.unused_pages(), before.unused_pages());
+    });
+}
+
+#[test]
+fn alloc_frames_uses_exact_non_power_of_two_counts() {
+    run_for_page_sizes(|page_size_shift| {
+        let page_size = page_size(page_size_shift);
+        let mut fixture = AllocatorFixture::with_standard_sections(page_size_shift);
+
+        for count in [3usize, 5, 6, 7, 9, 17] {
+            let before = fixture.allocator.stats();
+            let addr = fixture.allocator.alloc_frames(count, page_size).unwrap();
+            let after_alloc = fixture.allocator.stats();
+            assert_eq!(after_alloc.used_pages(), before.used_pages() + count);
+            assert_eq!(after_alloc.free_pages(), before.free_pages() - count);
+
+            fixture.allocator.dealloc_frames(addr, count).unwrap();
+            let after_dealloc = fixture.allocator.stats();
+            assert_eq!(after_dealloc.total_pages(), before.total_pages());
+            assert_eq!(after_dealloc.meta_pages(), before.meta_pages());
+            assert_eq!(after_dealloc.heap_pages(), before.heap_pages());
+            assert_eq!(after_dealloc.used_pages(), before.used_pages());
+            assert_eq!(after_dealloc.free_pages(), before.free_pages());
+            assert_eq!(after_dealloc.unused_pages(), before.unused_pages());
+        }
+    });
+}
+
+#[test]
+fn alloc_frames_can_exceed_single_block_capacity() {
+    run_for_page_sizes(|page_size_shift| {
+        let page_size = page_size(page_size_shift);
+        let mut fixture = AllocatorFixture::empty(page_size_shift);
+        fixture.add_section(huge_total_pages(page_size_shift), 1);
+
+        let count = (1usize << MAX_ORDER) + 1;
+        let before = fixture.allocator.stats();
+        let addr = fixture.allocator.alloc_frames(count, page_size).unwrap();
+        let after_alloc = fixture.allocator.stats();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + count);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - count);
+
+        fixture.allocator.dealloc_frames(addr, count).unwrap();
+        let after_dealloc = fixture.allocator.stats();
+        assert_eq!(after_dealloc.used_pages(), before.used_pages());
+        assert_eq!(after_dealloc.free_pages(), before.free_pages());
+    });
+}
+
+#[test]
+fn at_apis_can_exceed_single_block_capacity() {
+    run_for_page_sizes(|page_size_shift| {
+        let mut fixture = AllocatorFixture::empty(page_size_shift);
+        fixture.add_section(huge_total_pages(page_size_shift), 1);
+
+        let heap_start = fixture
+            .allocator
+            .section_iter()
+            .next()
+            .unwrap()
+            .heap_region
+            .start;
+        let count = (1usize << MAX_ORDER) + 1;
+
+        let before = fixture.allocator.stats();
+        fixture
+            .allocator
+            .alloc_blocks_at(heap_start, count)
+            .unwrap();
+        let after_alloc = fixture.allocator.stats();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + count);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - count);
+        fixture
+            .allocator
+            .dealloc_blocks_at(heap_start, count)
+            .unwrap();
+        let after_dealloc = fixture.allocator.stats();
+        assert_eq!(after_dealloc.used_pages(), before.used_pages());
+        assert_eq!(after_dealloc.free_pages(), before.free_pages());
+
+        fixture
+            .allocator
+            .alloc_frames_at(heap_start, count)
+            .unwrap();
+        let after_alloc = fixture.allocator.stats();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + count);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - count);
+        fixture
+            .allocator
+            .dealloc_frames_at(heap_start, count)
+            .unwrap();
+        let after_dealloc = fixture.allocator.stats();
+        assert_eq!(after_dealloc.used_pages(), before.used_pages());
+        assert_eq!(after_dealloc.free_pages(), before.free_pages());
+    });
+}
+
+#[test]
+fn alloc_frames_uses_adjacent_free_blocks_when_no_single_block_fits() {
+    run_for_page_sizes(|page_size_shift| {
+        let page_size = page_size(page_size_shift);
+        let mut fixture = AllocatorFixture::empty(page_size_shift);
+        fixture.add_section(total_pages_for_heap_at_least(page_size_shift, 16), 1);
+
+        let (heap_start, heap_pages) = {
+            let section = fixture.allocator.section_iter().next().unwrap();
+            (section.heap_region.start, section.stats().heap_pages())
+        };
+
+        assert!(heap_pages >= 16);
+
+        fixture.allocator.alloc_blocks_at(heap_start, 1).unwrap();
+        fixture
+            .allocator
+            .alloc_blocks_at(heap_start + 7 * page_size, heap_pages - 7)
+            .unwrap();
+
+        let before = fixture.allocator.stats();
+        assert_eq!(before.free_pages(), 6);
+        let addr = fixture.allocator.alloc_frames(6, page_size).unwrap();
+        assert_eq!(addr, heap_start + page_size);
+        let after_alloc = fixture.allocator.stats();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + 6);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - 6);
+
+        fixture.allocator.dealloc_frames(addr, 6).unwrap();
+        let after_dealloc = fixture.allocator.stats();
+        assert_eq!(after_dealloc.free_pages(), before.free_pages());
+    });
+}
+
+#[test]
+fn blocks_at_range_overflow_returns_operation_error() {
+    run_for_page_sizes(|page_size_shift| {
+        let mut fixture = AllocatorFixture::empty(page_size_shift);
+        fixture.add_section(total_pages_for_heap_at_least(page_size_shift, 16), 1);
+        let heap_start = fixture
+            .allocator
+            .section_iter()
+            .next()
+            .unwrap()
+            .heap_region
+            .start;
+
+        assert_eq!(
+            fixture.allocator.alloc_blocks_at(heap_start, usize::MAX),
+            Err(BuddyError::NoMemory)
+        );
+        assert_eq!(
+            fixture.allocator.dealloc_blocks_at(heap_start, usize::MAX),
+            Err(BuddyError::NotInHeap)
+        );
+    });
+}
+
+#[test]
+fn alloc_frames_returns_no_memory_without_large_enough_free_range() {
+    run_for_page_sizes(|page_size_shift| {
+        let page_size = page_size(page_size_shift);
+        let mut fixture = AllocatorFixture::empty(page_size_shift);
+        fixture.add_section(total_pages_for_heap_at_least(page_size_shift, 16), 1);
+
+        let (heap_start, heap_pages) = {
+            let section = fixture.allocator.section_iter().next().unwrap();
+            (section.heap_region.start, section.stats().heap_pages())
+        };
+
+        assert!(heap_pages >= 16);
+
+        fixture.allocator.alloc_blocks_at(heap_start, 1).unwrap();
+        fixture
+            .allocator
+            .alloc_blocks_at(heap_start + 4 * page_size, 1)
+            .unwrap();
+        fixture
+            .allocator
+            .alloc_blocks_at(heap_start + 8 * page_size, heap_pages - 8)
+            .unwrap();
+
+        let before = fixture.allocator.stats();
+        assert_eq!(before.free_pages(), 6);
+        assert_eq!(
+            fixture.allocator.alloc_frames(4, page_size),
+            Err(BuddyError::NoMemory)
+        );
+        assert_eq!(fixture.allocator.stats().free_pages(), before.free_pages());
     });
 }
 

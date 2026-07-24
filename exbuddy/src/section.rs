@@ -1,6 +1,6 @@
 use core::{mem, ptr, slice};
 
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, align_up};
+use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, align_up, pa};
 
 use crate::{
     MAX_ORDER,
@@ -19,6 +19,23 @@ pub struct SectionLayout {
     pub metadata_pages: usize,
     /// Number of pages used for the heap.
     pub heap_pages: usize,
+}
+
+/// Creates a physical address range for a page count.
+///
+/// Returns the provided error when the page size, byte size, or range end cannot
+/// be represented.
+fn checked_page_range(
+    addr: PhysAddr,
+    count: usize,
+    page_size_shift: usize,
+    error: BuddyError,
+) -> BuddyResult<PhysAddrRange> {
+    let page_size = 1usize.checked_shl(page_size_shift as u32).ok_or(error)?;
+    let size = count.checked_mul(page_size).ok_or(error)?;
+    let end = addr.as_usize().checked_add(size).ok_or(error)?;
+
+    Ok(PhysAddrRange::new(addr, pa!(end)))
 }
 
 impl SectionLayout {
@@ -459,6 +476,88 @@ impl BuddySection {
 
 /// Allocation and deallocation.
 impl BuddySection {
+    /// Finds a free buddy block of at least the given order and alignment.
+    ///
+    /// The returned address is the head of a free buddy block. The caller must
+    /// still perform the actual allocation through `alloc_blocks_at`.
+    pub(crate) fn find_free_block(
+        &self,
+        order: usize,
+        align: usize,
+        page_size_shift: usize,
+    ) -> Option<PhysAddr> {
+        let visitor = self.visitor();
+
+        for free_block_order in order..=MAX_ORDER {
+            let mut free_block = visitor.free_list_head(free_block_order);
+            while let Some(sfn) = free_block {
+                let addr = sfn.to_pfn(self.heap_base_pfn).to_phys_addr(page_size_shift);
+
+                if addr.is_aligned(align) {
+                    return Some(addr);
+                }
+
+                free_block = visitor.meta(sfn).next();
+            }
+        }
+
+        None
+    }
+
+    /// Finds an aligned exact frame range inside adjacent free buddy blocks.
+    ///
+    /// The returned address is only a candidate. The caller must still perform the
+    /// actual allocation through `alloc_blocks_at`.
+    pub(crate) fn find_free_range(
+        &self,
+        required_bytes: usize,
+        align: usize,
+        page_size_shift: usize,
+    ) -> Option<PhysAddr> {
+        let visitor = self.visitor();
+        let mut current_sfn = SectionFrameNumber::new(0);
+        let mut candidate_start = None;
+        let heap_pages = visitor.stats().heap_pages();
+
+        while current_sfn.as_usize() < heap_pages {
+            let meta = visitor.meta(current_sfn);
+            match meta.flags {
+                PageFlags::InBlock => {
+                    unreachable!("[BUG] block iteration reached an in-block page")
+                }
+                PageFlags::Free => {
+                    let start = candidate_start.unwrap_or_else(|| {
+                        current_sfn
+                            .to_pfn(self.heap_base_pfn)
+                            .to_phys_addr(page_size_shift)
+                            .align_up(align)
+                    });
+
+                    let block_end = (current_sfn + (1usize << meta.order))
+                        .to_pfn(self.heap_base_pfn)
+                        .to_phys_addr(page_size_shift);
+
+                    if start
+                        .as_usize()
+                        .checked_add(required_bytes)
+                        .is_some_and(|candidate_end| candidate_end <= block_end.as_usize())
+                    {
+                        return Some(start);
+                    }
+
+                    candidate_start = Some(start);
+                }
+                PageFlags::Allocated => {
+                    candidate_start = None;
+                }
+            }
+
+            current_sfn += 1usize << meta.order;
+        }
+
+        None
+    }
+
     /// Allocates a free block of the given order and alignment.
     pub fn alloc_block(
         &mut self,
@@ -693,7 +792,7 @@ impl BuddySection {
             return Err(BuddyError::InvalidPageCount);
         }
 
-        let range = PhysAddrRange::from_start_size(addr, count << page_size_shift);
+        let range = checked_page_range(addr, count, page_size_shift, BuddyError::NoMemory)?;
 
         // Check whether the range is free
         self.iter_blocks_in_range(
@@ -711,7 +810,7 @@ impl BuddySection {
         )?;
 
         self.iter_blocks_in_range(
-            PhysAddrRange::from_start_size(addr, count << page_size_shift),
+            range,
             page_size_shift,
             |visitor,
              free_block_sfn: SectionFrameNumber,
@@ -757,7 +856,7 @@ impl BuddySection {
             return Err(BuddyError::InvalidPageCount);
         }
 
-        let range = PhysAddrRange::from_start_size(addr, count << page_size_shift);
+        let range = checked_page_range(addr, count, page_size_shift, BuddyError::NotInHeap)?;
 
         self.iter_blocks_in_range(
             range,
