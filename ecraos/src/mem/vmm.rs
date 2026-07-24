@@ -11,7 +11,7 @@ use size_disp::SizeDisplay;
 
 use crate::{
     kprintln,
-    mem::{self, pmm::MemoryRegions, region_flags_to_mapping},
+    mem::{allocs, pmm::MemoryRegions, region_flags_to_mapping},
 };
 
 /// The layout of the virtual address space.
@@ -53,7 +53,7 @@ pub fn page_count_for_bytes(bytes: usize) -> usize {
 }
 
 #[inline]
-pub fn virt_phys_offset() -> usize {
+pub fn direct_mapping_offset() -> usize {
     VIRTUAL_ADDRESS_SPACE
         .layout
         .direct_mapping_range
@@ -189,7 +189,7 @@ fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
 /// Initializes the page table with both identical mappings and mappings
 /// to the direct mapping area.
 pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &MemoryRegions) {
-    let virt_phys_offset = virt_phys_offset();
+    let virt_phys_offset = direct_mapping_offset();
     let mut pt = VIRTUAL_ADDRESS_SPACE
         .page_table_type_mutex
         .lock()
@@ -249,22 +249,22 @@ impl PageAllocator for TmpGoodPagingHandler {
     }
 
     fn alloc_frame() -> Option<PhysAddr> {
-        mem::palloc::alloc_frame().ok()
+        allocs::palloc::alloc_frame().ok()
     }
 
     fn alloc_frames(page_count: usize) -> Option<PhysAddr> {
-        mem::palloc::alloc_frames(page_count, 1 << page_size_shift()).ok()
+        allocs::palloc::alloc_frames(page_count, 1 << page_size_shift()).ok()
     }
 
     fn dealloc_frame(addr: PhysAddr) {
-        mem::palloc::dealloc_frame(addr).unwrap();
+        allocs::palloc::dealloc_frame(addr).unwrap();
     }
 
     fn dealloc_frames(addr: PhysAddr, page_count: usize) {
-        mem::palloc::dealloc_frames(addr, page_count).unwrap();
+        allocs::palloc::dealloc_frames(addr, page_count).unwrap();
     }
 
     fn phys_to_virt(addr: exboot::PhysAddr) -> VirtAddr {
-        VirtAddr::from_usize(addr.as_usize() + virt_phys_offset())
+        VirtAddr::from_usize(addr.as_usize() + direct_mapping_offset())
     }
 }

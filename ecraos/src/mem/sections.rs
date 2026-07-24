@@ -105,3 +105,14 @@ pub fn kernel_range() -> memory_addr::VirtAddrRange {
         )
     }
 }
+
+/// Clears the BSS section.
+///
+/// This function should be called after the relocation of the kernel image.
+pub fn clear_bss() {
+    let bss_range = bss();
+    let bss_slice =
+        unsafe { core::slice::from_raw_parts_mut(bss_range.start.as_mut_ptr(), bss_range.size()) };
+
+    bss_slice.fill(0);
+}

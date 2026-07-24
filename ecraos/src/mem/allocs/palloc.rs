@@ -1,4 +1,4 @@
-//! Kernel physical page allocator integration.
+//! The physical page allocator.
 
 use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
@@ -7,20 +7,25 @@ use log::{debug, info};
 use memory_addr::PhysAddr;
 use size_disp::SizeDisplay;
 
-use crate::{kprintln, mem};
+use crate::{
+    kprintln,
+    mem::{early, pmm, vmm},
+};
 
+/// The global buddy allocator.
 static BUDDY: SpinNoIrq<BuddyAllocator> = SpinNoIrq::new(BuddyAllocator::new());
 
+/// Initializes the page allocator.
 pub fn init_palloc() {
-    let phys_regions = mem::pmm::phys_mem_regions();
-    let page_size_shift = mem::vmm::page_size_shift();
-    let page_size = mem::vmm::page_size();
-    let vpo = mem::vmm::virt_phys_offset();
+    let phys_regions = pmm::phys_mem_regions();
+    let page_size_shift = vmm::page_size_shift();
+    let page_size = vmm::page_size();
+    let dmo = vmm::direct_mapping_offset();
 
     info!("Initializing page allocator...");
 
-    let early_alloc_range = mem::early::phys_addr_range();
-    let (early_alloc_bitmap, _, early_allocbase_paddr) = mem::early::destroy_early_page_allocator();
+    let early_alloc_range = early::phys_addr_range();
+    let (early_alloc_bitmap, _, early_allocbase_paddr) = early::destroy_early_page_allocator();
 
     debug!(
         "Early page allocator at {:x} destroyed, {} pages allocated",
@@ -29,9 +34,8 @@ pub fn init_palloc() {
     );
 
     let mut buddy = BUDDY.lock();
-    // SAFETY: we believe that we have mapped the physical memory to the virtual
-    // memory correctly.
-    unsafe { buddy.init(page_size_shift, vpo) }.expect("failed to init buddy allocator");
+    // SAFETY: we believe that we have mapped the physical memory to the virtual memory correctly.
+    unsafe { buddy.init(page_size_shift, dmo) }.expect("failed to init buddy allocator");
 
     for region in phys_regions {
         if !region.flags.contains(MemoryRegionFlags::FREE) {
@@ -80,46 +84,70 @@ pub fn init_palloc() {
     print_buddy_stats("Initial buddy allocator stats");
 }
 
+/// Runs a function with the buddy allocator locked.
+pub fn with_allocator<F: FnOnce(&mut BuddyAllocator) -> R, R>(f: F) -> R {
+    let mut buddy = BUDDY.lock();
+    f(&mut buddy)
+}
+
+/// Allocates a single physical frame.
 pub fn alloc_frame() -> exbuddy::BuddyResult<PhysAddr> {
-    BUDDY.lock().alloc_frame()
+    with_allocator(|b| b.alloc_frame())
 }
 
-pub fn alloc_frames(count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr> {
-    let page_size = mem::vmm::page_size();
-    BUDDY.lock().alloc_frames(count, align.max(page_size))
+/// Allocates a buddy block that can contain at least `frame_count` frames.
+///
+/// The returned block is aligned to at least `align` bytes. Since this uses the
+/// buddy allocator's frame API, the actual reserved block may be larger than
+/// `frame_count` when the count is not a power of two. The same `frame_count`
+/// must be passed back to [`dealloc_frames`].
+pub fn alloc_frames(frame_count: usize, align: usize) -> exbuddy::BuddyResult<PhysAddr> {
+    let page_size = vmm::page_size();
+    with_allocator(|b| b.alloc_frames(frame_count, align.max(page_size)))
 }
 
+/// Marks exactly `frame_count` frames starting at `addr` as allocated.
+///
+/// Unlike [`alloc_frames`], this address-specific API operates on the exact
+/// range requested by the caller.
 #[expect(unused)]
-pub fn alloc_blocks_at(paddr: PhysAddr, count: usize) -> exbuddy::BuddyResult<PhysAddr> {
-    BUDDY.lock().alloc_blocks_at(paddr, count)?;
-    Ok(paddr)
+pub fn alloc_blocks_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult<PhysAddr> {
+    with_allocator(|b| b.alloc_blocks_at(addr, frame_count).map(|_| addr))
 }
 
-pub fn dealloc_frames(addr: PhysAddr, count: usize) -> exbuddy::BuddyResult {
-    BUDDY.lock().dealloc_frames(addr, count)
-}
-
+/// Deallocates a single physical frame.
 pub fn dealloc_frame(addr: PhysAddr) -> exbuddy::BuddyResult {
-    BUDDY.lock().dealloc_frame(addr)
+    with_allocator(|b| b.dealloc_frame(addr))
 }
 
+/// Deallocates a buddy block previously returned by [`alloc_frames`].
+///
+/// `frame_count` must match the count that was passed to [`alloc_frames`].
+pub fn dealloc_frames(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
+    with_allocator(|b| b.dealloc_frames(addr, frame_count))
+}
+
+/// Deallocates an exact frame range allocated with [`alloc_blocks_at`].
 #[expect(unused)]
-pub fn dealloc_blocks_at(addr: PhysAddr, count: usize) -> exbuddy::BuddyResult {
-    BUDDY.lock().dealloc_blocks_at(addr, count)
+pub fn dealloc_blocks_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
+    with_allocator(|b| b.dealloc_blocks_at(addr, frame_count))
 }
 
+/// Returns whether the page containing `addr` is allocated.
 #[expect(unused)]
 pub fn is_allocated(addr: PhysAddr) -> exbuddy::BuddyResult<bool> {
-    BUDDY.lock().is_allocated(addr)
+    with_allocator(|b| b.is_allocated(addr))
 }
 
+/// Returns aggregate buddy allocator statistics.
 pub fn stats() -> AllocatorStats {
-    BUDDY.lock().stats()
+    with_allocator(|b| b.stats())
 }
 
+/// Prints aggregate buddy allocator statistics.
 pub fn print_buddy_stats(heading: &str) {
     let stats = stats();
-    let page_size_shift = mem::vmm::page_size_shift();
+    let page_size_shift = vmm::page_size_shift();
     let total = stats.total_pages();
     let meta = stats.meta_pages();
     let heap = stats.heap_pages();

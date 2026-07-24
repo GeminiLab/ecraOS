@@ -51,14 +51,12 @@ pub fn alloc_percpu_area_for_ap(ap_count: usize) {
     let percpu_page_count = mem::vmm::page_count_for_bytes(section_size());
 
     for _ in 0..ap_count {
-        let percpu_area = mem::vmalloc::VMALLOC
-            .lock()
-            .alloc_allocated(
-                percpu_page_count,
-                1,
-                MappingFlags::READ | MappingFlags::WRITE,
-            )
-            .expect("failed to allocate percpu area");
+        let percpu_area = mem::allocs::vmalloc::alloc_range_and_map_alloc(
+            percpu_page_count,
+            1,
+            MappingFlags::READ | MappingFlags::WRITE,
+        )
+        .expect("failed to allocate percpu area");
 
         percpu_area_bases.push(percpu_area.start);
     }

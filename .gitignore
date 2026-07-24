@@ -1,5 +1,7 @@
 /target
 /.worktrees
+/.agents
+skills-lock.json
 
 *.asm
 *.log

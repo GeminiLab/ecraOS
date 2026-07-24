@@ -3,23 +3,25 @@
 //! Maintains three intrusive doubly-linked lists of slab pages:
 //! - **partial**: some objects free (preferred for allocation)
 //! - **full**: no objects free
-//! - **empty**: all objects free (at most one cached; rest returned to buddy)
+//! - **empty**: all objects free (at most one cached; rest returned to caller)
+
+use memory_addr::{VirtAddr, va};
 
 use crate::{page::SlabPageHeader, size_class::SizeClass};
 
-/// Intrusive list head (address of the first `SlabPageHeader`, 0 = empty).
+/// Intrusive list head for slab page headers.
 #[derive(Debug, Clone, Copy)]
 struct ListHead {
-    first: usize,
+    first: Option<VirtAddr>,
 }
 
 impl ListHead {
     const fn empty() -> Self {
-        Self { first: 0 }
+        Self { first: None }
     }
 
     fn is_empty(&self) -> bool {
-        self.first == 0
+        self.first.is_none()
     }
 
     /// Pushes a slab page onto the front of the list.
@@ -27,16 +29,16 @@ impl ListHead {
     /// # Safety
     ///
     /// `base` must point to a valid `SlabPageHeader`.
-    unsafe fn push_front(&mut self, base: usize) {
+    unsafe fn push_front(&mut self, base: VirtAddr) {
         unsafe {
-            let hdr = &mut *(base as *mut SlabPageHeader);
-            hdr.list_prev = 0;
-            hdr.list_next = self.first;
-            if self.first != 0 {
-                let old = &mut *(self.first as *mut SlabPageHeader);
+            let hdr = &mut *base.as_mut_ptr_of::<SlabPageHeader>();
+            hdr.list_prev = va!(0);
+            hdr.list_next = self.first.unwrap_or(va!(0));
+            if let Some(first) = self.first {
+                let old = &mut *first.as_mut_ptr_of::<SlabPageHeader>();
                 old.list_prev = base;
             }
-            self.first = base;
+            self.first = Some(base);
         }
     }
 
@@ -45,36 +47,33 @@ impl ListHead {
     /// # Safety
     ///
     /// `base` must be in this list.
-    unsafe fn remove(&mut self, base: usize) {
+    unsafe fn remove(&mut self, base: VirtAddr) {
         unsafe {
-            let hdr = &*(base as *const SlabPageHeader);
+            let hdr = &*base.as_ptr_of::<SlabPageHeader>();
             let prev = hdr.list_prev;
             let next = hdr.list_next;
 
-            if prev != 0 {
-                (*(prev as *mut SlabPageHeader)).list_next = next;
+            if prev.as_usize() != 0 {
+                (*prev.as_mut_ptr_of::<SlabPageHeader>()).list_next = next;
             } else {
-                self.first = next;
+                self.first = (next.as_usize() != 0).then_some(next);
             }
-            if next != 0 {
-                (*(next as *mut SlabPageHeader)).list_prev = prev;
+            if next.as_usize() != 0 {
+                (*next.as_mut_ptr_of::<SlabPageHeader>()).list_prev = prev;
             }
             // Clear links
-            let hdr = &mut *(base as *mut SlabPageHeader);
-            hdr.list_prev = 0;
-            hdr.list_next = 0;
+            let hdr = &mut *base.as_mut_ptr_of::<SlabPageHeader>();
+            hdr.list_prev = va!(0);
+            hdr.list_next = va!(0);
         }
     }
 
-    /// Pops the first page from the list, returning 0 if empty.
-    unsafe fn pop_front(&mut self) -> usize {
+    /// Pops the first page from the list.
+    unsafe fn pop_front(&mut self) -> Option<VirtAddr> {
         unsafe {
-            if self.first == 0 {
-                return 0;
-            }
-            let base = self.first;
+            let base = self.first?;
             self.remove(base);
-            base
+            Some(base)
         }
     }
 }
@@ -97,8 +96,8 @@ pub struct SlabCache {
 pub enum CacheDeallocResult {
     /// Object freed, slab stays.
     Done,
-    /// Slab became empty and should be returned to the page allocator.
-    FreeSlab { base: usize, pages: usize },
+    /// Slab became empty and should be returned to the caller's page allocator.
+    FreeSlab { base: VirtAddr, pages: usize },
 }
 
 impl SlabCache {
@@ -114,7 +113,7 @@ impl SlabCache {
     }
 
     /// Tries to allocate one object, returning `Some(obj_addr)` or `None` if no slabs available.
-    pub fn alloc_object(&mut self, _page_size: usize) -> Option<usize> {
+    pub fn alloc_object(&mut self, _page_size: usize) -> Option<VirtAddr> {
         // 1. Try the first partial slab (drain remote frees first).
         if let Some(addr) = self.try_alloc_from_partial() {
             return Some(addr);
@@ -128,7 +127,11 @@ impl SlabCache {
 
         // 3. Try recycling an empty slab.
         if !self.empty.is_empty() {
-            let base = unsafe { self.empty.pop_front() };
+            let base = unsafe {
+                self.empty
+                    .pop_front()
+                    .expect("empty list checked before pop")
+            };
             self.empty_count -= 1;
             // Move to partial and alloc from it.
             unsafe { self.partial.push_front(base) };
@@ -140,29 +143,26 @@ impl SlabCache {
 
     /// Drains remote frees from the first full slab that has them and moves it
     /// back to the partial list.
-    fn reclaim_full_with_remote_frees(&mut self) -> Option<usize> {
+    fn reclaim_full_with_remote_frees(&mut self) -> Option<VirtAddr> {
         let mut base = self.full.first;
-        while base != 0 {
-            let next = unsafe { (*(base as *const SlabPageHeader)).list_next };
-            let hdr = unsafe { &mut *(base as *mut SlabPageHeader) };
+        while let Some(current) = base {
+            let next = unsafe { (*current.as_ptr_of::<SlabPageHeader>()).list_next };
+            let hdr = unsafe { &mut *current.as_mut_ptr_of::<SlabPageHeader>() };
             if hdr.has_remote_frees() {
-                hdr.drain_remote_frees(base);
-                unsafe { self.full.remove(base) };
-                return Some(base);
+                hdr.drain_remote_frees(current);
+                unsafe { self.full.remove(current) };
+                return Some(current);
             }
-            base = next;
+            base = (next.as_usize() != 0).then_some(next);
         }
         None
     }
 
     /// Attempts allocation from the first partial slab.
-    fn try_alloc_from_partial(&mut self) -> Option<usize> {
-        let base = self.partial.first;
-        if base == 0 {
-            return None;
-        }
+    fn try_alloc_from_partial(&mut self) -> Option<VirtAddr> {
+        let base = self.partial.first?;
 
-        let hdr = unsafe { &mut *(base as *mut SlabPageHeader) };
+        let hdr = unsafe { &mut *base.as_mut_ptr_of::<SlabPageHeader>() };
 
         // Drain any remote frees first.
         if hdr.has_remote_frees() {
@@ -186,10 +186,10 @@ impl SlabCache {
     /// Frees an object back to this cache (local CPU path -- under lock).
     ///
     /// Returns whether the slab should be returned to the page allocator.
-    pub fn dealloc_object(&mut self, page_size: usize, obj_addr: usize) -> CacheDeallocResult {
+    pub fn dealloc_object(&mut self, page_size: usize, obj_addr: VirtAddr) -> CacheDeallocResult {
         let slab_bytes = self.size_class.slab_pages(page_size) * page_size;
         let base = SlabPageHeader::base_from_obj_addr(obj_addr, slab_bytes, page_size);
-        let hdr = unsafe { &mut *(base as *mut SlabPageHeader) };
+        let hdr = unsafe { &mut *base.as_mut_ptr_of::<SlabPageHeader>() };
         let was_full = hdr.is_local_full() && !hdr.has_remote_frees();
 
         let idx = hdr.object_index(base, obj_addr);
@@ -231,9 +231,9 @@ impl SlabCache {
         }
     }
 
-    /// Registers a newly allocated slab page (from the buddy allocator).
-    pub fn add_slab(&mut self, base: usize, bytes: usize, owner_cpu: u16) {
-        let hdr = unsafe { &mut *(base as *mut SlabPageHeader) };
+    /// Registers newly allocated slab memory supplied by the caller.
+    pub fn add_slab(&mut self, base: VirtAddr, bytes: usize, owner_cpu: u16) {
+        let hdr = unsafe { &mut *base.as_mut_ptr_of::<SlabPageHeader>() };
         hdr.init(self.size_class, bytes, owner_cpu);
         unsafe { self.partial.push_front(base) };
     }

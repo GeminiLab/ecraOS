@@ -265,7 +265,6 @@ dependencies = [
 name = "exslab"
 version = "0.1.0"
 dependencies = [
- "kspin",
  "memory_addr",
 ]
 

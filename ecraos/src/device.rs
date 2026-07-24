@@ -113,7 +113,7 @@ impl Handler for AcpiHandler {
         physical_address: usize,
         size: usize,
     ) -> PhysicalMapping<Self, T> {
-        let virtual_address = physical_address + mem::vmm::virt_phys_offset();
+        let virtual_address = physical_address + mem::vmm::direct_mapping_offset();
         let virtual_start = NonNull::new(virtual_address as *mut T)
             .expect("direct-mapped ACPI physical address must be non-null");
 
@@ -131,42 +131,62 @@ impl Handler for AcpiHandler {
     }
 
     fn read_u8(&self, address: usize) -> u8 {
-        unsafe { core::ptr::read_volatile((address + mem::vmm::virt_phys_offset()) as *const u8) }
+        unsafe {
+            core::ptr::read_volatile((address + mem::vmm::direct_mapping_offset()) as *const u8)
+        }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        unsafe { core::ptr::read_volatile((address + mem::vmm::virt_phys_offset()) as *const u16) }
+        unsafe {
+            core::ptr::read_volatile((address + mem::vmm::direct_mapping_offset()) as *const u16)
+        }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        unsafe { core::ptr::read_volatile((address + mem::vmm::virt_phys_offset()) as *const u32) }
+        unsafe {
+            core::ptr::read_volatile((address + mem::vmm::direct_mapping_offset()) as *const u32)
+        }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        unsafe { core::ptr::read_volatile((address + mem::vmm::virt_phys_offset()) as *const u64) }
+        unsafe {
+            core::ptr::read_volatile((address + mem::vmm::direct_mapping_offset()) as *const u64)
+        }
     }
 
     fn write_u8(&self, address: usize, value: u8) {
         unsafe {
-            core::ptr::write_volatile((address + mem::vmm::virt_phys_offset()) as *mut u8, value)
+            core::ptr::write_volatile(
+                (address + mem::vmm::direct_mapping_offset()) as *mut u8,
+                value,
+            )
         }
     }
 
     fn write_u16(&self, address: usize, value: u16) {
         unsafe {
-            core::ptr::write_volatile((address + mem::vmm::virt_phys_offset()) as *mut u16, value)
+            core::ptr::write_volatile(
+                (address + mem::vmm::direct_mapping_offset()) as *mut u16,
+                value,
+            )
         }
     }
 
     fn write_u32(&self, address: usize, value: u32) {
         unsafe {
-            core::ptr::write_volatile((address + mem::vmm::virt_phys_offset()) as *mut u32, value)
+            core::ptr::write_volatile(
+                (address + mem::vmm::direct_mapping_offset()) as *mut u32,
+                value,
+            )
         }
     }
 
     fn write_u64(&self, address: usize, value: u64) {
         unsafe {
-            core::ptr::write_volatile((address + mem::vmm::virt_phys_offset()) as *mut u64, value)
+            core::ptr::write_volatile(
+                (address + mem::vmm::direct_mapping_offset()) as *mut u64,
+                value,
+            )
         }
     }
 
@@ -550,7 +570,7 @@ fn probe_device_tree(addr: PhysAddr) {
     use fdt_rs::{base::*, index::*, prelude::*};
 
     // Only detect CPUs here
-    let vaddr = va!(addr.as_usize() + crate::mem::vmm::virt_phys_offset());
+    let vaddr = va!(addr.as_usize() + crate::mem::vmm::direct_mapping_offset());
 
     let dtb = unsafe { DevTree::from_raw_pointer(vaddr.as_ptr()).expect("failed to load dtb") };
     let dtb_boot_cpuid_phys = dtb.boot_cpuid_phys();

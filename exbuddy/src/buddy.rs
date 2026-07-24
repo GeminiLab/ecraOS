@@ -70,7 +70,6 @@ use crate::{
 ///
 /// Such arrangement is useful as it ensures that all blocks are naturally aligned to its maximal
 /// possible order (and therefore all possible orders).
-///
 pub struct BuddyAllocator {
     /// Page size shift.
     ///

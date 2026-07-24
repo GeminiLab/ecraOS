@@ -121,14 +121,12 @@ pub fn start_secondary_cpus() {
         let phys_id = LOGI_TO_PHYS_ID_MAP.deref().get(&logi_id).unwrap();
         info!("Starting up CPU {}: Physical ID {:#x}", logi_id, phys_id);
 
-        let boot_stack = crate::mem::vmalloc::VMALLOC
-            .lock()
-            .alloc_allocated(
-                crate::mem::vmm::page_count_for_bytes(crate::mem::BSP_STACK_SIZE),
-                1,
-                MappingFlags::WRITE | MappingFlags::READ,
-            )
-            .unwrap_or_else(|e| panic!("Failed to allocate boot stack for CPU {}: {}", logi_id, e));
+        let boot_stack = crate::mem::allocs::vmalloc::alloc_range_and_map_alloc(
+            crate::mem::vmm::page_count_for_bytes(crate::mem::BSP_STACK_SIZE),
+            1,
+            MappingFlags::WRITE | MappingFlags::READ,
+        )
+        .unwrap_or_else(|e| panic!("Failed to allocate boot stack for CPU {}: {}", logi_id, e));
 
         let boot_stack_top = boot_stack.end;
 

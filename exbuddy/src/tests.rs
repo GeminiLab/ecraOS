@@ -927,6 +927,20 @@ fn alloc_block_and_frame_boundaries() {
             }
             model.assert_stats_match(&fixture.allocator);
         }
+
+        let before = fixture.allocator.stats();
+        let rounded = fixture.allocator.alloc_frames(3, page_size).unwrap();
+        let after_alloc = fixture.allocator.stats();
+        assert_eq!(after_alloc.used_pages(), before.used_pages() + 4);
+        assert_eq!(after_alloc.free_pages(), before.free_pages() - 4);
+        fixture.allocator.dealloc_frames(rounded, 3).unwrap();
+        let after_dealloc = fixture.allocator.stats();
+        assert_eq!(after_dealloc.total_pages(), before.total_pages());
+        assert_eq!(after_dealloc.meta_pages(), before.meta_pages());
+        assert_eq!(after_dealloc.heap_pages(), before.heap_pages());
+        assert_eq!(after_dealloc.used_pages(), before.used_pages());
+        assert_eq!(after_dealloc.free_pages(), before.free_pages());
+        assert_eq!(after_dealloc.unused_pages(), before.unused_pages());
     });
 }
 

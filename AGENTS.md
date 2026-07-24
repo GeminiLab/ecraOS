@@ -1,8 +1,8 @@
-# CLAUDE.md for ecraOS
+# Global AI instructions for ecraOS
 
 ecraOS is an experimental and educational operating-system kernel written in
 Rust. It aims to stay flexible across architectures, while the current working
-target is x86-64.
+target is x86-64 and RISC-V 64.
 
 ## Structure
 
@@ -12,13 +12,15 @@ The main crates are:
 - `exarch/` - Architecture-specific support code and architecture-kernel
   interfaces. The current implementation is x86-64.
 - `exboot/` - Boot argument definitions, kernel-entry glue, and boot support.
+  - `exboot/exboot-multiboot-x86_64` - The current Multiboot 1 boot module for
+    x86-64.
+  - `exboot/exboot-none-riscv64` - The current RISC-V 64 boot module.
 - `ecraos-loader/` - The static loader binary that embeds the stripped kernel.
-- `exboot/exboot-multiboot-x86_64/` - The current Multiboot 1 boot module for
-  x86-64.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
 allocation, `expalloc_trait` for page allocation traits, and small utility
-crates such as `size-disp` and `memory_range_set`.
+crates such as `size-disp` and `memory_range_set`. There may be more crates in
+the repository.
 
 ## Build & Run Commands
 
@@ -32,7 +34,7 @@ The current build procedure is:
 
 1. Build the kernel with PIE relocation and the kernel linker script.
 2. Strip the kernel to a flat binary.
-3. Build the boot module crate, currently `exboot-multiboot-x86_64`.
+3. Build the boot module crate.
 4. Build `ecraos-loader` with static relocation, the loader linker script,
    `KERNEL_BIN=<path-to-stripped-kernel>`, and
    `--extern exboot_impl=<path-to-boot-module-rlib>`.
@@ -71,6 +73,17 @@ errors.
 
 We use the following code format conventions, beyond common Rust conventions:
 
+- Memory addresses should use semantic address types such as `VirtAddr`,
+  `PhysAddr`, `VirtAddrRange`, and `PhysAddrRange` whenever possible.
+  - Raw `usize` should be used for sizes, counts, indices, offsets, alignment
+    values, bit patterns, and unavoidable pointer or atomic storage boundaries.
+  - Public APIs should not accept or return `usize` when the value is a virtual
+    or physical address.
+  - Prefer `va!` and `pa!` for integer-to-address conversions, and prefer
+    `VirtAddr` pointer conversion helpers over raw pointer/integer casts.
+  - Conversions between semantic address types and `usize` should stay close to
+    raw pointer dereferences, inline assembly, atomic pointer storage, or other
+    low-level boundaries that require an integer representation.
 - All items (types, type aliases, functions, modules, etc.) should have doc
   comments, regardless of their visibility.
   - All doc comments should have a one-line summary, followed by a blank line,

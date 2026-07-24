@@ -11,13 +11,11 @@ use size_disp::SizeDisplay;
 
 use crate::kprintln;
 
+pub mod allocs;
 mod early;
-pub mod malloc;
-pub mod palloc;
 pub mod pmm;
 pub mod reloc;
 pub mod sections;
-pub mod vmalloc;
 pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
@@ -54,7 +52,7 @@ fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
         return Some(stack.pa_range.start + offset);
     }
 
-    vmalloc::virt_to_phys(addr)
+    allocs::vmalloc::virt_to_phys(addr)
 }
 
 fn phys_addr_is_known(addr: PhysAddr) -> bool {
@@ -82,6 +80,7 @@ pub fn init_and_enable_vmm(
     pmm::build_phys_mem_regions(
         &raw_mem_regions,
         unsafe { arg.as_ref_unchecked() }.loader_range,
+        unsafe { arg.as_ref_unchecked() }.plat_arg,
     );
     print_mem_regions("Final physical memory regions:", pmm::phys_mem_regions());
     // The final table is now the sole source of truth. boot_regions is never
@@ -89,7 +88,6 @@ pub fn init_and_enable_vmm(
 
     // Determine the layout of the virtual address space.
     vmm::init_vmm_layout();
-    let virt_phys_offset = vmm::virt_phys_offset();
 
     // Initialize the early page allocator using the final region table. It depends on the page
     // size info.
@@ -120,9 +118,11 @@ pub fn init_and_enable_vmm(
 
     // Use a returnless call to jump to non-identical PC/SP.
     unsafe {
+        let direct_mapping_offset = vmm::direct_mapping_offset();
+
         let new_stack_top = bsp_stack.alloc_range.end.as_usize();
-        let entry_with_vmm = entry_with_vmm.byte_add(virt_phys_offset);
-        let arg = arg.byte_add(virt_phys_offset);
+        let entry_with_vmm = entry_with_vmm.byte_add(direct_mapping_offset);
+        let arg = arg.byte_add(direct_mapping_offset);
 
         call_fn_new_stack_arg2(entry_with_vmm as _, hart_id, arg as _, new_stack_top)
     }
@@ -135,30 +135,29 @@ pub fn init_after_enable_vmm() {
 
     // Initialize the page allocator.
     // TODO: recycle the loader memory region (as well as the bootstack).
-    palloc::init_palloc();
+    allocs::palloc::init_palloc();
 
     // Initialize the small object allocator.
-    malloc::init_malloc_current_cpu();
+    allocs::malloc::init_malloc_current_cpu();
 
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
-    vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
+    allocs::vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
 
     let early_bsp_stack = early::bsp_stack();
-    vmalloc::VMALLOC
-        .lock()
-        .add_allocated_range(
-            early_bsp_stack.full_range,
-            early_bsp_stack.alloc_range,
-            early_bsp_stack.pa_range,
-        )
-        .expect("failed to add bsp stack to vmalloc");
+    allocs::vmalloc::register_external_range(
+        early_bsp_stack.full_range,
+        early_bsp_stack.alloc_range,
+        early_bsp_stack.pa_range,
+        MappingFlags::READ | MappingFlags::WRITE,
+    )
+    .expect("failed to add bsp stack to vmalloc");
 
     info!("Later memory initialization completed");
 }
 
 pub fn init_ap() {
-    malloc::init_malloc_current_cpu();
+    allocs::malloc::init_malloc_current_cpu();
 }
 
 pub fn remove_identical_mappings() {
@@ -252,12 +251,4 @@ pub fn print_kernel_location(heading: &str) {
     }
 
     kprintln!();
-}
-
-pub fn clear_bss() {
-    let bss_range = sections::bss();
-    let bss_slice =
-        unsafe { core::slice::from_raw_parts_mut(bss_range.start.as_mut_ptr(), bss_range.size()) };
-
-    bss_slice.fill(0);
 }

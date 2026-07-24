@@ -65,7 +65,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     unsafe { mem::reloc::relocate_me() };
 
     // Clear the BSS.
-    mem::clear_bss();
+    mem::sections::clear_bss();
 
     // Initialize the per-CPU data area using the early slot. It maybe used while initializing
     // interrupts and timers.
@@ -80,6 +80,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
     // Perform early platform initialization.
     exarch::init::init_early(arg_ref.plat_arg);
 
+    // Print the hello banner.
     print_hello_banner();
     kprintln!(
         "Kernel entry on BSP(hart_id: {:#x}), arg: {:x?}\n",
@@ -87,6 +88,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
         arg_ref
     );
 
+    // Enable the VMM, and jump to the upper address space.
     mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
 }
 
@@ -97,14 +99,17 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 /// This function should only be called by the [`kernel_entry`] function, via
 /// [`mem::init_vmm`], and should never be called directly.
 pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg) -> ! {
+    // Relocate the kernel image again.
     unsafe { mem::reloc::relocate_me() };
 
-    // Re-initialize the per-CPU data area pointer after relocation.
+    // Re-initialize the per-CPU data area pointer after relocation, to fix the per-CPU data area
+    // pointer after relocation.
     percpu::init_bsp_after_reloc();
 
     // Call the relocation hook.
     exarch::reloc_hook::after_reloc();
 
+    // Print the hello banner.
     kprintln!(
         "{HLINE}\necraOS now in VMM world...\n{HLINE}\nVMM enabled on hart_id: {:#x}\n",
         hart_id
@@ -112,7 +117,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg)
 
     // Initialize logging.
     logging::init();
-
     info!("Logger initialized");
 
     // Finish memory initialization after enabling VMM.

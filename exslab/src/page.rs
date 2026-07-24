@@ -9,6 +9,8 @@ use core::{
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 
+use memory_addr::{MemoryAddr, VirtAddr, va};
+
 use crate::size_class::SizeClass;
 
 /// Magic number written at the start of every slab page header.
@@ -43,8 +45,8 @@ pub struct SlabPageHeader {
     pub slab_bytes: u32,
 
     // --- Intrusive doubly-linked list pointers (used by SlabCache) ---
-    pub list_prev: usize,
-    pub list_next: usize,
+    pub list_prev: VirtAddr,
+    pub list_next: VirtAddr,
 
     // --- Local bitmap (under slab lock, owner CPU only) ---
     // A set bit means the slot is FREE.
@@ -79,8 +81,8 @@ impl SlabPageHeader {
         self.owner_cpu = owner_cpu;
         self._pad = 0;
         self.slab_bytes = bytes as u32;
-        self.list_prev = 0;
-        self.list_next = 0;
+        self.list_prev = va!(0);
+        self.list_next = va!(0);
         self.local_bitmap = [0u64; BITMAP_WORDS];
         self.remote_free_head = AtomicUsize::new(0);
         self.remote_free_count = AtomicU32::new(0);
@@ -107,20 +109,20 @@ impl SlabPageHeader {
 
     /// Returns the virtual address of the object region start (given `base` = page start).
     #[inline]
-    pub fn data_start(&self, base: usize) -> usize {
+    pub fn data_start(&self, base: VirtAddr) -> VirtAddr {
         base + Self::data_offset(self.size_class.size())
     }
 
     /// Returns the virtual address of object at `index`.
     #[inline]
-    pub fn object_addr(&self, base: usize, index: usize) -> usize {
+    pub fn object_addr(&self, base: VirtAddr, index: usize) -> VirtAddr {
         self.data_start(base) + index * self.size_class.size()
     }
 
     /// Returns the index of the object whose address is `addr`.
     #[inline]
-    pub fn object_index(&self, base: usize, addr: usize) -> usize {
-        (addr - self.data_start(base)) / self.size_class.size()
+    pub fn object_index(&self, base: VirtAddr, addr: VirtAddr) -> usize {
+        (addr.as_usize() - self.data_start(base).as_usize()) / self.size_class.size()
     }
 
     /// Returns the base address (slab start) from an object address.
@@ -128,16 +130,16 @@ impl SlabPageHeader {
     /// Searches backward by page because the slab base may no longer have
     /// absolute `slab_bytes` alignment after metadata is carved from a region.
     #[inline]
-    pub fn base_from_obj_addr(addr: usize, slab_bytes: usize, page_size: usize) -> usize {
+    pub fn base_from_obj_addr(addr: VirtAddr, slab_bytes: usize, page_size: usize) -> VirtAddr {
         let slab_pages = slab_bytes / page_size;
         debug_assert!(slab_pages > 0);
 
-        let page_base = addr & !(page_size - 1);
+        let page_base = va!(addr.as_usize() & !(page_size - 1));
         for page_idx in 0..slab_pages {
             let Some(candidate) = page_base.checked_sub(page_idx * page_size) else {
                 break;
             };
-            let hdr = unsafe { &*(candidate as *const SlabPageHeader) };
+            let hdr = unsafe { &*candidate.as_ptr_of::<SlabPageHeader>() };
             if hdr.magic == SLAB_MAGIC
                 && hdr.slab_bytes as usize == slab_bytes
                 && addr >= candidate
@@ -151,16 +153,19 @@ impl SlabPageHeader {
         page_base
     }
 
-    fn base_from_obj_addr_unknown_with_page_size(addr: usize, page_size: usize) -> Option<usize> {
+    fn base_from_obj_addr_unknown_with_page_size(
+        addr: VirtAddr,
+        page_size: usize,
+    ) -> Option<VirtAddr> {
         if page_size == 0 || !page_size.is_power_of_two() {
             return None;
         }
-        let page_base = addr & !(page_size - 1);
+        let page_base = va!(addr.as_usize() & !(page_size - 1));
         for page_idx in 0..MAX_SLAB_PAGES {
             let Some(candidate) = page_base.checked_sub(page_idx * page_size) else {
                 break;
             };
-            let hdr = unsafe { &*(candidate as *const SlabPageHeader) };
+            let hdr = unsafe { &*candidate.as_ptr_of::<SlabPageHeader>() };
             let slab_bytes = hdr.slab_bytes as usize;
             if hdr.magic != SLAB_MAGIC
                 || slab_bytes == 0
@@ -181,7 +186,7 @@ impl SlabPageHeader {
     /// Searches backward up to [`MAX_SLAB_PAGES`] pages and validates each candidate
     /// against the header's `slab_bytes`.
     #[inline]
-    pub fn base_from_obj_addr_unknown(addr: usize, page_size: usize) -> Option<usize> {
+    pub fn base_from_obj_addr_unknown(addr: VirtAddr, page_size: usize) -> Option<VirtAddr> {
         Self::base_from_obj_addr_unknown_with_page_size(addr, page_size)
     }
 
@@ -193,13 +198,13 @@ impl SlabPageHeader {
     /// - `owner_cpu` must match the slab header's owner CPU.
     /// - `page_size` must be the slab allocator's page size.
     pub unsafe fn remote_free_object(ptr: NonNull<u8>, owner_cpu: u16, page_size: usize) {
-        let obj_addr = ptr.as_ptr() as usize;
+        let obj_addr = VirtAddr::from_mut_ptr_of(ptr.as_ptr());
         let Some(base) = Self::base_from_obj_addr_unknown_with_page_size(obj_addr, page_size)
         else {
             debug_assert!(false, "object address does not belong to a live slab");
             return;
         };
-        let hdr = unsafe { &*(base as *const SlabPageHeader) };
+        let hdr = unsafe { &*base.as_ptr_of::<SlabPageHeader>() };
         debug_assert_eq!(hdr.magic, SLAB_MAGIC);
         debug_assert_eq!(hdr.owner_cpu, owner_cpu);
         unsafe { hdr.remote_free(obj_addr) };
@@ -260,15 +265,20 @@ impl SlabPageHeader {
     /// - `obj_addr` must point to a previously allocated object within this slab.
     /// - The object's first `size_of::<usize>()` bytes will be overwritten with
     ///   the next-pointer.
-    pub unsafe fn remote_free(&self, obj_addr: usize) {
+    pub unsafe fn remote_free(&self, obj_addr: VirtAddr) {
         unsafe {
             loop {
                 let old_head = self.remote_free_head.load(Ordering::Acquire);
                 // Store "next" pointer inside the freed object.
-                (obj_addr as *mut usize).write(old_head);
+                obj_addr.as_mut_ptr_of::<usize>().write(old_head);
                 if self
                     .remote_free_head
-                    .compare_exchange_weak(old_head, obj_addr, Ordering::AcqRel, Ordering::Relaxed)
+                    .compare_exchange_weak(
+                        old_head,
+                        obj_addr.as_usize(),
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    )
                     .is_ok()
                 {
                     self.remote_free_count.fetch_add(1, Ordering::Relaxed);
@@ -281,7 +291,7 @@ impl SlabPageHeader {
     /// Drains all remote frees back into the local bitmap.
     ///
     /// Must be called under the owner-CPU slab lock.
-    pub fn drain_remote_frees(&mut self, base: usize) {
+    pub fn drain_remote_frees(&mut self, base: VirtAddr) {
         let head = self.remote_free_head.swap(0, Ordering::AcqRel);
         if head == 0 {
             return;
@@ -291,8 +301,9 @@ impl SlabPageHeader {
 
         let mut ptr = head;
         while ptr != 0 {
-            let next = unsafe { *(ptr as *const usize) };
-            let idx = self.object_index(base, ptr);
+            let ptr_addr = va!(ptr);
+            let next = unsafe { *ptr_addr.as_ptr_of::<usize>() };
+            let idx = self.object_index(base, ptr_addr);
             let wi = idx / 64;
             let bit = idx % 64;
             debug_assert!(
