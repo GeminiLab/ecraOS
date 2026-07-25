@@ -1,6 +1,7 @@
 //! Multiboot 1 boot module for x86-64.
 
 #![no_std]
+#![no_main]
 #![cfg(target_arch = "x86_64")]
 
 use core::arch::global_asm;
@@ -58,3 +59,5 @@ fn rust_entry64_bsp(_arg0: u32, arg1: u32) -> ! {
 
     call_kernel_entry!(0, &boot_arg)
 }
+
+ecraldr::ecraldr_panic_handler!();

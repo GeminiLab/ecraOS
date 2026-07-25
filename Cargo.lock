@@ -106,6 +106,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecraldr"
+version = "0.1.0"
+dependencies = [
+ "ecraos_boot",
+]
+
+[[package]]
+name = "ecraldr-riscv64-none"
+version = "0.1.0"
+dependencies = [
+ "ecraldr",
+ "ecraldr_build_rs",
+ "ecraos_boot",
+]
+
+[[package]]
+name = "ecraldr-x86_64-multiboot"
+version = "0.1.0"
+dependencies = [
+ "ecraldr",
+ "ecraldr_build_rs",
+ "ecraos_boot",
+ "x86_64",
+]
+
+[[package]]
+name = "ecraldr_build_rs"
+version = "0.1.0"
+
+[[package]]
 name = "ecraos"
 version = "0.1.0"
 dependencies = [
@@ -146,28 +176,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "ecraos_boot_riscv64_none"
-version = "0.1.0"
-dependencies = [
- "ecraos_boot",
-]
-
-[[package]]
-name = "ecraos_boot_x86_64_multiboot"
-version = "0.1.0"
-dependencies = [
- "ecraos_boot",
- "x86_64",
-]
-
-[[package]]
-name = "ecraos_loader"
-version = "0.1.0"
-dependencies = [
- "ecraos_boot",
 ]
 
 [[package]]

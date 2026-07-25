@@ -6,8 +6,6 @@ use std::{
 };
 
 fn main() {
-    // Register the `building_ecraos_loader` cfg flag.
-    println!("cargo::rustc-check-cfg=cfg(building_ecraos_loader)");
     println!("cargo::rerun-if-env-changed=KERNEL_BIN");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR is not set");
@@ -28,7 +26,8 @@ fn main() {
             format!("*include_bytes!(\"{}\")", kernel_abs_path.display()),
         )
     } else {
-        // use a dummy payload if no kernel path is provided
+        // use a dummy payload if no kernel path is provided, to prevent errors
+        // when running rust-analyzer.
         (4, "[0xde, 0xad, 0xbe, 0xef]".to_string())
     };
 

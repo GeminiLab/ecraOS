@@ -3,6 +3,7 @@
 //! Some code is copied from the `axplat-riscv64-qemu-virt` crate.
 
 #![no_std]
+#![no_main]
 #![cfg(target_arch = "riscv64")]
 
 use ecraos_boot::{PhysAddr, PhysAddrRange, PlatformBootArg};
@@ -35,3 +36,5 @@ fn rust_entry64_bsp(arg0: u64, arg1: u64) -> ! {
 
     ecraos_boot::call_kernel_entry!(arg0 as _, &boot_arg);
 }
+
+ecraldr::ecraldr_panic_handler!();

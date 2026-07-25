@@ -1,5 +1,5 @@
 [package]
-name = "ecraos_loader"
+name = "ecraldr"
 version = "0.1.0"
 edition = "2024"
 

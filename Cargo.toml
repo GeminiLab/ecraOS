@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
+    "ecraldr",
+    "ecraldr-riscv64-none",
+    "ecraldr-x86_64-multiboot",
     "ecraos",
     "ecraos_boot/ecraos_boot",
     "ecraos_boot/ecraos_boot_macros",
-    "ecraos_boot/ecraos_boot_riscv64_none",
-    "ecraos_boot/ecraos_boot_x86_64_multiboot",
-    "ecraos_loader",
     "exarch",
     "exbuddy",
     "expalloc_trait",
@@ -18,6 +18,9 @@ members = [
     "utils/maybe_non_generic",
     "utils/memory_range_set",
     "utils/size_disp",
+]
+exclude = [
+    "ecraldr_build_rs"
 ]
 
 [workspace.dependencies]

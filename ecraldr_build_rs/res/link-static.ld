@@ -1,8 +1,4 @@
-/*
-    TODO: how to handle this?
-*/
-/* BASE_ADDRESS = 0x80200000; */
-BASE_ADDRESS = 0x200000;
+BASE_ADDRESS = %BASE_ADDRESS%;
 ENTRY(_start)
 
 SECTIONS {

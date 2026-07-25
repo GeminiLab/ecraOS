@@ -1,7 +1,0 @@
-[package]
-name = "ecraos_boot_riscv64_none"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-ecraos_boot = { path = "../ecraos_boot" }

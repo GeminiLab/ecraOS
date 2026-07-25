@@ -1,0 +1,12 @@
+[package]
+name = "ecraldr-x86_64-multiboot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecraldr = { path = "../ecraldr" }
+ecraos_boot = { path = "../ecraos_boot/ecraos_boot" }
+x86_64 = "0.15.4"
+
+[build-dependencies]
+ecraldr_build_rs = { path = "../ecraldr_build_rs" }

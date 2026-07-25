@@ -16,13 +16,13 @@ fi
 
 case "$TARGET" in
   "x86_64-unknown-none")
-    BOOT_CRATE="ecraos_boot_x86_64_multiboot"
+    ECRALDR_CRATE="ecraldr-x86_64-multiboot"
     QEMU="qemu-system-x86_64"
     KERNEL_CARGO_ARGS=()
     QEMU_DEFAULT_ARGS=(-cpu qemu64,+fsgsbase,+x2apic)
     ;;
   "riscv64gc-unknown-none-elf")
-    BOOT_CRATE="ecraos_boot_riscv64_none"
+    ECRALDR_CRATE="ecraldr-riscv64-none"
     QEMU="qemu-system-riscv64"
     KERNEL_CARGO_ARGS=(-Z build-std=core,alloc,compiler_builtins)
     QEMU_DEFAULT_ARGS=(-machine virt)
@@ -35,9 +35,8 @@ esac
 
 KERNEL="$ROOT/target/$TARGET/$PROFILE/ecraos"
 KERNEL_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos.bin"
-BOOT="$ROOT/target/$TARGET/$PROFILE/lib${BOOT_CRATE//-/_}.rlib"
-LOADER="$ROOT/target/$TARGET/$PROFILE/ecraos_loader"
-LOADER_STRIPPED="$ROOT/target/$TARGET/$PROFILE/ecraos_loader.bin"
+LOADER="$ROOT/target/$TARGET/$PROFILE/$ECRALDR_CRATE"
+LOADER_STRIPPED="$ROOT/target/$TARGET/$PROFILE/$ECRALDR_CRATE.bin"
 
 if [ "$CLEAN" = "1" ]; then
   echo "Cleaning up..." >&2
@@ -51,15 +50,12 @@ RUSTFLAGS="-C relocation-model=pie -C link-arg=-Tecraos/link.ld -C link-arg=-pie
 echo "Stripping ecraos..." >&2
 rust-objcopy "$KERNEL" --strip-all -O binary "$KERNEL_STRIPPED"
 
-echo "Building $BOOT_CRATE..." >&2
-RUSTFLAGS="-C relocation-model=static" cargo build -p $BOOT_CRATE --target $TARGET $PROFILE_ARG
-
-echo "Building ecraos_loader..." >&2
+echo "Building $ECRALDR_CRATE..." >&2
 KERNEL_BIN="$KERNEL_STRIPPED" \
-  RUSTFLAGS="-C relocation-model=static -C link-arg=-Tecraos_loader/link.ld --cfg building_ecraos_loader --extern ecraos_boot_impl=$BOOT" \
-  cargo build -p ecraos_loader --target $TARGET $PROFILE_ARG
+  RUSTFLAGS="-C relocation-model=static" \
+  cargo build -p $ECRALDR_CRATE --target $TARGET $PROFILE_ARG
 
-echo "Stripping ecraos_loader..." >&2
+echo "Stripping $ECRALDR_CRATE..." >&2
 rust-objcopy "$LOADER" --strip-all -O binary "$LOADER_STRIPPED"
 
 NORUN="${NORUN:-0}"

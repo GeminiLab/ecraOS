@@ -1,5 +1,5 @@
 # x86_64-unknown-none
-QEMU_EXTRA_ARGS='-m 16G -cpu qemu64,+fsgsbase,+x2apic,-la57,+tsc -smp 8' TIMEOUT_SEC="999" PROFILE=release ./test.sh
+QEMU_EXTRA_ARGS='-m 16G -cpu qemu64,+fsgsbase,+x2apic,-la57,+tsc -smp 4' PROFILE=release ./test.sh
 
 # riscv64gc-unknown-none-elf
-TARGET=riscv64gc-unknown-none-elf TIMEOUT_SEC="999" PROFILE=release ./test.sh
+TARGET=riscv64gc-unknown-none-elf QEMU_EXTRA_ARGS='-smp 4' PROFILE=release ./test.sh
