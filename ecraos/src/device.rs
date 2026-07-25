@@ -5,7 +5,7 @@ use alloc::{
 use core::{
     alloc::GlobalAlloc, mem as core_mem, ptr::NonNull, slice, str::FromStr, time::Duration,
 };
-use ecraos_boot::PhysAddr;
+use ecraldr_base::PhysAddr;
 use memory_addr::va;
 
 #[cfg(target_arch = "x86_64")]
@@ -540,12 +540,12 @@ fn print_aml_field(
     }
 }
 
-pub fn probe_device_info_source(boot_arg: ecraos_boot::PlatformBootArg) -> Vec<DeviceInfoSource> {
+pub fn probe_device_info_source(boot_arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource> {
     let mut result = Vec::new();
 
     #[cfg(target_arch = "x86_64")]
     {
-        if matches!(boot_arg, ecraos_boot::PlatformBootArg::Multiboot(_)) {
+        if matches!(boot_arg, ecraldr_base::PlatformBootArg::Multiboot(_)) {
             if let Some(rsdp) = find_rsdp() {
                 log::info!("Found ACPI RSDP at {:#x}", rsdp);
                 result.push(DeviceInfoSource::ACPI(rsdp.into()));
@@ -557,7 +557,7 @@ pub fn probe_device_info_source(boot_arg: ecraos_boot::PlatformBootArg) -> Vec<D
 
     #[cfg(target_arch = "riscv64")]
     {
-        if let ecraos_boot::PlatformBootArg::DeviceTree(dtb) = boot_arg {
+        if let ecraldr_base::PlatformBootArg::DeviceTree(dtb) = boot_arg {
             log::info!("Found Device Tree at {:#x}", dtb.as_usize());
             result.push(DeviceInfoSource::DeviceTree(dtb));
         }
@@ -655,7 +655,7 @@ fn probe_device_tree(_addr: PhysAddr) {
 ///
 /// This routine runs after the VMM and heap are initialized. It is best-effort
 /// and should not prevent the kernel from continuing.
-pub fn probe_devices(boot_arg: ecraos_boot::PlatformBootArg) {
+pub fn probe_devices(boot_arg: ecraldr_base::PlatformBootArg) {
     let sources = probe_device_info_source(boot_arg);
     info!("Device information sources: {:?}", sources);
 

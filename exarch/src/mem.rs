@@ -1,7 +1,7 @@
 use core::{fmt, num::NonZeroU8};
 
 use crate_interface::def_interface;
-use ecraos_boot::PlatformBootArg;
+use ecraldr_base::PlatformBootArg;
 use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
 use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};

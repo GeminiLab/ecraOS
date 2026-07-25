@@ -264,7 +264,7 @@ impl PageAllocator for TmpGoodPagingHandler {
         allocs::palloc::dealloc_frames(addr, page_count).unwrap();
     }
 
-    fn phys_to_virt(addr: ecraos_boot::PhysAddr) -> VirtAddr {
+    fn phys_to_virt(addr: ecraldr_base::PhysAddr) -> VirtAddr {
         VirtAddr::from_usize(addr.as_usize() + direct_mapping_offset())
     }
 }

@@ -1,8 +1,8 @@
 [package]
-name = "ecraos_boot"
+name = "ecraldr_base"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ecraos_boot_macros = { path = "../ecraos_boot_macros" }
+ecraldr_base_macros = { path = "../ecraldr_base_macros" }
 memory_addr.workspace = true

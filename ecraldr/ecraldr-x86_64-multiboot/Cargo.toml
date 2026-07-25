@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ecraldr = { path = "../ecraldr" }
-ecraos_boot = { path = "../ecraos_boot/ecraos_boot" }
+ecraldr_base = { path = "../ecraldr_base" }
 x86_64 = "0.15.4"
 
 [build-dependencies]

@@ -1,4 +1,7 @@
-use std::{env, fs, path::{self, PathBuf}};
+use std::{
+    env, fs,
+    path::{self, PathBuf},
+};
 
 const STATIC_LINK_SCRIPT: &str = include_str!("../res/link-static.ld");
 
@@ -19,7 +22,8 @@ fn abs_out_dir() -> PathBuf {
 pub fn specify_static_link_script<K: AsRef<str> + ?Sized>(loader_key: &K, base_phys_addr: usize) {
     ensure_in_build_rs();
 
-    let link_script_content = STATIC_LINK_SCRIPT.replace("%BASE_ADDRESS%", &format!("{base_phys_addr:#x}"));
+    let link_script_content =
+        STATIC_LINK_SCRIPT.replace("%BASE_ADDRESS%", &format!("{base_phys_addr:#x}"));
 
     let out_dir = abs_out_dir();
     let out_path = out_dir.join(format!("ecraldr_{}.ld", loader_key.as_ref()));

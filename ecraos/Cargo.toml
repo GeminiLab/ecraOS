@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 bitmaps = { version = "3.2.1", default-features = false }
 crate_interface = { version = "0.3", features = ["weak_default"] }
-ecraos_boot = { path = "../ecraos_boot/ecraos_boot" }
+ecraldr_base = { path = "../ecraldr/ecraldr_base" }
 exbuddy = { path = "../exbuddy" }
 exarch = { path = "../exarch" }
 expalloc_trait = { path = "../expalloc_trait" }

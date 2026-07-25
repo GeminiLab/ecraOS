@@ -6,7 +6,7 @@ struct DeviceImpl;
 
 #[crate_interface::impl_interface]
 impl DeviceIf for DeviceImpl {
-    fn probe_device_info_sources(_arg: ecraos_boot::PlatformBootArg) -> Vec<DeviceInfoSource> {
+    fn probe_device_info_sources(_arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource> {
         unimplemented!();
     }
 }

@@ -1,4 +1,4 @@
-//! Proc macros for marking and calling the ecraos_boot kernel entry point from platform code.
+//! Proc macros for marking and calling the ecraldr_base kernel entry point from platform code.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -42,7 +42,7 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[allow(clippy::unused_unit)]
         const KERNEL_ENTRY_SIGNATURE_GUARD: () = {
-            let _kernel_entry_must_match_signature: ::ecraos_boot::KernelEntryType = #kernel_entry_name;
+            let _kernel_entry_must_match_signature: ::ecraldr_base::KernelEntryType = #kernel_entry_name;
             ()
         };
     }
@@ -70,7 +70,7 @@ pub fn call_kernel_entry(input: TokenStream) -> TokenStream {
     quote! {
         {
             unsafe extern "Rust" {
-                fn #kernel_entry_ident(hart_id: usize, arg: *const ::ecraos_boot::BootArg) -> !;
+                fn #kernel_entry_ident(hart_id: usize, arg: *const ::ecraldr_base::BootArg) -> !;
             }
 
             unsafe {

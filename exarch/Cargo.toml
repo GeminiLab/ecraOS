@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 bitflags = "2.11"
 crate_interface = { version = "0.3", features = ["weak_default"] }
-ecraos_boot = { path = "../ecraos_boot/ecraos_boot" }
+ecraldr_base = { path = "../ecraldr/ecraldr_base" }
 expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
 heapless = "0.9"

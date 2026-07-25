@@ -1,5 +1,5 @@
 [package]
-name = "ecraos_boot_macros"
+name = "ecraldr_base_macros"
 version = "0.1.0"
 edition = "2024"
 

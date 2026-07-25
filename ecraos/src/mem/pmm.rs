@@ -1,6 +1,6 @@
 //! Physical memory management region table builder.
 
-use ecraos_boot::PlatformBootArg;
+use ecraldr_base::PlatformBootArg;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
 #[cfg(target_arch = "riscv64")]
 use fdt_rs::base::DevTree;

@@ -2,7 +2,7 @@
 
 pub use memory_addr::{PhysAddr, PhysAddrRange};
 
-pub use ecraos_boot_macros::*;
+pub use ecraldr_base_macros::*;
 
 /// The expected size of the boot stack (16 KiB).
 pub const BOOTSTACK_SIZE: usize = 16 * 1024;
@@ -18,7 +18,7 @@ pub enum PlatformBootArg {
     None,
 }
 
-/// The argument provided by the `ecraos_boot` during boot.
+/// The argument provided by the `ecraldr_base` during boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootArg {
     /// The physical address range occupied by the loader.

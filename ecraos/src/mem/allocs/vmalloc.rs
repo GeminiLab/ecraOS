@@ -7,7 +7,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::range::Range;
 
-use ecraos_boot::PhysAddrRange;
+use ecraldr_base::PhysAddrRange;
 use expt::pte::MappingFlags;
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;

@@ -109,7 +109,7 @@ dependencies = [
 name = "ecraldr"
 version = "0.1.0"
 dependencies = [
- "ecraos_boot",
+ "ecraldr_base",
 ]
 
 [[package]]
@@ -117,8 +117,8 @@ name = "ecraldr-riscv64-none"
 version = "0.1.0"
 dependencies = [
  "ecraldr",
+ "ecraldr_base",
  "ecraldr_build_rs",
- "ecraos_boot",
 ]
 
 [[package]]
@@ -126,9 +126,26 @@ name = "ecraldr-x86_64-multiboot"
 version = "0.1.0"
 dependencies = [
  "ecraldr",
+ "ecraldr_base",
  "ecraldr_build_rs",
- "ecraos_boot",
  "x86_64",
+]
+
+[[package]]
+name = "ecraldr_base"
+version = "0.1.0"
+dependencies = [
+ "ecraldr_base_macros",
+ "memory_addr",
+]
+
+[[package]]
+name = "ecraldr_base_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -142,7 +159,7 @@ dependencies = [
  "acpi",
  "bitmaps",
  "crate_interface",
- "ecraos_boot",
+ "ecraldr_base",
  "exarch",
  "exbuddy",
  "expalloc_trait",
@@ -159,23 +176,6 @@ dependencies = [
  "size_disp",
  "target-triple",
  "thiserror",
-]
-
-[[package]]
-name = "ecraos_boot"
-version = "0.1.0"
-dependencies = [
- "ecraos_boot_macros",
- "memory_addr",
-]
-
-[[package]]
-name = "ecraos_boot_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -196,7 +196,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
  "crate_interface",
- "ecraos_boot",
+ "ecraldr_base",
  "expercpu",
  "expt",
  "fdt-rs",

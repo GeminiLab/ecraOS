@@ -64,9 +64,9 @@ fn phys_addr_is_known(addr: PhysAddr) -> bool {
 }
 
 pub fn init_and_enable_vmm(
-    entry_with_vmm: *const ecraos_boot::KernelEntryType,
+    entry_with_vmm: *const ecraldr_base::KernelEntryType,
     hart_id: usize,
-    arg: *const ecraos_boot::BootArg,
+    arg: *const ecraldr_base::BootArg,
 ) -> ! {
     // Print kernel location before initializing the vmm.
     print_kernel_location("Kernel location immediately after boot:");

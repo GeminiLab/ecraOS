@@ -4,7 +4,7 @@
 #![no_main]
 #![feature(used_with_arg)] // Used when including the kernel.
 
-use ecraos_boot::BOOTSTACK_SIZE;
+use ecraldr_base::BOOTSTACK_SIZE;
 
 /// The boot stack.
 ///

@@ -13,5 +13,5 @@ pub struct DeviceInfoToBeImplemented {}
 
 #[def_interface(gen_caller)]
 pub trait DeviceIf {
-    fn probe_device_info_sources(arg: ecraos_boot::PlatformBootArg) -> Vec<DeviceInfoSource>;
+    fn probe_device_info_sources(arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource>;
 }
