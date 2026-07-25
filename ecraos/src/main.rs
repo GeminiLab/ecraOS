@@ -1,8 +1,8 @@
 //! `ecraOS` kernel binary.
 //!
 //! This binary is the core and PIE-enabled part of the kernel. For the static
-//! loader stage (handling very early boot and initialization), see [`exboot`]
-//! and `ecraos-loader`.
+//! loader stage (handling very early boot and initialization), see [`ecraos_boot`]
+//! and `ecraos_loader`.
 
 #![no_std]
 #![no_main]
@@ -48,10 +48,10 @@ fn print_hello_banner() {
 }
 
 /// Kernel entry called by specified boot modules through
-/// [`call_kernel_entry`](exboot::call_kernel_entry).
+/// [`call_kernel_entry`](ecraos_boot::call_kernel_entry).
 ///
 /// For execution environment requirements when calling this function, see
-/// [`call_kernel_entry`](exboot::call_kernel_entry) also.
+/// [`call_kernel_entry`](ecraos_boot::call_kernel_entry) also.
 ///
 /// # Safety
 ///
@@ -59,8 +59,8 @@ fn print_hello_banner() {
 /// bootloader. The bootloader should guarantee that the argument is valid.
 ///
 /// This function should never be called directly.
-#[exboot::kernel_entry]
-pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
+#[ecraos_boot::kernel_entry]
+pub unsafe fn kernel_entry(hart_id: usize, arg: *const ecraos_boot::BootArg) -> ! {
     // Relocate the kernel image.
     unsafe { mem::reloc::relocate_me() };
 
@@ -98,7 +98,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const exboot::BootArg) -> ! {
 ///
 /// This function should only be called by the [`kernel_entry`] function, via
 /// [`mem::init_vmm`], and should never be called directly.
-pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const exboot::BootArg) -> ! {
+pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraos_boot::BootArg) -> ! {
     // Relocate the kernel image again.
     unsafe { mem::reloc::relocate_me() };
 

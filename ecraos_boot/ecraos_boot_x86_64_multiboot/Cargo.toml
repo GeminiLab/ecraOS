@@ -1,0 +1,8 @@
+[package]
+name = "ecraos_boot_x86_64_multiboot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecraos_boot = { path = "../ecraos_boot" }
+x86_64 = "0.15.4"

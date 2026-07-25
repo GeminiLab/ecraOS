@@ -5,7 +5,7 @@
 
 use core::arch::global_asm;
 
-use exboot::{BootArg, PhysAddr, PhysAddrRange, PlatformBootArg};
+use ecraos_boot::{BootArg, PhysAddr, PhysAddrRange, PlatformBootArg};
 use x86_64::registers::control::{Cr0Flags, Cr4Flags, EferFlags};
 
 /// `CR0` value applied by boot code: protected mode, paging, write protect, FP-related bits.
@@ -32,7 +32,7 @@ global_asm!(
     efer = const EFER,
 );
 
-use exboot::call_kernel_entry;
+use ecraos_boot::call_kernel_entry;
 
 /// First Rust code on the bootstrap processor after the `global_asm!` boot path: jumps to the
 /// portable kernel entry with `hart_id == 0`.

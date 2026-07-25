@@ -1,16 +1,16 @@
-//! Proc macros for marking and calling the exboot kernel entry point from platform code.
+//! Proc macros for marking and calling the ecraos_boot kernel entry point from platform code.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Ident, ItemFn, parse_macro_input};
 
-/// Exported symbol name for the kernel entry (`export_name` / `extern "Rust"`).
+/// Exported symbol name for the kernel entry.
 const fn kernel_entry_export_name() -> &'static str {
-    "__exboot_kernel_entry"
+    "__ecraos_kernel_entry"
 }
 
-/// Builds the `syn` identifier for the exported kernel entry symbol (`__exboot_kernel_entry`).
+/// Builds the `syn` identifier for the exported kernel entry symbol (`__ecraos_kernel_entry`).
 fn kernel_entry_export_ident() -> Ident {
     format_ident!("{}", kernel_entry_export_name())
 }
@@ -42,7 +42,7 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[allow(clippy::unused_unit)]
         const KERNEL_ENTRY_SIGNATURE_GUARD: () = {
-            let _kernel_entry_must_match_signature: ::exboot::KernelEntryType = #kernel_entry_name;
+            let _kernel_entry_must_match_signature: ::ecraos_boot::KernelEntryType = #kernel_entry_name;
             ()
         };
     }
@@ -70,7 +70,7 @@ pub fn call_kernel_entry(input: TokenStream) -> TokenStream {
     quote! {
         {
             unsafe extern "Rust" {
-                fn #kernel_entry_ident(hart_id: usize, arg: *const ::exboot::BootArg) -> !;
+                fn #kernel_entry_ident(hart_id: usize, arg: *const ::ecraos_boot::BootArg) -> !;
             }
 
             unsafe {

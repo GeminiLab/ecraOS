@@ -1,4 +1,4 @@
-use exboot::PlatformBootArg;
+use ecraos_boot::PlatformBootArg;
 use expt::{
     arch::riscv64::{Sv39PageTableMeta, Sv48PageTableMeta, Sv57PageTableMeta},
     opaque::OpaquePageTableType,

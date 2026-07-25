@@ -1,4 +1,4 @@
-use exboot::PlatformBootArg;
+use ecraos_boot::PlatformBootArg;
 use fdt_rs::base::DevTree;
 use lazyinit::LazyInit;
 use memory_addr::va;

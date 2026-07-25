@@ -1,8 +1,0 @@
-[package]
-name = "exboot-multiboot-x86_64"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-exboot = { path = "../exboot" }
-x86_64 = "0.15.4"

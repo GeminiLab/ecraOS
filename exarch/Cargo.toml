@@ -6,15 +6,15 @@ edition = "2024"
 [dependencies]
 bitflags = "2.11"
 crate_interface = { version = "0.3", features = ["weak_default"] }
-exboot = { path = "../exboot/exboot" }
+ecraos_boot = { path = "../ecraos_boot/ecraos_boot" }
 expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
+heapless = "0.9"
 kspin.workspace = true
 lazyinit.workspace = true
 log.workspace = true
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
-heapless = "0.9"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 multiboot = "0.8"

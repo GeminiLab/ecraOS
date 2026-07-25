@@ -1,8 +1,8 @@
 [package]
-name = "exboot"
+name = "ecraos_boot"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-exboot-macros = { path = "../exboot-macros" }
+ecraos_boot_macros = { path = "../ecraos_boot_macros" }
 memory_addr.workspace = true

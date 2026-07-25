@@ -1,6 +1,6 @@
 //! Initialization hooks: early and later platform bring-up.
 
-pub use exboot::PlatformBootArg;
+pub use ecraos_boot::PlatformBootArg;
 
 use crate_interface::def_interface;
 

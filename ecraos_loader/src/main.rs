@@ -7,7 +7,7 @@
 #![no_main]
 #![feature(used_with_arg)] // Used when including the kernel.
 
-use exboot::BOOTSTACK_SIZE;
+use ecraos_boot::BOOTSTACK_SIZE;
 
 /// The boot stack.
 ///
@@ -24,7 +24,7 @@ static BOOTSTACK: [u8; BOOTSTACK_SIZE] = [0; BOOTSTACK_SIZE];
 include!(concat!(env!("OUT_DIR"), "/kernel.rs"));
 
 #[cfg(building_ecraos_loader)]
-extern crate exboot_impl;
+extern crate ecraos_boot_impl;
 
 /// Loader stage panic handler.
 ///

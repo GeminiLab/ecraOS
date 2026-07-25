@@ -11,15 +11,15 @@ The main crates are:
 - `ecraos/` - The PIE-enabled kernel.
 - `exarch/` - Architecture-specific support code and architecture-kernel
   interfaces. The current implementation is x86-64.
-- `exboot/` - Boot argument definitions, kernel-entry glue, and boot support.
-  - `exboot/exboot-multiboot-x86_64` - The current Multiboot 1 boot module for
+- `ecraos_boot/` - Boot argument definitions, kernel-entry glue, and boot support.
+  - `ecraos_boot/ecraos_boot_x86_64_multiboot` - The current Multiboot 1 boot module for
     x86-64.
-  - `exboot/exboot-none-riscv64` - The current RISC-V 64 boot module.
-- `ecraos-loader/` - The static loader binary that embeds the stripped kernel.
+  - `ecraos_boot/ecraos_boot_riscv64_none` - The current RISC-V 64 boot module.
+- `ecraos_loader/` - The static loader binary that embeds the stripped kernel.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
 allocation, `expalloc_trait` for page allocation traits, and small utility
-crates such as `size-disp` and `memory_range_set`. There may be more crates in
+crates such as `size_disp` and `memory_range_set`. There may be more crates in
 the repository.
 
 ## Build & Run Commands
@@ -35,9 +35,9 @@ The current build procedure is:
 1. Build the kernel with PIE relocation and the kernel linker script.
 2. Strip the kernel to a flat binary.
 3. Build the boot module crate.
-4. Build `ecraos-loader` with static relocation, the loader linker script,
+4. Build `ecraos_loader` with static relocation, the loader linker script,
    `KERNEL_BIN=<path-to-stripped-kernel>`, and
-   `--extern exboot_impl=<path-to-boot-module-rlib>`.
+   `--extern ecraos_boot_impl=<path-to-boot-module-rlib>`.
 5. Strip the loader and run it in QEMU.
 
 ### Build Script

@@ -1,8 +1,8 @@
 /*
     TODO: how to handle this?
 */
-BASE_ADDRESS = 0x80200000;
-/* BASE_ADDRESS = 0x200000; */
+/* BASE_ADDRESS = 0x80200000; */
+BASE_ADDRESS = 0x200000;
 ENTRY(_start)
 
 SECTIONS {
@@ -53,7 +53,7 @@ SECTIONS {
     /* Kernel payload section */
     .kernel : ALIGN(4K) {
         _skernel = .;
-        __exboot_kernel_entry = .;
+        __ecraos_kernel_entry = .;
         *(.kernel)
         . = ALIGN(4K);
         _ekernel = .;

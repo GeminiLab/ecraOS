@@ -1,9 +1,9 @@
-ENTRY(__exboot_kernel_entry)
+ENTRY(__ecraos_kernel_entry)
 
 SECTIONS {
     /*
         The kernel, the .text.kernel_entry section, and the symbol
-        `__exboot_kernel_entry` must be placed at VMA 0, for relocator to work
+        `__ecraos_kernel_entry` must be placed at VMA 0, for relocator to work
         properly.
     */
     . = 0;

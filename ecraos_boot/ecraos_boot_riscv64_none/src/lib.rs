@@ -5,7 +5,7 @@
 #![no_std]
 #![cfg(target_arch = "riscv64")]
 
-use exboot::{PhysAddr, PhysAddrRange, PlatformBootArg};
+use ecraos_boot::{PhysAddr, PhysAddrRange, PlatformBootArg};
 
 unsafe extern "C" {
     static _ebootstack: u8;
@@ -28,10 +28,10 @@ fn rust_entry64_bsp(arg0: u64, arg1: u64) -> ! {
     let sloader = _sloader as *const () as usize;
     let skernel = _skernel as *const () as usize;
 
-    let boot_arg = exboot::BootArg {
+    let boot_arg = ecraos_boot::BootArg {
         loader_range: unsafe { PhysAddrRange::new_unchecked(sloader.into(), skernel.into()) },
         plat_arg: PlatformBootArg::DeviceTree(PhysAddr::from_usize(arg1 as _)),
     };
 
-    exboot::call_kernel_entry!(arg0 as _, &boot_arg);
+    ecraos_boot::call_kernel_entry!(arg0 as _, &boot_arg);
 }
