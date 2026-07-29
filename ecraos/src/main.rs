@@ -14,7 +14,7 @@
 /// available in the kernel.
 extern crate alloc;
 
-use log::{error, info, warn};
+use log::{error, info};
 
 mod device;
 mod logging;
@@ -22,6 +22,8 @@ mod mem;
 mod mp;
 mod percpu;
 mod smoke;
+#[cfg(target_arch = "riscv64")]
+mod timer;
 
 macro_rules! kprintln {
     ($($arg:tt)*) => {
@@ -129,6 +131,12 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     // Probe devices.
     device::probe_devices(boot_arg.plat_arg);
 
+    #[cfg(target_arch = "riscv64")]
+    {
+        timer::init_bsp();
+        timer::smoke_test();
+    }
+
     kprintln!("\n\nHere we go!\n\n");
 
     info!("Starting up secondary CPUs...");
@@ -176,6 +184,12 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 
     // Initialize memory for the AP.
     mem::init_ap();
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        timer::init_ap();
+        timer::smoke_test();
+    }
 
     smoke::remote_slab_free_ap();
 

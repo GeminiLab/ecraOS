@@ -5,5 +5,8 @@ pub struct RelocHookImpl;
 #[crate_interface::impl_interface]
 impl RelocHookIf for RelocHookImpl {
     fn before_reloc() {}
-    fn after_reloc() {}
+
+    fn after_reloc() {
+        super::trap::after_reloc();
+    }
 }

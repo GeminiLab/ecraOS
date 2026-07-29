@@ -1,6 +1,6 @@
 use fdt_rs::prelude::{FallibleIterator, PropReader};
 
-use crate::time::{Nanos, Ticks, TimeIf};
+use crate::time::{Nanos, Ticks, TimeIf, TimeValue};
 
 fn current_ticks() -> Ticks {
     Ticks(riscv::register::time::read() as _)
@@ -27,6 +27,19 @@ impl TimeIf for TimeImpl {
 
     fn nanos_to_ticks(nanos: Nanos) -> Ticks {
         unsafe { Ticks(nanos.0 * TIME_FREQ_KHZ / 1_000_000) }
+    }
+
+    fn set_oneshot_timer(deadline: TimeValue) {
+        let deadline_ns = u64::try_from(deadline.as_nanos())
+            .expect("timer deadline does not fit in the RISC-V time domain");
+        let relative_ticks = Self::nanos_to_ticks(Nanos(deadline_ns));
+        let absolute_ticks = unsafe {
+            INIT_TICK
+                .0
+                .checked_add(relative_ticks.0)
+                .expect("RISC-V timer deadline overflow")
+        };
+        sbi_rt::set_timer(absolute_ticks).expect("SBI TIME set_timer failed");
     }
 }
 

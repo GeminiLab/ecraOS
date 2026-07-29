@@ -30,6 +30,12 @@ pub trait TimeIf {
     fn ticks_to_nanos(ticks: Ticks) -> Nanos;
 
     fn nanos_to_ticks(nanos: Nanos) -> Ticks;
+
+    /// Programs a one-shot timer for an absolute monotonic deadline.
+    ///
+    /// The RISC-V implementation converts the boot-relative deadline to an absolute hardware tick.
+    #[cfg(target_arch = "riscv64")]
+    fn set_oneshot_timer(deadline: TimeValue);
 }
 
 pub fn monotonic_time() -> TimeValue {

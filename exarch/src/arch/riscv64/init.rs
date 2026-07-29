@@ -16,5 +16,7 @@ impl InitIf for InitImpl {
     fn init_later() {}
 
     /// Runs early application-processor initialization.
-    fn init_early_ap() {}
+    fn init_early_ap() {
+        super::init_early_ap();
+    }
 }
