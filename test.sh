@@ -68,6 +68,9 @@ fi
 TIMEOUT_SEC="${TIMEOUT_SEC:-15}"
 QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 
+QEMU_LOG="$(mktemp "${TMPDIR:-/tmp}/ecraos-qemu-task1.XXXXXX.log")"
+trap 'rm -f "$QEMU_LOG"' EXIT
+
 set +e
 timeout --foreground "${TIMEOUT_SEC}" \
   $QEMU \
@@ -75,4 +78,23 @@ timeout --foreground "${TIMEOUT_SEC}" \
   -nographic \
   -no-reboot \
   -kernel "${LOADER}" \
-  ${QEMU_EXTRA_ARGS}
+  ${QEMU_EXTRA_ARGS} 2>&1 | tee "$QEMU_LOG"
+QEMU_STATUS=${PIPESTATUS[0]}
+set -e
+
+if [ "$QEMU_STATUS" -eq 124 ]; then
+  echo "QEMU timeout after ${TIMEOUT_SEC}s" >&2
+  exit 124
+fi
+
+if rg -qi 'Kernel panic:|fatal:|triple fault|unhandled supervisor .*fault' "$QEMU_LOG"; then
+  echo "Guest panic or fatal exception" >&2
+  exit 1
+fi
+
+if [ "$QEMU_STATUS" -eq 0 ]; then
+  exit 0
+fi
+
+echo "Unexpected QEMU status: $QEMU_STATUS" >&2
+exit 1

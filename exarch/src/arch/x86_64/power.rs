@@ -4,7 +4,7 @@ use core::time::Duration;
 
 use memory_addr::{PhysAddr, VirtAddr};
 
-use crate::power::{APEntry, PhysicalCpuId, PowerIf};
+use crate::power::{APEntry, PhysicalCpuId, PowerIf, ShutdownReason};
 
 /// The implementation of the [`PowerIf`] trait.
 pub struct PowerImpl;
@@ -38,7 +38,7 @@ impl PowerIf for PowerImpl {
         unsafe { lapic.send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
     }
 
-    fn poweroff() -> ! {
+    fn shutdown(_reason: ShutdownReason) -> ! {
         unsafe {
             const POWEROFF_PORT: u16 = 0x604;
             const POWEROFF_VALUE: u16 = 0x2000;
@@ -46,7 +46,7 @@ impl PowerIf for PowerImpl {
                 "outw %ax, (%dx)",
                 in("ax") POWEROFF_VALUE,
                 in("dx") POWEROFF_PORT,
-                options(att_syntax),
+                options(att_syntax, nomem, nostack, preserves_flags),
             );
 
             loop {

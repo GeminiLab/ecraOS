@@ -82,6 +82,18 @@ pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
     ))
 }
 
+pub fn direct_mapping_phys_to_virt(addr: PhysAddr) -> Option<VirtAddr> {
+    let addr_space = VIRTUAL_ADDRESS_SPACE.get()?;
+    let offset = addr.as_usize();
+    let start = addr_space.layout.direct_mapping_range.start.as_usize();
+    let virt = VirtAddr::from_usize(start.checked_add(offset)?);
+    addr_space
+        .layout
+        .direct_mapping_range
+        .contains(virt)
+        .then_some(virt)
+}
+
 #[inline]
 pub fn with_page_table<F, T>(f: F) -> T
 where

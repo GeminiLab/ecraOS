@@ -20,17 +20,26 @@ pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
 
-struct DebugConsoleVirtToPhysIfImpl;
+struct MemoryAddressTranslationIfImpl;
 
 #[crate_interface::impl_interface]
-impl exarch::debug_console::DebugConsoleVirtToPhysIf for DebugConsoleVirtToPhysIfImpl {
+impl exarch::mem::MemoryAddressTranslationIf for MemoryAddressTranslationIfImpl {
     fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
         virt_to_phys(addr)
+    }
+
+    fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
+        phys_to_virt(addr)
     }
 }
 
 pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
     try_virt_to_phys(addr).unwrap_or_else(|| PhysAddr::from_usize(addr.as_usize()))
+}
+
+/// Converts a physical address into its currently accessible virtual address.
+pub fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
+    vmm::direct_mapping_phys_to_virt(addr).unwrap_or_else(|| VirtAddr::from_usize(addr.as_usize()))
 }
 
 fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {

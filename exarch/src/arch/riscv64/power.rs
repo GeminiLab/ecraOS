@@ -3,7 +3,7 @@ use core::ops::BitOr;
 use log::{error, info, warn};
 use memory_addr::{PhysAddr, VirtAddr, va};
 
-use crate::power::{APEntry, PhysicalCpuId, PowerIf};
+use crate::power::{APEntry, PhysicalCpuId, PowerIf, ShutdownReason};
 
 core::arch::global_asm!(include_str!("mp.S"));
 
@@ -33,10 +33,10 @@ impl PowerIf for PowerImpl {
         const AP_BOOT_ARG_SLOT_SIZE: usize = core::mem::size_of::<u64>();
 
         // `boot_stack_top` is one-past-end, so translate the last argument slot.
-        let boot_stack_top_pa = crate::debug_console::virt_to_phys(va!(
-            boot_stack_top.as_usize() - AP_BOOT_ARG_SLOT_SIZE
-        )) + AP_BOOT_ARG_SLOT_SIZE;
-        let start_ap_pa = crate::debug_console::virt_to_phys(va!(_start_ap as *const () as _));
+        let boot_stack_top_pa =
+            crate::mem::virt_to_phys(va!(boot_stack_top.as_usize() - AP_BOOT_ARG_SLOT_SIZE))
+                + AP_BOOT_ARG_SLOT_SIZE;
+        let start_ap_pa = crate::mem::virt_to_phys(va!(_start_ap as *const () as _));
 
         let boot_stack_top_ptr = boot_stack_top.as_mut_ptr_of::<u64>();
         unsafe {
@@ -65,7 +65,7 @@ impl PowerIf for PowerImpl {
         .expect("start ap failed");
     }
 
-    fn poweroff() -> ! {
+    fn shutdown(_reason: ShutdownReason) -> ! {
         info!("Shutting down...");
         sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
         error!("It should shutdown!");
