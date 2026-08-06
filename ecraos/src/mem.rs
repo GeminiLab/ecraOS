@@ -130,10 +130,23 @@ pub fn init_and_enable_vmm(
         let direct_mapping_offset = vmm::direct_mapping_offset();
 
         let new_stack_top = bsp_stack.alloc_range.end.as_usize();
-        let entry_with_vmm = entry_with_vmm.byte_add(direct_mapping_offset);
-        let arg = arg.byte_add(direct_mapping_offset);
+        let entry_with_vmm = VirtAddr::from_usize(
+            (entry_with_vmm as usize)
+                .checked_add(direct_mapping_offset)
+                .expect("relocated kernel entry address overflow"),
+        );
+        let arg = VirtAddr::from_usize(
+            (arg as usize)
+                .checked_add(direct_mapping_offset)
+                .expect("relocated boot argument address overflow"),
+        );
 
-        call_fn_new_stack_arg2(entry_with_vmm as _, hart_id, arg as _, new_stack_top)
+        call_fn_new_stack_arg2(
+            entry_with_vmm.as_ptr_of::<fn(usize, usize) -> !>(),
+            hart_id,
+            arg.as_ptr_of::<ecraldr_base::BootArg>() as usize,
+            new_stack_top,
+        )
     }
 }
 
