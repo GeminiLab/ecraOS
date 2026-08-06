@@ -140,7 +140,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     kprintln!("\n\nHere we go!\n\n");
 
     info!("Starting up secondary CPUs...");
-    mp::start_secondary_cpus();
+    mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
     smoke::remote_slab_free_bsp();
 
@@ -164,9 +164,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
 pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     let cpu_id = mp::phys_to_logi_id(phys_id);
 
-    // Mark the AP as up.
-    mp::mark_ap_up(cpu_id);
-
     // Initialize the per-CPU data area for the AP.
     percpu::init_ap(cpu_id);
 
@@ -188,8 +185,12 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     #[cfg(target_arch = "riscv64")]
     {
         timer::init_ap();
-        timer::smoke_test();
     }
+
+    mp::mark_ap_up(cpu_id);
+
+    #[cfg(target_arch = "riscv64")]
+    timer::smoke_test();
 
     smoke::remote_slab_free_ap();
 
@@ -215,5 +216,5 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         kprintln!("Kernel panic: {}", info);
     }
 
-    exarch::power::poweroff()
+    exarch::power::shutdown(exarch::power::ShutdownReason::Panicked)
 }

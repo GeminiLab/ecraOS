@@ -3,7 +3,7 @@ use core::ops::BitOr;
 use log::{error, info, warn};
 use memory_addr::{PhysAddr, VirtAddr, va};
 
-use crate::power::{APEntry, PhysicalCpuId, PowerIf, ShutdownReason};
+use crate::power::{APEntry, CpuStartError, PhysicalCpuId, PowerIf, ShutdownReason};
 
 core::arch::global_asm!(include_str!("mp.S"));
 
@@ -20,10 +20,10 @@ impl PowerIf for PowerImpl {
         page_table_root: PhysAddr,
         boot_stack_top: VirtAddr,
         entry: APEntry,
-    ) {
+    ) -> Result<(), CpuStartError> {
         if sbi_rt::probe_extension(sbi_rt::Hsm).is_unavailable() {
             warn!("HSM SBI extension is not supported for current SEE.");
-            return;
+            return Err(CpuStartError::Unsupported);
         }
 
         unsafe extern "C" {
@@ -57,12 +57,21 @@ impl PowerIf for PowerImpl {
             *boot_stack_top_ptr.sub(3) = entry as *const () as _;
         }
 
-        sbi_rt::hart_start(
+        let result = sbi_rt::hart_start(
             phys_id,
             start_ap_pa.as_usize(),
             boot_stack_top_pa.as_usize(),
-        )
-        .expect("start ap failed");
+        );
+        if result.is_ok() {
+            return Ok(());
+        }
+
+        match result.error as isize {
+            -2 => Err(CpuStartError::Unsupported),
+            -3 => Err(CpuStartError::InvalidCpu),
+            -4 => Err(CpuStartError::FirmwareDenied),
+            _ => Err(CpuStartError::Transport),
+        }
     }
 
     fn shutdown(_reason: ShutdownReason) -> ! {

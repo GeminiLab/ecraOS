@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Run host test suite
+        run: scripts/test-host.sh
+
+  qemu-tests:
+    name: QEMU test matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            qemu-system-misc \
+            qemu-system-x86 \
+            ripgrep
+
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils --locked
+
+      - name: Run QEMU test matrix
+        run: scripts/test-matrix.sh
+
+      - name: Upload QEMU logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-logs
+          path: target/qemu-logs/*.log
+          if-no-files-found: warn
+          retention-days: 7

@@ -4,7 +4,7 @@ use core::time::Duration;
 
 use memory_addr::{PhysAddr, VirtAddr};
 
-use crate::power::{APEntry, PhysicalCpuId, PowerIf, ShutdownReason};
+use crate::power::{APEntry, CpuStartError, PhysicalCpuId, PowerIf, ShutdownReason};
 
 /// The implementation of the [`PowerIf`] trait.
 pub struct PowerImpl;
@@ -20,8 +20,8 @@ impl PowerIf for PowerImpl {
         page_table_root: PhysAddr,
         boot_stack_top: VirtAddr,
         entry: APEntry,
-    ) {
-        let apic_id = cpu_id as _;
+    ) -> Result<(), CpuStartError> {
+        let apic_id = u32::try_from(cpu_id).map_err(|_| CpuStartError::InvalidCpu)?;
         let lapic = super::imp::apic::local_apic();
 
         super::imp::ap::setup_ap_start_page(
@@ -36,6 +36,7 @@ impl PowerIf for PowerImpl {
         unsafe { lapic.send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
         crate::time::spin_wait_for(Duration::from_micros(200)); // 200us
         unsafe { lapic.send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
+        Ok(())
     }
 
     fn shutdown(_reason: ShutdownReason) -> ! {
