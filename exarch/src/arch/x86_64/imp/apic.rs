@@ -3,11 +3,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use expercpu::def_percpu;
 use log::info;
-use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerMode};
+use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
 use x86_64::instructions::port::Port;
 
 use self::vectors::*;
@@ -27,6 +27,10 @@ pub const TIMER_VECTOR: usize = APIC_TIMER_VECTOR as usize;
 static LOCAL_APIC: usize = 0;
 static TSC_DEADLINE_SUPPORTED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
+/// The calibrated LAPIC countdown frequency in kHz.
+///
+/// The BSP publishes the value for application processors to reuse.
+static LAPIC_TIMER_FREQ_KHZ: AtomicU64 = AtomicU64::new(0);
 // static IO_APIC: LazyInit<SpinNoIrq<IoApic>> = LazyInit::new();
 
 /// Enables or disables the given IRQ.
@@ -43,7 +47,10 @@ static TSC_DEADLINE_SUPPORTED: core::sync::atomic::AtomicBool =
 //     }
 // }
 
-fn with_local_apic<R>(f: impl FnOnce(&mut LocalApic) -> R) -> R {
+/// Invokes a callback with the current CPU's initialized local APIC.
+///
+/// This panics when local APIC initialization has not installed the current CPU's pointer.
+pub fn with_local_apic<R>(f: impl FnOnce(&mut LocalApic) -> R) -> R {
     let local = LOCAL_APIC.read_current();
     assert_ne!(local, 0, "current CPU local APIC is not initialized");
     // SAFETY: The pointer is installed once by the current CPU and remains valid forever.
@@ -93,6 +100,7 @@ fn init_local_apic() {
     let mut builder = LocalApicBuilder::new();
     builder
         .timer_vector(APIC_TIMER_VECTOR as _)
+        .timer_divide(TimerDivide::Div1)
         .timer_mode(if has_tsc_deadline {
             TimerMode::TscDeadline
         } else {
@@ -121,11 +129,26 @@ fn init_local_apic() {
     }
     let lapic = Box::leak(Box::new(lapic)) as *mut LocalApic as usize;
     LOCAL_APIC.write_current(lapic);
+    if !has_tsc_deadline && LAPIC_TIMER_FREQ_KHZ.load(Ordering::Acquire) == 0 {
+        let frequency = crate::arch::x86_64::time::calibrate_lapic_timer()
+            .expect("failed to calibrate LAPIC timer");
+        LAPIC_TIMER_FREQ_KHZ.store(frequency, Ordering::Release);
+        info!("Calibrated LAPIC timer: {frequency} kHz");
+    }
 }
 
 /// Returns whether the current CPU supports TSC-Deadline mode.
 pub fn tsc_deadline_supported() -> bool {
     TSC_DEADLINE_SUPPORTED.load(Ordering::Acquire)
+}
+
+/// Returns the calibrated LAPIC timer frequency in kHz.
+///
+/// This rejects use of the one-shot timer before calibration has completed.
+pub fn timer_frequency_khz() -> u64 {
+    let frequency = LAPIC_TIMER_FREQ_KHZ.load(Ordering::Acquire);
+    assert_ne!(frequency, 0, "LAPIC timer frequency is not calibrated");
+    frequency
 }
 
 /// Programs the current LAPIC one-shot initial count.

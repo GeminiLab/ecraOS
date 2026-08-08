@@ -251,6 +251,9 @@ fn handle_pit_irq() {
     PIT_EVENTS.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Arms PIT channel 0 in one-shot mode for the IOAPIC self-test.
+///
+/// The divisor gives the self-test enough time to observe delivery without making boot slow.
 #[cfg(target_arch = "x86_64")]
 fn arm_pit_oneshot() {
     const PIT_DIVISOR: u16 = 20_000;

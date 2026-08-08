@@ -1,9 +1,16 @@
+use x2apic::lapic::{TimerDivide, TimerMode};
 use x86::io::{inb, outb};
 
+use crate::arch::x86_64::imp::apic::with_local_apic;
 use crate::dbcn_println;
 
 /// PIT frequency in Hz.
 const PIT_FREQ_HZ: u64 = 1193182;
+
+/// Calibration intervals in milliseconds for LAPIC samples.
+///
+/// Multiple intervals allow the caller to reject unstable measurements.
+const LAPIC_CALIBRATION_MS: [u64; 3] = [50, 30, 10];
 
 /// Calibration time in milliseconds.
 const CALIBRATION_MS_LIST: [u64; 3] = [50, 30, 10];
@@ -156,4 +163,74 @@ pub fn calibrate_tsc_early() -> Option<u64> {
     }
 
     None
+}
+
+/// Measures LAPIC countdown ticks during one PIT interval.
+///
+/// The returned value is the measured LAPIC countdown frequency in kHz.
+fn calibrate_lapic_once(calibration_ms: u64) -> Option<u64> {
+    unsafe {
+        start_apic_timer_for_calibration();
+        outb(0x61, (inb(0x61) & !0x02) | 0x01);
+        outb(0x43, 0xb0);
+        let [latch_low, latch_high] = calibration_latch_bytes(calibration_ms);
+        outb(0x42, latch_low);
+        outb(0x42, latch_high);
+
+        let start = apic_timer_current();
+        while inb(0x61) & 0x20 == 0 {
+            core::hint::spin_loop();
+        }
+        let end = apic_timer_current();
+        stop_apic_timer_for_calibration();
+        let elapsed = start.saturating_sub(end) as u64;
+        // Ticks per millisecond have the same numeric value as kHz.
+        let frequency_khz = elapsed / calibration_ms;
+        (frequency_khz > 0).then_some(frequency_khz)
+    }
+}
+
+/// Starts a one-shot LAPIC timer calibration interval.
+///
+/// This fixes the divider at one and starts the countdown at the largest hardware value.
+fn start_apic_timer_for_calibration() {
+    with_local_apic(|lapic| unsafe {
+        lapic.set_timer_mode(TimerMode::OneShot);
+        lapic.set_timer_divide(TimerDivide::Div1);
+        lapic.set_timer_initial(u32::MAX);
+        lapic.enable_timer();
+    });
+}
+
+/// Returns the current LAPIC timer count during calibration.
+///
+/// The count decreases while the one-shot timer remains enabled.
+fn apic_timer_current() -> u32 {
+    with_local_apic(|lapic| unsafe { lapic.timer_current() })
+}
+
+/// Stops the LAPIC timer after calibration.
+///
+/// This disables the timer and clears its initial-count register.
+fn stop_apic_timer_for_calibration() {
+    with_local_apic(|lapic| unsafe {
+        lapic.disable_timer();
+        lapic.set_timer_initial(0);
+    });
+}
+
+/// Calibrates the LAPIC timer frequency in kHz using PIT channel 2.
+///
+/// Three samples must agree within one percent before their average is accepted.
+pub fn calibrate_lapic_with_pit() -> Option<u64> {
+    let mut samples = [0u64; LAPIC_CALIBRATION_MS.len()];
+    for (index, milliseconds) in LAPIC_CALIBRATION_MS.iter().copied().enumerate() {
+        samples[index] = calibrate_lapic_once(milliseconds)?;
+    }
+    let min = *samples.iter().min()?;
+    let max = *samples.iter().max()?;
+    if max > min.saturating_mul(101) / 100 {
+        return None;
+    }
+    Some(samples.iter().sum::<u64>() / samples.len() as u64)
 }

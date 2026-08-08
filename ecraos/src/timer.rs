@@ -16,6 +16,11 @@ use deadline::select_next_deadline;
 /// This is the selected kernel timer-event cadence in hertz.
 pub const TIMER_EVENT_HZ: u64 = 100;
 
+/// The maximum allowed lateness for a timer deadline smoke test.
+///
+/// A deadline that fires later than this interval fails the boot smoke test.
+const TIMER_DEADLINE_TOLERANCE: Duration = Duration::from_millis(20);
+
 /// The interval between periodic timer-event deadlines in nanoseconds.
 ///
 /// This is exact because one second is divisible by [`TIMER_EVENT_HZ`].
@@ -80,15 +85,31 @@ pub fn smoke_test() {
     for step in 1..=3 {
         let deadline = exarch::time::monotonic_time() + Duration::from_millis(10);
         exarch::time::set_oneshot_timer(deadline);
-        let timeout = exarch::time::monotonic_time() + Duration::from_millis(200);
+        let timeout = deadline + TIMER_DEADLINE_TOLERANCE;
         while timer_event_count() <= observed && exarch::time::monotonic_time() < timeout {
             core::hint::spin_loop();
         }
         let after = timer_event_count();
+        let actual = exarch::time::monotonic_time();
         assert!(
             after > observed,
-            "timer deadline {step} did not fire on CPU {}: deadline={deadline:?}, timeout={timeout:?}",
+            "timer deadline {step} did not fire on CPU {}: deadline={deadline:?}, actual={actual:?}, timeout={timeout:?}",
             crate::mp::current_cpu_phys_id()
+        );
+        assert!(
+            actual >= deadline,
+            "timer deadline {step} fired early on CPU {}: deadline={deadline:?}, actual={actual:?}",
+            crate::mp::current_cpu_phys_id()
+        );
+        assert!(
+            actual <= timeout,
+            "timer deadline {step} fired late on CPU {}: deadline={deadline:?}, actual={actual:?}, tolerance={TIMER_DEADLINE_TOLERANCE:?}",
+            crate::mp::current_cpu_phys_id()
+        );
+        log::debug!(
+            "Timer deadline {step} on CPU {}: deadline={deadline:?}, actual={actual:?}, lateness={:?}",
+            crate::mp::current_cpu_phys_id(),
+            actual - deadline
         );
         observed = after;
     }
