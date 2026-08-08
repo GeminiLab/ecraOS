@@ -81,6 +81,13 @@ SECTIONS {
         /* PerCPU early slot sections */
         _percpu_early_slot_start = .;
         *(.pes .pes.*)
+        /*
+            .percpu and .pes may have different arrangement of their items,
+            resulting in the early slot being too small.
+
+            Maybe the .pes section can be removed later?
+        */
+        . = MAX(., _percpu_early_slot_start + (_percpu_end - _percpu_start));
         _percpu_early_slot_end = .;
 
         *(.bss .bss.*)

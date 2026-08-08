@@ -90,6 +90,10 @@ pub unsafe fn init(base: VirtAddr) {
 
 /// Initializes the current CPU's per-CPU data area using the early slot.
 ///
+/// # Panics
+///
+/// Panics at runtime if the linker-provided early slot is smaller than the per-CPU initial image.
+///
 /// # Safety
 ///
 /// The caller must ensure that the early slot is included in the binary, and is not used by other
@@ -99,7 +103,7 @@ pub unsafe fn init_in_early_slot() {
     let early_slot_start = expercpu_macros::percpu_symbol_vma!(_percpu_early_slot_start);
     let early_slot_end = expercpu_macros::percpu_symbol_vma!(_percpu_early_slot_end);
 
-    debug_assert!(
+    assert!(
         early_slot_end - early_slot_start >= percpu_area_size(),
         "early slot is too small"
     );
