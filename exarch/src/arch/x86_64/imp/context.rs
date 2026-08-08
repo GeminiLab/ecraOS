@@ -2,6 +2,10 @@
 //!
 //! Original code from `axcpu` v0.3.1.
 
+use memory_addr::{VirtAddr, va};
+
+use crate::trap::TrapFrameAccess;
+
 /// Saved registers when a trap (interrupt or exception) occurs.
 #[allow(missing_docs)]
 #[repr(C)]
@@ -69,5 +73,19 @@ impl TrapFrame {
     /// Whether the trap is from userspace.
     pub const fn is_user(&self) -> bool {
         self.cs & 0b11 == 3
+    }
+}
+
+impl TrapFrameAccess for TrapFrame {
+    fn instruction_pointer(&self) -> VirtAddr {
+        va!(self.rip as usize)
+    }
+
+    fn set_instruction_pointer(&mut self, instruction_pointer: VirtAddr) {
+        self.rip = instruction_pointer.as_usize() as u64;
+    }
+
+    fn is_user(&self) -> bool {
+        TrapFrame::is_user(self)
     }
 }

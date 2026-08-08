@@ -354,7 +354,7 @@ fn probe_acpi(rsdp: usize) {
         );
     }
 
-    print_acpi_processors(&tables);
+    init_acpi_platform(&tables);
 
     #[cfg(false)]
     {
@@ -382,15 +382,22 @@ fn probe_acpi(rsdp: usize) {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn print_acpi_processors(tables: &acpi::AcpiTables<AcpiHandler>) {
+fn init_acpi_platform(tables: &acpi::AcpiTables<AcpiHandler>) {
     use alloc::vec;
 
-    use crate::mp;
+    use acpi::platform::interrupt::{InterruptModel, Polarity, TriggerMode};
+    use exarch::irq::{
+        IoApicConfig, Polarity as ExarchPolarity, TriggerMode as ExarchTriggerMode,
+        X86ExternalIrqConfig, X86IrqOverride,
+    };
 
-    let (_, Some(processors)) = (match acpi::platform::interrupt::InterruptModel::new(tables) {
+    let (interrupt_model, Some(processors)) = (match InterruptModel::new(tables) {
         Ok(result) => result,
         Err(error) => {
-            warn!("Failed to enumerate ACPI processors from MADT: {:?}", error);
+            warn!(
+                "Failed to enumerate ACPI APIC topology from MADT: {:?}",
+                error
+            );
             return;
         }
     }) else {
@@ -411,6 +418,45 @@ fn print_acpi_processors(tables: &acpi::AcpiTables<AcpiHandler>) {
         cpu_ids.into_boxed_slice(),
         processors.boot_processor.local_apic_id as _,
     );
+
+    let InterruptModel::Apic(apic) = interrupt_model else {
+        warn!("ACPI MADT did not report an APIC interrupt model");
+        return;
+    };
+    let io_apics = apic
+        .io_apics
+        .iter()
+        .map(|ioapic| IoApicConfig {
+            id: ioapic.id,
+            physical_base: PhysAddr::from_usize(ioapic.address as usize),
+            gsi_base: ioapic.global_system_interrupt_base,
+            // The hardware version register supplies the authoritative pin count.
+            pin_count: 0,
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    let overrides = apic
+        .interrupt_source_overrides
+        .iter()
+        .map(|override_entry| X86IrqOverride {
+            isa_source: override_entry.isa_source,
+            gsi: override_entry.global_system_interrupt,
+            polarity: match override_entry.polarity {
+                Polarity::SameAsBus | Polarity::ActiveHigh => ExarchPolarity::ActiveHigh,
+                Polarity::ActiveLow => ExarchPolarity::ActiveLow,
+            },
+            trigger: match override_entry.trigger_mode {
+                TriggerMode::SameAsBus | TriggerMode::Edge => ExarchTriggerMode::Edge,
+                TriggerMode::Level => ExarchTriggerMode::Level,
+            },
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    exarch::irq::init_external_controller(X86ExternalIrqConfig {
+        io_apics,
+        overrides,
+        bsp_apic_id: processors.boot_processor.local_apic_id,
+    });
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -639,6 +685,118 @@ fn probe_device_tree(addr: PhysAddr) {
             runtime_boot_cpuid_phys
         );
     }
+
+    let plic_node = index
+        .compatible_nodes("sifive,plic-1.0.0")
+        .next()
+        .or_else(|| index.compatible_nodes("riscv,plic0").next())
+        .expect("Device Tree has no supported PLIC node");
+    let plic_reg = plic_node
+        .props()
+        .find(|prop| prop.name().map(|name| name == "reg").unwrap_or(false))
+        .expect("PLIC node has no reg property");
+    let plic_ndev = plic_node
+        .props()
+        .find(|prop| {
+            prop.name()
+                .map(|name| name == "riscv,ndev")
+                .unwrap_or(false)
+        })
+        .expect("PLIC node has no riscv,ndev property")
+        .u32(0)
+        .expect("invalid PLIC riscv,ndev") as usize;
+    let plic_interrupts = plic_node
+        .props()
+        .find(|prop| {
+            prop.name()
+                .map(|name| name == "interrupts-extended")
+                .unwrap_or(false)
+        })
+        .expect("PLIC node has no interrupts-extended property");
+    let mut interrupt_controllers = alloc::collections::BTreeMap::new();
+    for node in index.nodes() {
+        let Some(phandle) = node
+            .props()
+            .find(|prop| prop.name().map(|name| name == "phandle").unwrap_or(false))
+            .and_then(|prop| prop.phandle(0).ok())
+        else {
+            continue;
+        };
+        let is_interrupt_controller = node.props().any(|prop| {
+            prop.name()
+                .map(|name| name == "interrupt-controller")
+                .unwrap_or(false)
+        });
+        if !is_interrupt_controller {
+            continue;
+        }
+        let Some(cpu_node) = node.parent() else {
+            continue;
+        };
+        let Some(hart_id) = cpu_node
+            .props()
+            .find(|prop| prop.name().map(|name| name == "reg").unwrap_or(false))
+            .and_then(|prop| prop.u32(0).ok())
+        else {
+            continue;
+        };
+        interrupt_controllers.insert(phandle, hart_id as usize);
+    }
+    let mut contexts = Vec::new();
+    for entry in 0..(plic_interrupts.length() / 8) {
+        let phandle = plic_interrupts
+            .phandle(entry * 2)
+            .expect("invalid PLIC context phandle");
+        let cause = plic_interrupts
+            .u32(entry * 2 + 1)
+            .expect("invalid PLIC context cause");
+        if cause != 9 {
+            continue;
+        }
+        if let Some(&hart_id) = interrupt_controllers.get(&phandle) {
+            contexts.push(exarch::irq::RiscvPlicContext {
+                hart_id,
+                context: entry,
+            });
+        }
+    }
+    assert!(!contexts.is_empty(), "PLIC has no supervisor contexts");
+
+    let uart_node = index
+        .compatible_nodes("ns16550a")
+        .next()
+        .expect("Device Tree has no ns16550a UART");
+    let uart_reg = uart_node
+        .props()
+        .find(|prop| prop.name().map(|name| name == "reg").unwrap_or(false))
+        .expect("UART node has no reg property");
+    let uart_source = uart_node
+        .props()
+        .find(|prop| {
+            prop.name()
+                .map(|name| name == "interrupts")
+                .unwrap_or(false)
+        })
+        .expect("UART node has no interrupts property")
+        .u32(0)
+        .expect("invalid UART interrupt source") as usize;
+    exarch::irq::init_external_controller(exarch::irq::RiscvExternalIrqConfig {
+        physical_base: PhysAddr::from_usize(
+            usize::try_from(plic_reg.u64(0).expect("invalid PLIC reg base"))
+                .expect("PLIC base exceeds address width"),
+        ),
+        size: usize::try_from(plic_reg.u64(1).expect("invalid PLIC reg size"))
+            .expect("PLIC size exceeds address width"),
+        source_count: plic_ndev,
+        contexts: contexts.into_boxed_slice(),
+        uart_source: exarch::irq::GlobalIrq::new(
+            u32::try_from(uart_source).expect("UART PLIC source exceeds u32"),
+        ),
+        uart_base: PhysAddr::from_usize(
+            usize::try_from(uart_reg.u64(0).expect("invalid UART reg base"))
+                .expect("UART base exceeds address width"),
+        ),
+    });
 
     drop(index);
     unsafe { dealloc(buf_ptr, layout) };

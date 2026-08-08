@@ -2,7 +2,10 @@
 //!
 //! Field order is part of the assembly ABI used by `trap.S`.
 
+use memory_addr::{VirtAddr, va};
 use riscv::register::sstatus;
+
+use crate::trap::TrapFrameAccess;
 
 /// The RISC-V integer register file saved during a trap.
 ///
@@ -66,6 +69,20 @@ impl Default for TrapFrame {
             sepc: 0,
             sstatus: sstatus::Sstatus::from_bits(0),
         }
+    }
+}
+
+impl TrapFrameAccess for TrapFrame {
+    fn instruction_pointer(&self) -> VirtAddr {
+        va!(self.sepc)
+    }
+
+    fn set_instruction_pointer(&mut self, instruction_pointer: VirtAddr) {
+        self.sepc = instruction_pointer.as_usize();
+    }
+
+    fn is_user(&self) -> bool {
+        self.sstatus.spp() == sstatus::SPP::User
     }
 }
 

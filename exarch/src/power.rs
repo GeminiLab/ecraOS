@@ -49,11 +49,6 @@ pub enum ShutdownReason {
 /// Power operations implemented by the platform.
 #[def_interface(gen_caller)]
 pub trait PowerIf {
-    /// Returns the current physical CPU ID.
-    ///
-    /// The value identifies the hardware CPU executing the caller.
-    fn current_cpu_id() -> PhysicalCpuId;
-
     /// Brings up a physical CPU.
     ///
     /// The return value reports whether the architecture accepted the startup request.

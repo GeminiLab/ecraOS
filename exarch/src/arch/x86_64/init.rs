@@ -18,4 +18,8 @@ impl InitIf for InitImpl {
     fn init_early_ap() {
         super::init_early_ap();
     }
+
+    fn init_later_ap() {
+        super::init_later_ap();
+    }
 }

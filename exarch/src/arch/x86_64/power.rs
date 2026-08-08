@@ -11,10 +11,6 @@ pub struct PowerImpl;
 
 #[crate_interface::impl_interface]
 impl PowerIf for PowerImpl {
-    fn current_cpu_id() -> PhysicalCpuId {
-        todo!()
-    }
-
     fn cpu_up(
         cpu_id: PhysicalCpuId,
         page_table_root: PhysAddr,
@@ -22,8 +18,6 @@ impl PowerIf for PowerImpl {
         entry: APEntry,
     ) -> Result<(), CpuStartError> {
         let apic_id = u32::try_from(cpu_id).map_err(|_| CpuStartError::InvalidCpu)?;
-        let lapic = super::imp::apic::local_apic();
-
         super::imp::ap::setup_ap_start_page(
             cpu_id,
             page_table_root,
@@ -31,11 +25,11 @@ impl PowerIf for PowerImpl {
             VirtAddr::from_usize(entry as usize),
         );
 
-        unsafe { lapic.send_init_ipi(apic_id) };
+        unsafe { super::imp::apic::send_init_ipi(apic_id) };
         crate::time::spin_wait_for(Duration::from_millis(10)); // 10ms
-        unsafe { lapic.send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
+        unsafe { super::imp::apic::send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
         crate::time::spin_wait_for(Duration::from_micros(200)); // 200us
-        unsafe { lapic.send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
+        unsafe { super::imp::apic::send_sipi(super::imp::ap::AP_START_PAGE_INDEX, apic_id) };
         Ok(())
     }
 

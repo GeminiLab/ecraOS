@@ -33,4 +33,5 @@ pub trait InitIf {
     fn init_later();
 
     fn init_early_ap();
+    fn init_later_ap();
 }

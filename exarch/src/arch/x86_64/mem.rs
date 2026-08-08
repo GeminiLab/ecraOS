@@ -137,7 +137,10 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegi
     {
         _ = memory_regions.push(MemoryRegion {
             range: pci_mmio_region,
-            flags: DEFAULT_RESERVED_FLAGS,
+            flags: MemoryRegionFlags::READ
+                | MemoryRegionFlags::WRITE
+                | MemoryRegionFlags::DEVICE
+                | MemoryRegionFlags::RESERVED,
             desc: PCI_MMIO_DESC,
         });
     }

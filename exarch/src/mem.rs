@@ -6,16 +6,6 @@ use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
 use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
 
-/// Kernel address translation operations.
-#[def_interface(gen_caller)]
-pub trait MemoryAddressTranslationIf {
-    /// Converts a virtual address into its physical address.
-    fn virt_to_phys(addr: VirtAddr) -> PhysAddr;
-
-    /// Converts a physical address into its currently accessible virtual address.
-    fn phys_to_virt(addr: PhysAddr) -> VirtAddr;
-}
-
 bitflags::bitflags! {
     /// The flags for a memory region.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,14 +4,19 @@
 
 use core::arch::global_asm;
 
+use log::{error, warn};
 use memory_addr::va;
 use riscv::{
-    interrupt::Trap,
+    interrupt::{
+        Trap,
+        supervisor::{self, Exception as RiscvException, Interrupt},
+    },
     register::{scause, sstatus, stval, stvec},
 };
 
 use super::context::TrapFrame;
-use crate::trap::PageFaultFlags;
+use crate::trap::{Exception, LocalInterrupt, SemanticTrap};
+use crate::trap::{PageFaultFlags, TrapDisposition, should_mask_unhandled_local};
 
 global_asm!(
     include_str!("trap.S"),
@@ -66,23 +71,21 @@ fn handle_breakpoint(sepc: &mut usize) {
 /// Dispatches a RISC-V page fault to the common kernel callback.
 ///
 /// An unhandled fault is fatal and includes the complete saved context in its diagnostic.
-fn handle_page_fault(tf: &TrapFrame, mut flags: PageFaultFlags) {
+fn handle_page_fault(tf: &mut TrapFrame, mut flags: PageFaultFlags) -> TrapDisposition {
     let user = is_user(tf);
     if user {
         flags |= PageFaultFlags::USER;
     }
 
     let fault_addr = va!(stval::read());
-    if !crate::trap::handle_page_fault(fault_addr, flags, user) {
-        panic!(
-            "Unhandled {} page fault @ {:#x}, fault_vaddr={:#x} ({:?}):\n{:#x?}",
-            if user { "user" } else { "supervisor" },
-            tf.sepc,
-            fault_addr,
+    crate::trap::handle(
+        tf,
+        SemanticTrap::Exception(Exception::PageFault {
+            address: fault_addr,
             flags,
-            tf,
-        );
-    }
+            is_user: user,
+        }),
+    )
 }
 
 /// Dispatches one RISC-V supervisor trap.
@@ -91,27 +94,82 @@ fn handle_page_fault(tf: &TrapFrame, mut flags: PageFaultFlags) {
 #[unsafe(no_mangle)]
 extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
     let scause = scause::read();
-    match scause.cause() {
-        Trap::Interrupt(_) => {
-            if !crate::trap::handle_irq(scause.bits()) {
-                panic!(
-                    "Unhandled IRQ {:#x} @ {:#x}:\n{:#x?}",
-                    scause.bits(),
-                    tf.sepc,
-                    tf
-                );
-            }
+
+    let result = match scause.cause().try_into() {
+        Ok(scause_decoded) => valid_riscv_trap_handler(tf, scause_decoded, scause.bits()),
+        Err(e) => {
+            error!(
+                "Unknown RISC-V scause: {scause:#x} with stval={stval:#x} @ {sepc:#x}, {e:?}, continue anyway...",
+                scause = scause.bits(),
+                stval = stval::read(),
+                sepc = tf.sepc,
+            );
+
+            crate::trap::handle(
+                tf,
+                if scause.is_exception() {
+                    SemanticTrap::Exception(Exception::Unknown(crate::trap::RawTrap(scause.bits())))
+                } else {
+                    SemanticTrap::UnknownInterrupt(crate::trap::RawTrap(scause.bits()))
+                },
+            )
         }
-        Trap::Exception(12) => handle_page_fault(tf, PageFaultFlags::EXECUTE),
-        Trap::Exception(13) => handle_page_fault(tf, PageFaultFlags::READ),
-        Trap::Exception(15) => handle_page_fault(tf, PageFaultFlags::WRITE),
-        Trap::Exception(3) => handle_breakpoint(&mut tf.sepc),
-        other => panic!(
-            "Unhandled trap {:?}, stval={:#x} @ {:#x}:\n{:#x?}",
-            other,
-            stval::read(),
-            tf.sepc,
-            tf,
-        ),
+    };
+
+    if result != TrapDisposition::Handled {
+        warn!(
+            "Unhandled RISC-V trap: {scause:#x} with stval={stval:#x} @ {sepc:#x}",
+            scause = scause.bits(),
+            stval = stval::read(),
+            sepc = tf.sepc
+        );
+    }
+}
+
+fn valid_riscv_trap_handler(
+    tf: &mut TrapFrame,
+    scause: Trap<Interrupt, RiscvException>,
+    raw_bits: usize,
+) -> TrapDisposition {
+    match scause {
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            crate::trap::handle(tf, SemanticTrap::LocalInterrupt(LocalInterrupt::Timer))
+        }
+        Trap::Interrupt(Interrupt::SupervisorExternal) => super::irq::handle_external(tf),
+        Trap::Interrupt(Interrupt::SupervisorSoft) => {
+            let disposition =
+                crate::trap::handle(tf, SemanticTrap::LocalInterrupt(LocalInterrupt::Software));
+            if should_mask_unhandled_local(LocalInterrupt::Software, disposition) {
+                supervisor::disable_interrupt(Interrupt::SupervisorSoft);
+            }
+            disposition
+        }
+        Trap::Exception(RiscvException::InstructionPageFault) => {
+            handle_page_fault(tf, PageFaultFlags::EXECUTE)
+        }
+        Trap::Exception(RiscvException::LoadPageFault) => {
+            handle_page_fault(tf, PageFaultFlags::READ)
+        }
+        Trap::Exception(RiscvException::StorePageFault) => {
+            handle_page_fault(tf, PageFaultFlags::WRITE)
+        }
+        Trap::Exception(RiscvException::Breakpoint) => {
+            handle_breakpoint(&mut tf.sepc);
+            crate::trap::handle(tf, SemanticTrap::Exception(Exception::Breakpoint))
+        }
+        Trap::Exception(RiscvException::IllegalInstruction) => {
+            crate::trap::handle(tf, SemanticTrap::Exception(Exception::InvalidInstruction))
+        }
+        Trap::Exception(other) => {
+            warn!(
+                "Unsupported RISC-V exception: {other:?} with stval={:#x} @ {:#x}",
+                stval::read(),
+                tf.sepc
+            );
+            crate::trap::handle(
+                tf,
+                SemanticTrap::Exception(Exception::Unknown(crate::trap::RawTrap(raw_bits))),
+            )
+        }
     }
 }

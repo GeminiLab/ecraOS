@@ -2,24 +2,33 @@
 //!
 //! Original code from `axcpu` v0.3.1.
 
-use log::debug;
 use memory_addr::va;
 use x86::{controlregs::cr2, irq::*};
 use x86_64::structures::idt::PageFaultErrorCode;
 
 use super::context::TrapFrame;
-use crate::trap::PageFaultFlags;
+use crate::trap::{Exception, LocalInterrupt, PageFaultFlags, SemanticTrap, TrapDisposition};
 
 core::arch::global_asm!(include_str!("trap.S"));
 
 const IRQ_VECTOR_START: u8 = 0x20;
 const IRQ_VECTOR_END: u8 = 0xff;
 
-fn handle_page_fault(tf: &TrapFrame) {
+fn handle_page_fault(tf: &mut TrapFrame) {
     let access_flags = err_code_to_flags(tf.error_code)
         .unwrap_or_else(|e| panic!("Invalid #PF error code: {:#x}", e));
     let vaddr = va!(unsafe { cr2() });
-    if !crate::trap::handle_page_fault(vaddr, access_flags, tf.is_user()) {
+    if !matches!(
+        crate::trap::handle(
+            tf,
+            SemanticTrap::Exception(Exception::PageFault {
+                address: vaddr,
+                flags: access_flags,
+                is_user: tf.is_user(),
+            }),
+        ),
+        TrapDisposition::Handled
+    ) {
         panic!(
             "Unhandled {} #PF @ {:#x}, fault_vaddr={:#x}, error_code={:#x} ({:?}):\n{:#x?}",
             if tf.is_user() { "user" } else { "kernel" },
@@ -36,34 +45,42 @@ fn handle_page_fault(tf: &TrapFrame) {
 fn x86_trap_handler(tf: &mut TrapFrame) {
     match tf.vector as u8 {
         PAGE_FAULT_VECTOR => handle_page_fault(tf),
-        BREAKPOINT_VECTOR => debug!("#BP @ {:#x} ", tf.rip),
+        BREAKPOINT_VECTOR => {
+            _ = crate::trap::handle(tf, SemanticTrap::Exception(Exception::Breakpoint));
+        }
         GENERAL_PROTECTION_FAULT_VECTOR => {
-            panic!(
-                "#GP @ {:#x}, error_code={:#x}:\n{:#x?}",
-                tf.rip, tf.error_code, tf
+            _ = crate::trap::handle(
+                tf,
+                SemanticTrap::Exception(Exception::GeneralProtection {
+                    error_code: tf.error_code as usize,
+                }),
             );
         }
         IRQ_VECTOR_START..=IRQ_VECTOR_END => {
-            crate::trap::handle_irq(tf.vector as _);
+            let vector = tf.vector as u8;
+            if vector == super::apic::vectors::APIC_TIMER_VECTOR {
+                _ = crate::trap::handle(tf, SemanticTrap::LocalInterrupt(LocalInterrupt::Timer));
+                super::apic::end_of_interrupt();
+            } else if let Some(irq) = crate::arch::x86_64::irq::gsi_for_vector(vector) {
+                let result = crate::trap::handle(tf, SemanticTrap::GlobalIrq(irq));
+                if matches!(result, TrapDisposition::Unhandled) {
+                    crate::arch::x86_64::irq::mask_source(irq);
+                }
+                super::apic::end_of_interrupt();
+            } else if vector == super::apic::vectors::APIC_SPURIOUS_VECTOR {
+                log::warn!("spurious x86 interrupt vector {vector:#x}");
+            } else {
+                log::warn!("unknown x86 interrupt vector {vector:#x}");
+                super::apic::end_of_interrupt();
+            }
         }
         _ => {
-            panic!(
-                "Unhandled exception {} ({}, error_code={:#x}) @ {:#x}:\n{:#x?}",
-                tf.vector,
-                vec_to_str(tf.vector),
-                tf.error_code,
-                tf.rip,
-                tf
-            );
+            let exception = match tf.vector as u8 {
+                INVALID_OPCODE_VECTOR => Exception::InvalidInstruction,
+                _ => Exception::Unknown(crate::trap::RawTrap(tf.vector as usize)),
+            };
+            _ = crate::trap::handle(tf, SemanticTrap::Exception(exception));
         }
-    }
-}
-
-fn vec_to_str(vec: u64) -> &'static str {
-    if vec < 32 {
-        EXCEPTIONS[vec as usize].mnemonic
-    } else {
-        "Unknown"
     }
 }
 

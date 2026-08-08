@@ -26,12 +26,16 @@ pub fn init_early() {
 }
 
 pub fn init_later() {
-    imp::apic::init_primary();
+    imp::apic::init_bsp();
 }
 
 pub fn init_early_ap() {
     imp::gdt::init_gdt();
     imp::idt::init_idt();
+}
+
+pub fn init_later_ap() {
+    imp::apic::init_ap();
 }
 
 pub fn after_reloc() {

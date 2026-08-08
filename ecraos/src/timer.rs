@@ -1,9 +1,10 @@
 //! Periodic kernel timer events.
 //!
-//! The RISC-V timer uses per-hart SBI one-shot deadlines to provide 100 timer events per second.
+//! The kernel timer uses per-CPU absolute one-shot deadlines to provide periodic timer events.
 
 use core::time::Duration;
 
+use exarch::trap::{Handler, LocalInterrupt, TrapDisposition, TrapFrame};
 use expercpu::def_percpu;
 
 mod deadline;
@@ -32,30 +33,28 @@ static NEXT_DEADLINE_NANOS: u64 = 0;
 #[def_percpu]
 static TIMER_EVENT_COUNT: u64 = 0;
 
-/// The kernel implementation of architecture trap callbacks.
-///
-/// This currently forwards IRQs to the architecture registry. The RISC-V trap path could call
-/// `exarch::irq::handle` directly, so this crate-interface layer is not mechanically required and
-/// remains only to preserve the existing common trap boundary for now.
-struct TrapHandlerImpl;
-
-#[crate_interface::impl_interface]
-impl exarch::trap::TrapHandler for TrapHandlerImpl {
-    fn handle_irq(irq: usize) -> bool {
-        exarch::irq::handle(irq)
-    }
-}
-
 /// Initializes the periodic timer on the bootstrap hart.
 ///
 /// This registers the shared handler before arming and enabling local interrupts.
 pub fn init_bsp() {
-    assert!(
-        exarch::irq::register(exarch::irq::TIMER_IRQ_NUM, handle_timer_irq),
-        "failed to register the RISC-V timer IRQ handler"
+    assert_eq!(
+        crate::irq::register(Handler::LocalInterrupt(handle_local_interrupt)),
+        Ok(()),
+        "failed to register the local timer handler"
     );
     program_next_timer();
     exarch::irq::enable_local();
+}
+
+/// Converts the semantic local timer trap into the periodic timer callback.
+fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> TrapDisposition {
+    match interrupt {
+        LocalInterrupt::Timer => {
+            handle_timer_irq();
+            TrapDisposition::Handled
+        }
+        LocalInterrupt::Software => TrapDisposition::Unhandled,
+    }
 }
 
 /// Initializes the periodic timer on an application hart.
@@ -77,18 +76,26 @@ pub fn timer_event_count() -> u64 {
 ///
 /// This checks delivery without asserting an exact rate that would be sensitive to host pauses.
 pub fn smoke_test() {
-    let before = timer_event_count();
-    exarch::time::spin_wait_for(Duration::from_secs(1));
-    let after = timer_event_count();
-    assert!(
-        after > before,
-        "timer IRQ did not advance on hart {}",
-        crate::mp::current_cpu_phys_id()
-    );
+    let mut observed = timer_event_count();
+    for step in 1..=3 {
+        let deadline = exarch::time::monotonic_time() + Duration::from_millis(10);
+        exarch::time::set_oneshot_timer(deadline);
+        let timeout = exarch::time::monotonic_time() + Duration::from_millis(200);
+        while timer_event_count() <= observed && exarch::time::monotonic_time() < timeout {
+            core::hint::spin_loop();
+        }
+        let after = timer_event_count();
+        assert!(
+            after > observed,
+            "timer deadline {step} did not fire on CPU {}: deadline={deadline:?}, timeout={timeout:?}",
+            crate::mp::current_cpu_phys_id()
+        );
+        observed = after;
+    }
     log::info!(
-        "Timer event smoke test on hart {}: {} events",
+        "Timer deadline smoke test on CPU {}: 3 deadlines, {} events",
         crate::mp::current_cpu_phys_id(),
-        after - before
+        observed
     );
 }
 

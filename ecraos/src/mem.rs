@@ -20,19 +20,6 @@ pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
 
-struct MemoryAddressTranslationIfImpl;
-
-#[crate_interface::impl_interface]
-impl exarch::mem::MemoryAddressTranslationIf for MemoryAddressTranslationIfImpl {
-    fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
-        virt_to_phys(addr)
-    }
-
-    fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
-        phys_to_virt(addr)
-    }
-}
-
 pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
     try_virt_to_phys(addr).unwrap_or_else(|| PhysAddr::from_usize(addr.as_usize()))
 }

@@ -11,11 +11,16 @@ use fdt_rs::{
 use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr, pa};
 
 use crate::mem::{
-    DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemIf, MemoryRegion, RawMemoryRegions, VirtAddrSpaceMode,
-    VirtAddrSpaceModes, VirtAddrSpaceProps,
+    DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemIf, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+    VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
 };
 
 core::arch::global_asm!(include_str!("mem.S"),);
+
+/// The description attached to device-tree MMIO regions.
+///
+/// These ranges are reserved from allocation and mapped with device-memory attributes.
+const DEVICE_MMIO_DESC: &str = "device-tree MMIO";
 
 /// The implementation of the [`MemIf`] trait.
 struct MemImpl;
@@ -60,6 +65,45 @@ impl MemIf for MemImpl {
                     flags: DEFAULT_RAM_FLAGS,
                     desc: DEFAULT_RAM_DESC,
                 });
+            }
+
+            // TODO: handle other devices
+            for node in dev_tree.nodes().iterator() {
+                let node = node.expect("failed to inspect Device Tree node");
+                let supported = node
+                    .props()
+                    .any(|prop| {
+                        Ok(prop.name()? == "compatible"
+                            && prop.str().is_ok_and(|compatible| {
+                                matches!(
+                                    compatible,
+                                    "sifive,plic-1.0.0" | "riscv,plic0" | "ns16550a"
+                                )
+                            }))
+                    })
+                    .expect("failed to inspect Device Tree compatible property");
+                if !supported {
+                    continue;
+                }
+                let Some(reg) = node
+                    .props()
+                    .find(|prop| Ok(prop.name()? == "reg"))
+                    .expect("failed to inspect Device Tree reg property")
+                else {
+                    continue;
+                };
+                let start = reg.u64(0).expect("invalid device MMIO base");
+                let size = reg.u64(1).expect("invalid device MMIO size");
+                regions
+                    .push(MemoryRegion {
+                        range: PhysAddrRange::from_start_size(pa!(start as usize), size as usize),
+                        flags: MemoryRegionFlags::READ
+                            | MemoryRegionFlags::WRITE
+                            | MemoryRegionFlags::DEVICE
+                            | MemoryRegionFlags::RESERVED,
+                        desc: DEVICE_MMIO_DESC,
+                    })
+                    .expect("too many platform memory regions");
             }
         }
 

@@ -11,10 +11,6 @@ struct PowerImpl;
 
 #[crate_interface::impl_interface]
 impl PowerIf for PowerImpl {
-    fn current_cpu_id() -> PhysicalCpuId {
-        todo!()
-    }
-
     fn cpu_up(
         phys_id: PhysicalCpuId,
         page_table_root: PhysAddr,
@@ -34,9 +30,9 @@ impl PowerIf for PowerImpl {
 
         // `boot_stack_top` is one-past-end, so translate the last argument slot.
         let boot_stack_top_pa =
-            crate::mem::virt_to_phys(va!(boot_stack_top.as_usize() - AP_BOOT_ARG_SLOT_SIZE))
+            crate::kernel_if::virt_to_phys(va!(boot_stack_top.as_usize() - AP_BOOT_ARG_SLOT_SIZE))
                 + AP_BOOT_ARG_SLOT_SIZE;
-        let start_ap_pa = crate::mem::virt_to_phys(va!(_start_ap as *const () as _));
+        let start_ap_pa = crate::kernel_if::virt_to_phys(va!(_start_ap as *const () as _));
 
         let boot_stack_top_ptr = boot_stack_top.as_mut_ptr_of::<u64>();
         unsafe {

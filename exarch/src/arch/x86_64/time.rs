@@ -46,4 +46,26 @@ impl TimeIf for TimeImpl {
     fn nanos_to_ticks(nanos: Nanos) -> Ticks {
         unsafe { Ticks(nanos.0 * TSC_FREQ_KHZ / 1_000_000) }
     }
+
+    fn set_oneshot_timer(deadline: crate::time::TimeValue) {
+        let deadline_ticks = unsafe { INIT_TICK.0 }
+            .checked_add(
+                Self::nanos_to_ticks(Nanos(
+                    u64::try_from(deadline.as_nanos())
+                        .expect("x86 timer deadline exceeds u64 nanoseconds"),
+                ))
+                .0,
+            )
+            .expect("x86 timer deadline overflows TSC");
+        if super::imp::apic::tsc_deadline_supported() {
+            super::imp::apic::program_tsc_deadline(deadline_ticks.max(current_ticks().0 + 1));
+            return;
+        }
+        let now = Self::monotonic_ticks().0;
+        let delta = deadline_ticks
+            .saturating_sub(unsafe { INIT_TICK.0 + now })
+            .max(1)
+            .min(u32::MAX as u64) as u32;
+        super::imp::apic::program_timer_initial(delta);
+    }
 }
