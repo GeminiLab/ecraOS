@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate_interface::def_interface;
+use look_at::look_at;
 use memory_addr::PhysAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,11 @@ pub enum DeviceInfoSource {
 
 pub struct DeviceInfoToBeImplemented {}
 
-#[def_interface(gen_caller)]
-pub trait DeviceIf {
-    fn probe_device_info_sources(arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource>;
+/// Platform device information operations.
+///
+/// The wrapper forwards calls to the selected architecture implementation.
+#[look_at(crate::arch::current::device, flatten)]
+mod _wrapper {
+    /// Probes platform-provided device information sources.
+    pub fn probe_device_info_sources(arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource>;
 }

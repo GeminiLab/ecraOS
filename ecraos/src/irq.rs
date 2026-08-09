@@ -3,7 +3,7 @@
 //! This module owns the three semantic handler registrations and adapts the global handler to the
 //! existing controller source registry while that registry is being moved into the kernel.
 
-pub mod global_irq;
+pub mod global;
 
 use exarch::trap::{
     Exception, Handler, HandlerSlots, SemanticTrap, TrapDisposition, TrapFrame, TrapFrameAccess,
@@ -65,7 +65,7 @@ fn handle_exception(frame: &mut TrapFrame, exception: Exception) -> TrapDisposit
 /// The registry migration keeps source handlers in the kernel-facing boundary while preserving the
 /// tested controller lifecycle during this transition.
 fn handle_global_irq(frame: &mut TrapFrame, irq: exarch::trap::GlobalIrq) -> TrapDisposition {
-    global_irq::dispatch(frame, irq)
+    global::dispatch(frame, irq)
 }
 
 /// Installs the exception and global semantic handlers.

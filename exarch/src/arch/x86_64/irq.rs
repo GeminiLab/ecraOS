@@ -10,7 +10,7 @@ use x86_64::instructions::interrupts;
 
 use crate::{
     arch::x86_64::imp::ioapic::{IoApicConfig, IoApicSet, Polarity, TriggerMode},
-    irq::{ExternalIrqIf, GlobalIrq, IrqError, IrqIf},
+    irq::{GlobalIrq, IrqError},
 };
 
 /// An x86 global system interrupt identifier.
@@ -152,11 +152,6 @@ impl ExternalController {
     }
 }
 
-/// The x86-64 implementation of local interrupt operations.
-///
-/// Handler registration reports unsupported until the controller path adopts the common API.
-pub struct IrqImpl;
-
 /// Initializes the x86 external controller from ACPI data.
 pub fn init_external(config: X86ExternalIrqConfig) {
     // SAFETY: VMM initialization has established device mappings before ACPI discovery reaches
@@ -219,41 +214,40 @@ pub fn mask_source(irq: GlobalIrq) {
     }
 }
 
-#[crate_interface::impl_interface]
-impl IrqIf for IrqImpl {
-    fn enable_local() {
-        interrupts::enable();
-    }
+/// Enables interrupts globally on the current CPU.
+pub fn enable_local() {
+    interrupts::enable();
+}
 
-    fn disable_local() {
-        interrupts::disable();
-    }
+/// Disables interrupts globally on the current CPU.
+pub fn disable_local() {
+    interrupts::disable();
+}
 
-    fn local_enabled() -> bool {
-        interrupts::are_enabled()
-    }
+/// Returns whether interrupts are globally enabled on the current CPU.
+pub fn local_enabled() -> bool {
+    interrupts::are_enabled()
 }
 
 /// Returns the architecture-local timer interrupt vector.
 pub const TIMER_IRQ_NUM: usize = super::imp::apic::TIMER_VECTOR;
 
-#[crate_interface::impl_interface]
-impl ExternalIrqIf for IrqImpl {
-    fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
-        let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-        let mut controller = controller.lock();
-        controller.prepare_route(irq)?;
-        Ok(())
-    }
+/// Prepares an external source while keeping it masked.
+pub fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
+    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
+    let mut controller = controller.lock();
+    controller.prepare_route(irq)?;
+    Ok(())
+}
 
-    fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
-        let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-        let controller = controller.lock();
-        if enabled {
-            controller.ioapics.unmask(irq.raw());
-        } else {
-            controller.ioapics.mask(irq.raw());
-        }
-        Ok(())
+/// Enables or disables a prepared external source.
+pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
+    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
+    let controller = controller.lock();
+    if enabled {
+        controller.ioapics.unmask(irq.raw());
+    } else {
+        controller.ioapics.mask(irq.raw());
     }
+    Ok(())
 }

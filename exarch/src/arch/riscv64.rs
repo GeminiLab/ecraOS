@@ -6,6 +6,7 @@ use memory_addr::va;
 mod context;
 
 pub mod debug_console;
+pub mod device;
 pub mod init;
 pub mod irq;
 pub mod mem;

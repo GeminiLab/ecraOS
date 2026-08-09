@@ -14,7 +14,7 @@ use riscv::{
 };
 
 use crate::{
-    irq::{ExternalIrqIf, GlobalIrq, IrqError, IrqIf},
+    irq::{GlobalIrq, IrqError},
     trap::{SemanticTrap, TrapDisposition, merge_dispositions},
 };
 
@@ -291,47 +291,41 @@ pub const TIMER_IRQ_NUM: usize = INTC_IRQ_BASE | Interrupt::SupervisorTimer as u
 /// This cause remains masked until a PLIC implementation is added.
 pub const EXTERNAL_IRQ_NUM: usize = INTC_IRQ_BASE | Interrupt::SupervisorExternal as usize;
 
-/// The RISC-V implementation of interrupt operations.
-///
-/// Local interrupt enable state is controlled here while semantic handlers remain in the kernel.
-pub struct IrqImpl;
-
-#[crate_interface::impl_interface]
-impl IrqIf for IrqImpl {
-    fn enable_local() {
-        // SAFETY: callers enable interrupts only after installing handlers.
-        unsafe { supervisor::enable() };
-    }
-
-    fn disable_local() {
-        supervisor::disable();
-    }
-
-    fn local_enabled() -> bool {
-        sstatus::read().sie()
-    }
+/// Enables interrupts globally on the current hart.
+pub fn enable_local() {
+    // SAFETY: callers enable interrupts only after installing handlers.
+    unsafe { supervisor::enable() };
 }
 
-#[crate_interface::impl_interface]
-impl ExternalIrqIf for IrqImpl {
-    fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
-        let plic = PLIC.get().ok_or(IrqError::Unsupported)?;
-        if irq.raw() == 0 || irq.raw() as usize > plic.lock().source_count {
-            return Err(IrqError::InvalidNumber);
-        }
-        Ok(())
-    }
+/// Disables interrupts globally on the current hart.
+pub fn disable_local() {
+    supervisor::disable();
+}
 
-    fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
-        let plic = PLIC.get().ok_or(IrqError::Unsupported)?;
-        let plic = plic.lock();
-        if enabled {
-            plic.unmask(irq);
-        } else {
-            plic.mask(irq);
-        }
-        Ok(())
+/// Returns whether interrupts are globally enabled on the current hart.
+pub fn local_enabled() -> bool {
+    sstatus::read().sie()
+}
+
+/// Prepares an external PLIC source while keeping it masked.
+pub fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
+    let plic = PLIC.get().ok_or(IrqError::Unsupported)?;
+    if irq.raw() == 0 || irq.raw() as usize > plic.lock().source_count {
+        return Err(IrqError::InvalidNumber);
     }
+    Ok(())
+}
+
+/// Enables or disables a prepared PLIC source.
+pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
+    let plic = PLIC.get().ok_or(IrqError::Unsupported)?;
+    let plic = plic.lock();
+    if enabled {
+        plic.unmask(irq);
+    } else {
+        plic.mask(irq);
+    }
+    Ok(())
 }
 
 /// Enables the supervisor timer source on the current hart.

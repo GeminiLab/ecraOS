@@ -2,7 +2,7 @@ use core::arch::x86_64::_rdtsc;
 
 use crate::{
     dbcn_println,
-    time::{Nanos, Ticks, TimeIf},
+    time::{Nanos, Ticks},
 };
 
 mod calibration;
@@ -46,37 +46,36 @@ pub fn init_early() {
     }
 }
 
-pub struct TimeImpl;
+/// Returns monotonic TSC ticks since early initialization.
+pub fn monotonic_ticks() -> Ticks {
+    unsafe { Ticks(current_ticks().0 - INIT_TICK.0) }
+}
 
-#[crate_interface::impl_interface]
-impl TimeIf for TimeImpl {
-    fn monotonic_ticks() -> Ticks {
-        unsafe { Ticks(current_ticks().0 - INIT_TICK.0) }
-    }
+/// Converts TSC ticks to nanoseconds.
+pub fn ticks_to_nanos(ticks: Ticks) -> Nanos {
+    unsafe { Nanos(ticks.0 * 1_000_000 / TSC_FREQ_KHZ) }
+}
 
-    fn ticks_to_nanos(ticks: Ticks) -> Nanos {
-        unsafe { Nanos(ticks.0 * 1_000_000 / TSC_FREQ_KHZ) }
-    }
+/// Converts nanoseconds to TSC ticks.
+pub fn nanos_to_ticks(nanos: Nanos) -> Ticks {
+    unsafe { Ticks(nanos.0 * TSC_FREQ_KHZ / 1_000_000) }
+}
 
-    fn nanos_to_ticks(nanos: Nanos) -> Ticks {
-        unsafe { Ticks(nanos.0 * TSC_FREQ_KHZ / 1_000_000) }
+/// Programs an x86 one-shot timer for an absolute monotonic deadline.
+pub fn set_oneshot_timer(deadline: crate::time::TimeValue) {
+    let deadline_ns =
+        u64::try_from(deadline.as_nanos()).expect("x86 timer deadline exceeds u64 nanoseconds");
+    if super::imp::apic::tsc_deadline_supported() {
+        let deadline_ticks = unsafe { INIT_TICK.0 }
+            .checked_add(nanos_to_ticks(Nanos(deadline_ns)).0)
+            .expect("x86 timer deadline overflows TSC");
+        super::imp::apic::program_tsc_deadline(deadline_ticks.max(current_ticks().0 + 1));
+        return;
     }
-
-    fn set_oneshot_timer(deadline: crate::time::TimeValue) {
-        let deadline_ns =
-            u64::try_from(deadline.as_nanos()).expect("x86 timer deadline exceeds u64 nanoseconds");
-        if super::imp::apic::tsc_deadline_supported() {
-            let deadline_ticks = unsafe { INIT_TICK.0 }
-                .checked_add(Self::nanos_to_ticks(Nanos(deadline_ns)).0)
-                .expect("x86 timer deadline overflows TSC");
-            super::imp::apic::program_tsc_deadline(deadline_ticks.max(current_ticks().0 + 1));
-            return;
-        }
-        let now_ns = Self::ticks_to_nanos(Self::monotonic_ticks()).0;
-        let delta_ns = deadline_ns.saturating_sub(now_ns);
-        let count = nanos_to_lapic_ticks(delta_ns, super::imp::apic::timer_frequency_khz());
-        super::imp::apic::program_timer_initial(count);
-    }
+    let now_ns = ticks_to_nanos(monotonic_ticks()).0;
+    let delta_ns = deadline_ns.saturating_sub(now_ns);
+    let count = nanos_to_lapic_ticks(delta_ns, super::imp::apic::timer_frequency_khz());
+    super::imp::apic::program_timer_initial(count);
 }
 
 #[cfg(test)]

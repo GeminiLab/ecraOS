@@ -3,8 +3,6 @@
 use kspin::SpinNoIrq;
 use uart_16550::SerialPort;
 
-use crate::debug_console::DebugConsoleIf;
-
 /// Standard PC COM1 I/O base port.
 const COM1_BASE: u16 = 0x3f8;
 
@@ -16,29 +14,23 @@ pub fn init() {
     COM1.lock().init();
 }
 
-/// The implementation of the [`DebugConsoleIf`] trait.
-pub struct DebugConsoleImpl;
+pub fn write_bytes(bytes: &[u8]) {
+    let mut com = COM1.lock();
+    for &b in bytes {
+        com.send(b);
+    }
+}
 
-#[crate_interface::impl_interface]
-impl DebugConsoleIf for DebugConsoleImpl {
-    fn write_bytes(bytes: &[u8]) {
-        let mut com = COM1.lock();
-        for &b in bytes {
-            com.send(b);
-        }
+pub fn read_bytes(bytes: &mut [u8]) -> usize {
+    let mut com = COM1.lock();
+
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let Some(n) = com.try_receive().ok() else {
+            return index;
+        };
+
+        *byte = n;
     }
 
-    fn read_bytes(bytes: &mut [u8]) -> usize {
-        let mut com = COM1.lock();
-
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            let Some(n) = com.try_receive().ok() else {
-                return index;
-            };
-
-            *byte = n;
-        }
-
-        bytes.len()
-    }
+    bytes.len()
 }

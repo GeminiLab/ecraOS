@@ -1,6 +1,6 @@
 //! Power management.
 
-use crate_interface::def_interface;
+use look_at::look_at;
 use memory_addr::{PhysAddr, VirtAddr};
 
 /// The physical identifier assigned to a CPU by firmware.
@@ -47,12 +47,14 @@ pub enum ShutdownReason {
 }
 
 /// Power operations implemented by the platform.
-#[def_interface(gen_caller)]
-pub trait PowerIf {
+///
+/// The wrapper forwards calls to the selected architecture implementation.
+#[look_at(crate::arch::current::power, flatten)]
+mod _wrapper {
     /// Brings up a physical CPU.
     ///
     /// The return value reports whether the architecture accepted the startup request.
-    fn cpu_up(
+    pub fn cpu_up(
         phys_id: PhysicalCpuId,
         page_table_root: PhysAddr,
         boot_stack_top: VirtAddr,
@@ -63,7 +65,7 @@ pub trait PowerIf {
     ///
     /// Current platform implementations perform their ordinary shutdown and reserve the reason for
     /// future policy.
-    fn shutdown(reason: ShutdownReason) -> !;
+    pub fn shutdown(reason: ShutdownReason) -> !;
 }
 
 /// Powers the system off through the common shutdown interface.

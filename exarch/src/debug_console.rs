@@ -1,22 +1,21 @@
-//! Debug console abstraction: write and read bytes through a platform-selected
-//! debug console device.
+//! Debug console abstraction.
+//!
+//! Methods here provide a high-level interface for writing and reading bytes through a
+//! platform-selected debug console device. Methods in this mod may be unavailable before
+//! [`init_early`](crate::init::InitIf::init_early) is called.
 
 use core::fmt::Write;
 
-use crate_interface::def_interface;
+use look_at::look_at;
 
-/// Low-level debug console operations implemented by the platform.
-///
-/// Methods in this trait may be unavailable before [`init_early`](crate::init::InitIf::init_early)
-/// is called.
-#[def_interface(gen_caller)]
-pub trait DebugConsoleIf {
+#[look_at(crate::arch::current::debug_console, flatten)]
+mod _wrapper {
     /// Writes every byte in `bytes` to the console device.
-    fn write_bytes(bytes: &[u8]);
+    pub fn write_bytes(bytes: &[u8]);
     /// Reads as many bytes as are immediately available, storing them in `bytes`.
     ///
     /// Returns how many bytes were read (may be less than `bytes.len()` if the input is idle).
-    fn read_bytes(bytes: &mut [u8]) -> usize;
+    pub fn read_bytes(bytes: &mut [u8]) -> usize;
 }
 
 /// Writes a UTF-8 string to the debug console.

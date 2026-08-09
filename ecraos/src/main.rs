@@ -135,7 +135,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     // Probe devices.
     device::probe_devices(boot_arg.plat_arg);
 
-    irq::global_irq::init();
+    irq::global::init();
     irq::init();
 
     external_irq_smoke_test();
@@ -192,7 +192,7 @@ fn external_irq_smoke_test() {
     let uart = crate::mem::phys_to_virt(uart_phys).as_usize();
     UART_BASE.store(uart, Ordering::Release);
     UART_EVENTS.store(0, Ordering::Release);
-    irq::global_irq::register(irq, handle_uart_irq).expect("UART IRQ registration failed");
+    irq::global::register(irq, handle_uart_irq).expect("UART IRQ registration failed");
 
     arm_uart_tx_empty();
     exarch::irq::enable_local();
@@ -204,7 +204,7 @@ fn external_irq_smoke_test() {
     );
     unsafe { (uart as *mut u8).add(1).write_volatile(0) };
 
-    irq::global_irq::set_enabled(irq, true).expect("PLIC UART source enable failed");
+    irq::global::set_enabled(irq, true).expect("PLIC UART source enable failed");
     for expected in 1..=2 {
         arm_uart_tx_empty();
         let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
@@ -219,23 +219,21 @@ fn external_irq_smoke_test() {
             UART_EVENTS.load(Ordering::Acquire)
         );
     }
-    irq::global_irq::set_enabled(irq, false).expect("PLIC UART source disable failed");
-    _ = irq::global_irq::unregister(irq).expect("PLIC UART unregister failed");
-    let before = irq::global_irq::unhandled_count(irq);
-    irq::global_irq::test_unmask(irq).expect("PLIC UART test source unmask failed");
+    irq::global::set_enabled(irq, false).expect("PLIC UART source disable failed");
+    _ = irq::global::unregister(irq).expect("PLIC UART unregister failed");
+    let before = irq::global::unhandled_count(irq);
+    irq::global::test_unmask(irq).expect("PLIC UART test source unmask failed");
     arm_uart_tx_empty();
     let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-    while irq::global_irq::unhandled_count(irq) == before
-        && exarch::time::monotonic_time() < deadline
-    {
+    while irq::global::unhandled_count(irq) == before && exarch::time::monotonic_time() < deadline {
         core::hint::spin_loop();
     }
-    let after = irq::global_irq::unhandled_count(irq);
+    let after = irq::global::unhandled_count(irq);
     assert!(
         after > before,
         "unregistered UART interrupt was not counted: irq={irq:?}, before={before}, after={after}, deadline={deadline:?}"
     );
-    irq::global_irq::test_mask(irq).expect("PLIC UART source could not be masked after self-test");
+    irq::global::test_mask(irq).expect("PLIC UART source could not be masked after self-test");
     unsafe { (uart as *mut u8).add(1).write_volatile(0) };
     info!(
         "PLIC UART self-test completed: irq={irq:?}, handled=2, unhandled={}",
@@ -276,7 +274,7 @@ fn wait_for_pit_count(expected: usize, deadline: exarch::time::TimeValue) {
 fn external_irq_smoke_test() {
     let irq = exarch::irq::legacy_irq_source(0)
         .expect("IOAPIC is not initialized before the PIT self-test");
-    irq::global_irq::register(irq, handle_pit_irq).expect("PIT IRQ registration failed");
+    irq::global::register(irq, handle_pit_irq).expect("PIT IRQ registration failed");
     let vector = exarch::irq::routed_vector(irq).expect("PIT route has no CPU vector");
 
     PIT_EVENTS.store(0, Ordering::Release);
@@ -289,7 +287,7 @@ fn external_irq_smoke_test() {
         "masked PIT delivered: gsi={irq:?}, vector={vector:#x}"
     );
 
-    irq::global_irq::set_enabled(irq, true).expect("PIT IRQ enable failed");
+    irq::global::set_enabled(irq, true).expect("PIT IRQ enable failed");
     for expected in 1..=2 {
         arm_pit_oneshot();
         let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
@@ -301,23 +299,21 @@ fn external_irq_smoke_test() {
         );
     }
 
-    irq::global_irq::set_enabled(irq, false).expect("PIT IRQ disable failed");
-    _ = irq::global_irq::unregister(irq).expect("PIT IRQ unregister failed");
-    let before = irq::global_irq::unhandled_count(irq);
-    irq::global_irq::test_unmask(irq).expect("PIT test route unmask failed");
+    irq::global::set_enabled(irq, false).expect("PIT IRQ disable failed");
+    _ = irq::global::unregister(irq).expect("PIT IRQ unregister failed");
+    let before = irq::global::unhandled_count(irq);
+    irq::global::test_unmask(irq).expect("PIT test route unmask failed");
     arm_pit_oneshot();
     let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-    while irq::global_irq::unhandled_count(irq) == before
-        && exarch::time::monotonic_time() < deadline
-    {
+    while irq::global::unhandled_count(irq) == before && exarch::time::monotonic_time() < deadline {
         core::hint::spin_loop();
     }
-    let after = irq::global_irq::unhandled_count(irq);
+    let after = irq::global::unhandled_count(irq);
     assert!(
         after > before,
         "unregistered PIT was not counted: gsi={irq:?}, vector={vector:#x}, before={before}, after={after}, deadline={deadline:?}"
     );
-    irq::global_irq::test_mask(irq).expect("PIT source could not be masked after self-test");
+    irq::global::test_mask(irq).expect("PIT source could not be masked after self-test");
     info!(
         "IOAPIC PIT self-test completed: gsi={irq:?}, vector={vector:#x}, handled=2, unhandled={}",
         after - before

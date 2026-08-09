@@ -4,8 +4,8 @@
 
 use alloc::boxed::Box;
 
-use crate_interface::def_interface;
 use lazyinit::LazyInit;
+use look_at::look_at;
 
 mod registry;
 
@@ -128,32 +128,28 @@ pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
 /// Architecture interrupt operations.
 ///
 /// Each architecture reports unsupported registration and dispatch explicitly.
-#[def_interface(gen_caller)]
-pub trait IrqIf {
+#[look_at(crate::arch::current::irq, flatten)]
+mod _wrapper {
     /// Enables interrupts globally on the current CPU.
     ///
     /// Callers must ensure all interrupt sources have valid handlers.
-    fn enable_local();
+    pub fn enable_local();
 
     /// Disables interrupts globally on the current CPU.
     ///
     /// Interrupt source enable bits are left unchanged.
-    fn disable_local();
+    pub fn disable_local();
 
     /// Returns whether interrupts are globally enabled on the current CPU.
     ///
     /// This does not inspect individual interrupt source masks.
-    fn local_enabled() -> bool;
-}
+    pub fn local_enabled() -> bool;
 
-/// Provides common external IRQ lifecycle operations to an architecture controller.
-#[def_interface(gen_caller)]
-pub trait ExternalIrqIf {
     /// Prepares a common external source while keeping it masked.
-    fn prepare(irq: GlobalIrq) -> Result<(), IrqError>;
+    pub fn prepare(irq: GlobalIrq) -> Result<(), IrqError>;
 
     /// Enables or disables a registered common external source.
-    fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError>;
+    pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError>;
 }
 
 /// A statically registered device interrupt handler.

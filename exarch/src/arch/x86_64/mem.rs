@@ -12,7 +12,7 @@ use crate::{
     arch::x86_64::imp::{self, gdt::GdtStruct},
     init::PlatformBootArg,
     mem::{
-        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS, MemIf,
+        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS,
         MemoryRegion, MemoryRegionFlags, RawMemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes,
         VirtAddrSpaceProps,
     },
@@ -181,79 +181,78 @@ core::arch::global_asm!(
     data_selector = const GdtStruct::KDATA_SELECTOR.0,
 );
 
-/// The implementation of the [`MemIf`] trait.
-struct MemImpl;
+/// Collects physical memory regions reported by Multiboot.
+pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
+    get_multiboot_memory_regions(arg)
+}
 
-#[crate_interface::impl_interface]
-impl MemIf for MemImpl {
-    fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
-        get_multiboot_memory_regions(arg)
-    }
+/// Returns supported and current x86-64 virtual address-space modes.
+pub fn virt_addr_space_modes() -> VirtAddrSpaceModes {
+    let mut modes = VirtAddrSpaceModes::new();
 
-    fn virt_addr_space_modes() -> VirtAddrSpaceModes {
-        let mut modes = VirtAddrSpaceModes::new();
+    let _ = modes
+        .modes
+        .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
+            page_shift: PAGE_SHIFT,
+            va_bits: LA48_VA_BITS,
+        }));
+    modes.current_index = modes.modes.len() - 1;
 
+    let la57_supported = CpuId::new()
+        .get_extended_feature_info()
+        .map(|f| f.has_la57())
+        .unwrap_or_default();
+    if la57_supported {
         let _ = modes
             .modes
             .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
                 page_shift: PAGE_SHIFT,
-                va_bits: LA48_VA_BITS,
+                va_bits: LA57_VA_BITS,
             }));
-        modes.current_index = modes.modes.len() - 1;
 
-        let la57_supported = CpuId::new()
-            .get_extended_feature_info()
-            .map(|f| f.has_la57())
-            .unwrap_or_default();
-        if la57_supported {
-            let _ = modes
-                .modes
-                .push(VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
-                    page_shift: PAGE_SHIFT,
-                    va_bits: LA57_VA_BITS,
-                }));
+        let la57_enabled = Cr4::read().contains(Cr4Flags::L5_PAGING);
+        if la57_enabled {
+            modes.current_index = modes.modes.len() - 1;
+        }
+    }
 
-            let la57_enabled = Cr4::read().contains(Cr4Flags::L5_PAGING);
-            if la57_enabled {
-                modes.current_index = modes.modes.len() - 1;
+    modes
+}
+
+/// Switches to the requested x86-64 virtual address-space mode.
+pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
+    unsafe extern "sysv64" {
+        fn switch_page_level(is_la57: bool);
+    }
+
+    check_mode(
+        mode,
+        |is_la57| unsafe { switch_page_level(is_la57) },
+        |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
+    )
+}
+
+/// Returns the page-table implementation for an x86-64 address-space mode.
+pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+    check_mode(
+        mode,
+        |is_la57| {
+            if is_la57 {
+                OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE>()
+            } else {
+                OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>()
             }
-        }
+        },
+        |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
+    )
+}
 
-        modes
-    }
-
-    fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
-        unsafe extern "sysv64" {
-            fn switch_page_level(is_la57: bool);
-        }
-
-        check_mode(
-            mode,
-            |is_la57| unsafe { switch_page_level(is_la57) },
-            |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
+/// Sets the x86-64 page-table root.
+pub fn set_page_table_root(root: PhysAddr) {
+    unsafe {
+        core::arch::asm!(
+            "mov cr3, rax",
+            in("rax") root.as_usize()
         )
-    }
-
-    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
-        check_mode(
-            mode,
-            |is_la57| {
-                if is_la57 {
-                    OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE>()
-                } else {
-                    OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>()
-                }
-            },
-            |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
-        )
-    }
-
-    fn set_page_table_root(root: PhysAddr) {
-        unsafe {
-            core::arch::asm!(
-                "mov cr3, rax",
-                in("rax") root.as_usize()
-            )
-        }
     }
 }

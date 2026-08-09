@@ -1,9 +1,9 @@
 use core::{fmt, num::NonZeroU8};
 
-use crate_interface::def_interface;
 use ecraldr_base::PlatformBootArg;
 use expt::opaque::OpaquePageTableType;
 use heapless::Vec as HeaplessVec;
+use look_at::look_at;
 use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
 
 bitflags::bitflags! {
@@ -277,8 +277,11 @@ impl VirtAddrSpaceModes {
     }
 }
 
-#[def_interface(gen_caller)]
-pub trait MemIf {
+/// Platform memory operations.
+///
+/// The wrapper forwards calls to the selected architecture implementation.
+#[look_at(crate::arch::current::mem, flatten)]
+mod _wrapper {
     /// Collects the memory regions from the platform boot argument.
     ///
     /// The returned memory regions should not contain the
@@ -286,12 +289,12 @@ pub trait MemIf {
     /// kernel itself.
     ///
     /// When this function is called, allocation is not available.
-    fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
+    pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
 
     /// Gets the supported and current virtual address space modes.
     ///
     /// When this function is called, allocation is not available.
-    fn virt_addr_space_modes() -> VirtAddrSpaceModes;
+    pub fn virt_addr_space_modes() -> VirtAddrSpaceModes;
 
     /// Sets the current virtual address space mode.
     ///
@@ -306,7 +309,7 @@ pub trait MemIf {
     /// This function will and should panic if the specified mode is not in the
     /// list returned by [`virt_addr_space_modes`], and not supported by the
     /// platform.
-    fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
+    pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
 
     /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
     ///
@@ -317,10 +320,10 @@ pub trait MemIf {
     /// This function will and should panic if the specified mode is not in the
     /// list returned by [`virt_addr_space_modes`], and not supported by the
     /// platform.
-    fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
+    pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
 
     /// Sets the page table root for the current virtual address space mode.
     ///
     /// [`VirtAddrSpaceMode::Independent`] is not supported yet.
-    fn set_page_table_root(root: PhysAddr);
+    pub fn set_page_table_root(root: PhysAddr);
 }

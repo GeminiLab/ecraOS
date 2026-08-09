@@ -1,25 +1,19 @@
 //! [`exarch::init::InitIf`] implementation for this platform.
 
-use crate::init::{InitIf, PlatformBootArg};
+use crate::init::PlatformBootArg;
 
-/// The implementation of the [`InitIf`] trait.
-pub struct InitImpl;
+pub fn init_early(_arg: PlatformBootArg) {
+    super::init_early();
+}
 
-#[crate_interface::impl_interface]
-impl InitIf for InitImpl {
-    fn init_early(_arg: PlatformBootArg) {
-        super::init_early();
-    }
+pub fn init_later() {
+    super::init_later();
+}
 
-    fn init_later() {
-        super::init_later();
-    }
+pub fn init_early_ap() {
+    super::init_early_ap();
+}
 
-    fn init_early_ap() {
-        super::init_early_ap();
-    }
-
-    fn init_later_ap() {
-        super::init_later_ap();
-    }
+pub fn init_later_ap() {
+    super::init_later_ap();
 }

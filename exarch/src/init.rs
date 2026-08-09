@@ -1,12 +1,11 @@
-//! Initialization hooks: early and later platform bring-up.
+//! Platform initialization functions.
 
 pub use ecraldr_base::PlatformBootArg;
 
-use crate_interface::def_interface;
+use look_at::look_at;
 
-/// Platform initialization contract invoked from portable kernel code.
-#[def_interface(gen_caller)]
-pub trait InitIf {
+#[look_at(crate::arch::current::init, flatten)]
+mod _wrapper {
     /// Early platform initialization.
     ///
     /// This method should be called immediately after the kernel entry runs,
@@ -28,10 +27,12 @@ pub trait InitIf {
     ///   disabled.
     /// - Initialize the time module.
     /// - Prepare for calling other initialization functions.
-    fn init_early(arg: PlatformBootArg);
+    pub fn init_early(arg: PlatformBootArg);
     /// Later platform initialization. Yet to be implemented.
-    fn init_later();
+    pub fn init_later();
 
-    fn init_early_ap();
-    fn init_later_ap();
+    /// Early platform initialization for APs.
+    pub fn init_early_ap();
+    /// Later platform initialization for APs.
+    pub fn init_later_ap();
 }

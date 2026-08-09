@@ -2,7 +2,7 @@
 
 pub use core::time::Duration;
 
-use crate_interface::def_interface;
+use look_at::look_at;
 
 /// A measurement of the system clock.
 ///
@@ -23,16 +23,22 @@ impl Nanos {
     }
 }
 
-#[def_interface(gen_caller)]
-pub trait TimeIf {
-    fn monotonic_ticks() -> Ticks;
+/// Platform time operations.
+///
+/// The wrapper forwards calls to the selected architecture implementation.
+#[look_at(crate::arch::current::time, flatten)]
+mod _wrapper {
+    /// Returns monotonic platform ticks since early initialization.
+    pub fn monotonic_ticks() -> Ticks;
 
-    fn ticks_to_nanos(ticks: Ticks) -> Nanos;
+    /// Converts platform ticks to nanoseconds.
+    pub fn ticks_to_nanos(ticks: Ticks) -> Nanos;
 
-    fn nanos_to_ticks(nanos: Nanos) -> Ticks;
+    /// Converts nanoseconds to platform ticks.
+    pub fn nanos_to_ticks(nanos: Nanos) -> Ticks;
 
     /// Programs a one-shot timer for an absolute monotonic deadline.
-    fn set_oneshot_timer(deadline: TimeValue);
+    pub fn set_oneshot_timer(deadline: TimeValue);
 }
 
 pub fn monotonic_time() -> TimeValue {

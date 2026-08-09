@@ -4,8 +4,10 @@ pub use memory_addr::{PhysAddr, PhysAddrRange};
 
 pub use ecraldr_base_macros::*;
 
-/// The expected size of the boot stack (16 KiB).
-pub const BOOTSTACK_SIZE: usize = 16 * 1024;
+/// The expected size of the boot stack (64 KiB).
+///
+/// The original value of 16 KiB is proven to be too small for some platforms.
+pub const BOOTSTACK_SIZE: usize = 64 * 1024;
 
 /// The argument provided by the bootloader or firmware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -15,6 +15,7 @@ members = [
     "expt",
     "exslab",
     "utils/dyn_static_traits",
+    "utils/look_at",
     "utils/maybe_non_generic",
     "utils/memory_range_set",
     "utils/size_disp",
