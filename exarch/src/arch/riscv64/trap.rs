@@ -11,7 +11,7 @@ use riscv::{
         Trap,
         supervisor::{self, Exception as RiscvException, Interrupt},
     },
-    register::{scause, sstatus, stval, stvec},
+    register::{scause::{self, Scause}, sstatus, stval, stvec},
 };
 
 use super::context::TrapFrame;
@@ -105,14 +105,7 @@ extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
                 sepc = tf.sepc,
             );
 
-            crate::trap::handle(
-                tf,
-                if scause.is_exception() {
-                    SemanticTrap::Exception(Exception::Unknown(crate::trap::RawTrap(scause.bits())))
-                } else {
-                    SemanticTrap::UnknownInterrupt(crate::trap::RawTrap(scause.bits()))
-                },
-            )
+            unknown_riscv_trap_handler(tf, scause)
         }
     };
 
@@ -126,6 +119,8 @@ extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
     }
 }
 
+
+/// Handles a RISC-V trap that is known to the kernel.
 fn valid_riscv_trap_handler(
     tf: &mut TrapFrame,
     scause: Trap<Interrupt, RiscvException>,
@@ -172,4 +167,16 @@ fn valid_riscv_trap_handler(
             )
         }
     }
+}
+
+/// Handles a RISC-V trap that is unknown to the kernel.
+fn unknown_riscv_trap_handler(tf: &mut TrapFrame, scause: Scause) -> TrapDisposition {
+    crate::trap::handle(
+        tf,
+        if scause.is_exception() {
+            SemanticTrap::Exception(Exception::Unknown(crate::trap::RawTrap(scause.bits())))
+        } else {
+            SemanticTrap::UnknownInterrupt(crate::trap::RawTrap(scause.bits()))
+        },
+    )
 }

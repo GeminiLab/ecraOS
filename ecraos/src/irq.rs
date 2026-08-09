@@ -72,6 +72,8 @@ fn handle_global_irq(frame: &mut TrapFrame, irq: exarch::trap::GlobalIrq) -> Tra
 ///
 /// The local-interrupt slot is installed by [`crate::timer::init_bsp`] before timer arming.
 pub fn init() {
+    global::init();
+
     _ = register(Handler::Exception(handle_exception));
     _ = register(Handler::GlobalIrq(handle_global_irq));
 }
