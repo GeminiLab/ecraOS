@@ -371,11 +371,13 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    use exarch::power::{ShutdownReason, shutdown};
+
     if logging::is_inited() {
         error!("Kernel panic: {}", info);
     } else {
         kprintln!("Kernel panic: {}", info);
     }
 
-    exarch::power::shutdown(exarch::power::ShutdownReason::Panicked)
+    shutdown(ShutdownReason::Panicked)
 }

@@ -11,7 +11,10 @@ use riscv::{
         Trap,
         supervisor::{self, Exception as RiscvException, Interrupt},
     },
-    register::{scause::{self, Scause}, sstatus, stval, stvec},
+    register::{
+        scause::{self, Scause},
+        sstatus, stval, stvec,
+    },
 };
 
 use super::context::TrapFrame;
@@ -118,7 +121,6 @@ extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
         );
     }
 }
-
 
 /// Handles a RISC-V trap that is known to the kernel.
 fn valid_riscv_trap_handler(

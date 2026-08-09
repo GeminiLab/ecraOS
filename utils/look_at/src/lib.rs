@@ -4,8 +4,8 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Error, FnArg, GenericParam, Ident, Path, Result, Signature, Token, Type, Visibility,
-    braced, parse_macro_input, parse_quote,
+    Attribute, Error, FnArg, GenericParam, Ident, Pat, Path, Result, Signature, Token, Type,
+    Visibility, braced, parse_macro_input, parse_quote,
 };
 
 /// Arguments accepted by the `look_at` attribute.
@@ -145,17 +145,21 @@ fn expand_function(target_path: &Path, mut function: ForwardFunction) -> Result<
 
     let mut call_args = Vec::new();
     let mut input_types = Vec::new();
-    for (index, argument) in function.sig.inputs.iter_mut().enumerate() {
+    for argument in function.sig.inputs.iter_mut() {
         let FnArg::Typed(argument) = argument else {
             return Err(Error::new(
                 argument.span(),
                 "`look_at` only supports free functions",
             ));
         };
-        let ident = format_ident!("__at_arg_{index}", span = argument.pat.span());
+        let Pat::Ident(ident) = &*argument.pat else {
+            return Err(Error::new(
+                argument.pat.span(),
+                "`look_at` does not support patterns in function arguments",
+            ));
+        };
         call_args.push(ident.clone());
         input_types.push(argument.ty.clone());
-        *argument.pat = parse_quote!(#ident);
     }
 
     let name = &function.sig.ident;
