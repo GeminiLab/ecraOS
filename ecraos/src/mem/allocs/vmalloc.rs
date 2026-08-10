@@ -4,7 +4,7 @@
 //! virtual-to-physical mappings, and owns page-table mappings for ranges that
 //! are mapped through this allocator.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use core::range::Range;
 
 use ecraldr_base::PhysAddrRange;
@@ -70,13 +70,8 @@ struct VMAllocPageList {
 impl VMAllocPageList {
     /// Creates a page list whose pages are initially unmapped.
     fn new(page_count: usize) -> Self {
-        let mut phys_pages = Vec::with_capacity(page_count);
-        let mut statuses = Vec::with_capacity(page_count);
-
-        for _ in 0..page_count {
-            phys_pages.push(pa!(0));
-            statuses.push(VMAllocPageStatus::NotMapped);
-        }
+        let phys_pages = vec![pa!(0); page_count];
+        let statuses = vec![VMAllocPageStatus::NotMapped; page_count];
 
         Self {
             phys_pages: phys_pages.into_boxed_slice(),
@@ -86,10 +81,7 @@ impl VMAllocPageList {
 
     /// Creates a page list from existing external page mappings.
     fn new_external(phys_pages: Box<[PhysAddr]>, flags: MappingFlags) -> Self {
-        let mut statuses = Vec::with_capacity(phys_pages.len());
-        for _ in 0..phys_pages.len() {
-            statuses.push(VMAllocPageStatus::External { flags });
-        }
+        let statuses = vec![VMAllocPageStatus::External { flags }; phys_pages.len()];
 
         Self {
             phys_pages,
@@ -128,6 +120,8 @@ impl VMAllocPageList {
 }
 
 /// An allocated vmalloc range.
+/// 
+/// The guard part is not recorded in this struct.
 pub(crate) struct VMAllocRange {
     /// The non-guard part of the reservation.
     non_guard_range: VirtAddrRange,
