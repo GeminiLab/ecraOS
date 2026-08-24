@@ -125,6 +125,7 @@ pub fn smoke_test() {
 /// The handler advances the periodic deadline and programs the next SBI event.
 fn handle_timer_irq() {
     TIMER_EVENT_COUNT.write_current(TIMER_EVENT_COUNT.read_current().wrapping_add(1));
+    crate::task::wake_sleepers(exarch::time::monotonic_time());
     program_next_timer();
 }
 

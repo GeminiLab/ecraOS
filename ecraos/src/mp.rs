@@ -10,8 +10,10 @@ use exarch::power::CpuStartError;
 pub use exarch::power::PhysicalCpuId;
 use expercpu::def_percpu;
 use expt::pte::MappingFlags;
+use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{debug, info, warn};
+use memory_addr::VirtAddrRange;
 
 use crate::{kernel_entry_ap, percpu};
 
@@ -30,6 +32,10 @@ static CPU_STATE: LazyInit<Box<[AtomicU8]>> = LazyInit::new();
 static LOGI_TO_PHYS_ID_MAP: LazyInit<BTreeMap<LogicalCpuId, PhysicalCpuId>> = LazyInit::new();
 
 static PHYS_TO_LOGI_ID_MAP: LazyInit<BTreeMap<PhysicalCpuId, LogicalCpuId>> = LazyInit::new();
+
+/// Boot-stack usable ranges awaiting adoption by their AP root tasks.
+static AP_BOOT_STACK_RANGES: SpinNoIrq<BTreeMap<LogicalCpuId, VirtAddrRange>> =
+    SpinNoIrq::new(BTreeMap::new());
 
 #[def_percpu]
 pub static CPU_PHYS_ID: usize = 0;
@@ -64,6 +70,27 @@ pub fn current_cpu_id() -> LogicalCpuId {
 
 pub fn current_cpu_phys_id() -> PhysicalCpuId {
     CPU_PHYS_ID.read_current() as _
+}
+
+/// Returns the number of CPUs discovered by the platform.
+///
+/// The value is stable after the platform initializes the CPU list.
+pub fn cpu_count() -> usize {
+    CPU_LIST.len()
+}
+
+/// Returns the boot stack range for the current CPU.
+pub fn current_cpu_boot_stack_range() -> VirtAddrRange {
+    cpu_boot_stack_range(current_cpu_id()).expect("Failed to get current CPU boot stack range")
+}
+
+/// Returns the boot stack range for a specific CPU.
+pub fn cpu_boot_stack_range(logi_id: LogicalCpuId) -> Option<VirtAddrRange> {
+    if logi_id == BSP_CPU_ID {
+        return Some(crate::mem::bsp_stack_range());
+    }
+
+    AP_BOOT_STACK_RANGES.lock().get(&logi_id).copied()
 }
 
 pub fn phys_to_logi_id(phys_id: PhysicalCpuId) -> LogicalCpuId {
@@ -182,6 +209,8 @@ pub fn start_secondary_cpus() -> Result<(), SecondaryCpuError> {
         })?;
 
         let boot_stack_top = boot_stack.end;
+
+        AP_BOOT_STACK_RANGES.lock().insert(logi_id, boot_stack);
 
         debug!("Boot stack for CPU {}: {:#x}", logi_id, boot_stack);
 

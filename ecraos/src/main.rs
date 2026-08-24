@@ -4,8 +4,8 @@
 //! loader stage (handling very early boot and initialization), see [`ecraldr_base`]
 //! and `ecraldr`.
 
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 #![deny(unfulfilled_lint_expectations)]
 
 /// The Rust standard allocator interface.
@@ -27,6 +27,7 @@ mod mem;
 mod mp;
 mod percpu;
 mod smoke;
+mod task;
 mod timer;
 
 macro_rules! kprintln {
@@ -43,6 +44,48 @@ const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 const DISCLAIMER: &str = "ecraOS is a derivative of the ArceOS project.";
 /// Horizontal line printed at startup.
 const HLINE: &str = "------------------------------------------------------------";
+
+/// Runs the per-CPU task sleep and join smoke workload.
+///
+/// Four tasks each sleep for one second four times. A fifth task joins all four workers before
+/// the per-CPU root task performs the BSP or AP terminal transition.
+fn run_sleep_join_workload(is_bsp: bool) -> ! {
+    const WORKER_COUNT: usize = 4;
+    const SLEEP_ROUNDS: usize = 4;
+
+    let workers: [task::JoinHandle; WORKER_COUNT] = core::array::from_fn(|worker_index| {
+        task::spawn(move || {
+            for round in 1..=SLEEP_ROUNDS {
+                task::sleep(exarch::time::Duration::from_secs(1));
+                info!(
+                    "Sleep task {worker_index} on CPU {} completed round {round}/{SLEEP_ROUNDS}",
+                    mp::current_cpu_id()
+                );
+            }
+        })
+    });
+
+    let joiner = task::spawn(move || {
+        for (worker_index, worker) in workers.into_iter().enumerate() {
+            worker.join();
+            info!(
+                "Join task on CPU {} joined sleep task {worker_index}/{WORKER_COUNT}",
+                mp::current_cpu_id()
+            );
+        }
+        info!(
+            "Join task on CPU {} joined all {WORKER_COUNT} sleep tasks",
+            mp::current_cpu_id()
+        );
+    });
+
+    joiner.join();
+    if is_bsp {
+        exarch::power::poweroff()
+    } else {
+        task::run_idle()
+    }
+}
 
 fn print_hello_banner() {
     kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}");
@@ -142,6 +185,8 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     timer::init_bsp();
     timer::smoke_test();
 
+    task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
+
     kprintln!("\n\nHere we go!\n\n");
 
     info!("Starting up secondary CPUs...");
@@ -151,14 +196,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
 
     mem::remove_identical_mappings();
 
-    info!("Timer: 0");
-    let start = exarch::time::monotonic_time();
-    for sec in 1..=4 {
-        exarch::time::spin_wait_until(start + exarch::time::Duration::from_secs(sec));
-        info!("Timer: {sec}");
-    }
-
-    exarch::power::poweroff()
+    run_sleep_join_workload(true)
 }
 
 #[cfg(target_arch = "riscv64")]
@@ -349,26 +387,19 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 
     timer::init_ap();
 
+    task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
+
     mp::mark_ap_up(cpu_id);
 
     timer::smoke_test();
 
     smoke::remote_slab_free_ap();
 
-    info!("Timer: 0");
-    let start = exarch::time::monotonic_time();
-    for sec in 1..=4 {
-        exarch::time::spin_wait_until(start + exarch::time::Duration::from_secs(sec));
-        info!("Timer: {sec}");
-    }
-
-    // Spin forever.
-    loop {
-        core::hint::spin_loop();
-    }
+    run_sleep_join_workload(false)
 }
 
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     use exarch::power::{ShutdownReason, shutdown};

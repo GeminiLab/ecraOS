@@ -120,7 +120,7 @@ impl VMAllocPageList {
 }
 
 /// An allocated vmalloc range.
-/// 
+///
 /// The guard part is not recorded in this struct.
 pub(crate) struct VMAllocRange {
     /// The non-guard part of the reservation.
@@ -687,7 +687,6 @@ impl VMAllocator {
     }
 
     /// Unmaps a vmalloc subrange.
-    #[expect(unused)]
     pub fn unmap(&mut self, range: VirtAddrRange) -> Result<(), VMAllocError> {
         let page_size = self.page_size();
         let (_, allocation) = self

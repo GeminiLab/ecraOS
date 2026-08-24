@@ -6,7 +6,7 @@
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
 use log::info;
-use memory_addr::{PhysAddr, VirtAddr};
+use memory_addr::{PhysAddr, VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -19,6 +19,11 @@ pub mod sections;
 pub mod vmm;
 
 pub use early::BSP_STACK_SIZE;
+
+/// Returns the usable BSP startup stack range after VMM initialization.
+pub(crate) fn bsp_stack_range() -> VirtAddrRange {
+    early::bsp_stack().alloc_range
+}
 
 pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
     try_virt_to_phys(addr).unwrap_or_else(|| PhysAddr::from_usize(addr.as_usize()))
