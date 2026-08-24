@@ -109,6 +109,7 @@ impl Log for Logger {
         let micros = mono_time.subsec_micros();
 
         let cpu_id: usize = crate::mp::current_cpu_id();
+        let task_id = crate::task::current_task_id().unwrap_or(0);
 
         let level_str = fixed_width_level(level);
         let ColorForLevel {
@@ -118,7 +119,7 @@ impl Log for Logger {
         } = colors::color_for_level(level);
 
         kprintln!(
-            "[{level_str_color}{level_str}{reset_color} {secs: >3}.{micros:06} {cpu_id} {target}:{line}] {content_color}{args}{reset_color}"
+            "[{level_str_color}{level_str}{reset_color} {secs: >3}.{micros:06} {cpu_id}:{task_id} {target}:{line}] {content_color}{args}{reset_color}"
         );
 
         drop(lock);
