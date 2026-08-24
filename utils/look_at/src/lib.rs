@@ -1,11 +1,12 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
-use syn::parse::{Parse, ParseStream};
-use syn::spanned::Spanned;
+use quote::quote;
 use syn::{
     Attribute, Error, FnArg, GenericParam, Ident, Pat, Path, Result, Signature, Token, Type,
-    Visibility, braced, parse_macro_input, parse_quote,
+    Visibility, braced,
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    spanned::Spanned,
 };
 
 /// Arguments accepted by the `look_at` attribute.

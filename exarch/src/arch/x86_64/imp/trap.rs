@@ -6,7 +6,7 @@ use memory_addr::va;
 use x86::{controlregs::cr2, irq::*};
 use x86_64::structures::idt::PageFaultErrorCode;
 
-use super::context::TrapFrame;
+use super::super::context::TrapFrame;
 use crate::trap::{Exception, LocalInterrupt, PageFaultFlags, SemanticTrap, TrapDisposition};
 
 core::arch::global_asm!(include_str!("trap.S"));

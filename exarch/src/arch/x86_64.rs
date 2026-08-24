@@ -1,3 +1,4 @@
+pub mod context;
 pub mod debug_console;
 pub mod device;
 pub mod imp;
@@ -57,6 +58,3 @@ fn check_required_features() {
         panic!("X2APIC not supported");
     }
 }
-
-// TODO: remove this
-pub use imp::TrapFrame;

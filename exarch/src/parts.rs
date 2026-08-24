@@ -1,3 +1,4 @@
+pub mod context;
 pub mod debug_console;
 pub mod device;
 pub mod init;
