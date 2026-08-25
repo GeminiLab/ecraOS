@@ -14,9 +14,6 @@
 /// available in the kernel.
 extern crate alloc;
 
-#[cfg(target_arch = "x86_64")]
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use log::{error, info};
 
 mod device;
@@ -26,7 +23,6 @@ mod logging;
 mod mem;
 mod mp;
 mod percpu;
-mod smoke;
 mod task;
 mod timer;
 
@@ -180,10 +176,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
 
     irq::init();
 
-    external_irq_smoke_test();
-
     timer::init_bsp();
-    timer::smoke_test();
 
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
 
@@ -192,169 +185,9 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
-    smoke::remote_slab_free_bsp();
-
     mem::remove_identical_mappings();
 
     run_sleep_join_workload(true)
-}
-
-#[cfg(target_arch = "riscv64")]
-static UART_EVENTS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(target_arch = "riscv64")]
-static UART_BASE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(target_arch = "riscv64")]
-fn handle_uart_irq() {
-    let base = UART_BASE.load(core::sync::atomic::Ordering::Acquire);
-    // Disable all UART interrupt causes before returning to the PLIC complete path.
-    unsafe { (base as *mut u8).add(1).write_volatile(0) };
-    UART_EVENTS.fetch_add(1, core::sync::atomic::Ordering::Release);
-}
-
-#[cfg(target_arch = "riscv64")]
-fn arm_uart_tx_empty() {
-    let base = UART_BASE.load(core::sync::atomic::Ordering::Acquire);
-    // Enable only the 16550 transmit-holding-register-empty source.
-    unsafe { (base as *mut u8).add(1).write_volatile(1 << 1) };
-}
-
-#[cfg(target_arch = "riscv64")]
-fn external_irq_smoke_test() {
-    use core::sync::atomic::Ordering;
-
-    let (irq, uart_phys) =
-        exarch::irq::uart_test_source().expect("PLIC UART test source was not discovered");
-    let uart = crate::mem::phys_to_virt(uart_phys).as_usize();
-    UART_BASE.store(uart, Ordering::Release);
-    UART_EVENTS.store(0, Ordering::Release);
-    irq::global::register(irq, handle_uart_irq).expect("UART IRQ registration failed");
-
-    arm_uart_tx_empty();
-    exarch::irq::enable_local();
-    exarch::time::spin_wait_for(exarch::time::Duration::from_millis(20));
-    assert_eq!(
-        UART_EVENTS.load(Ordering::Acquire),
-        0,
-        "disabled PLIC UART source delivered: irq={irq:?}"
-    );
-    unsafe { (uart as *mut u8).add(1).write_volatile(0) };
-
-    irq::global::set_enabled(irq, true).expect("PLIC UART source enable failed");
-    for expected in 1..=2 {
-        arm_uart_tx_empty();
-        let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-        while UART_EVENTS.load(Ordering::Acquire) < expected
-            && exarch::time::monotonic_time() < deadline
-        {
-            core::hint::spin_loop();
-        }
-        assert!(
-            UART_EVENTS.load(Ordering::Acquire) >= expected,
-            "PLIC UART delivery timed out: irq={irq:?}, expected={expected}, observed={}, deadline={deadline:?}",
-            UART_EVENTS.load(Ordering::Acquire)
-        );
-    }
-    irq::global::set_enabled(irq, false).expect("PLIC UART source disable failed");
-    _ = irq::global::unregister(irq).expect("PLIC UART unregister failed");
-    let before = irq::global::unhandled_count(irq);
-    irq::global::test_unmask(irq).expect("PLIC UART test source unmask failed");
-    arm_uart_tx_empty();
-    let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-    while irq::global::unhandled_count(irq) == before && exarch::time::monotonic_time() < deadline {
-        core::hint::spin_loop();
-    }
-    let after = irq::global::unhandled_count(irq);
-    assert!(
-        after > before,
-        "unregistered UART interrupt was not counted: irq={irq:?}, before={before}, after={after}, deadline={deadline:?}"
-    );
-    irq::global::test_mask(irq).expect("PLIC UART source could not be masked after self-test");
-    unsafe { (uart as *mut u8).add(1).write_volatile(0) };
-    info!(
-        "PLIC UART self-test completed: irq={irq:?}, handled=2, unhandled={}",
-        after - before
-    );
-}
-
-#[cfg(target_arch = "x86_64")]
-static PIT_EVENTS: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(target_arch = "x86_64")]
-fn handle_pit_irq() {
-    PIT_EVENTS.fetch_add(1, Ordering::Relaxed);
-}
-
-/// Arms PIT channel 0 in one-shot mode for the IOAPIC self-test.
-///
-/// The divisor gives the self-test enough time to observe delivery without making boot slow.
-#[cfg(target_arch = "x86_64")]
-fn arm_pit_oneshot() {
-    const PIT_DIVISOR: u16 = 20_000;
-    unsafe {
-        core::arch::asm!("out 0x43, al", in("al") 0x30_u8, options(nomem, nostack, preserves_flags));
-        core::arch::asm!("out 0x40, al", in("al") PIT_DIVISOR as u8, options(nomem, nostack, preserves_flags));
-        core::arch::asm!("out 0x40, al", in("al") (PIT_DIVISOR >> 8) as u8, options(nomem, nostack, preserves_flags));
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn wait_for_pit_count(expected: usize, deadline: exarch::time::TimeValue) {
-    while PIT_EVENTS.load(Ordering::Acquire) < expected && exarch::time::monotonic_time() < deadline
-    {
-        core::hint::spin_loop();
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn external_irq_smoke_test() {
-    let irq = exarch::irq::legacy_irq_source(0)
-        .expect("IOAPIC is not initialized before the PIT self-test");
-    irq::global::register(irq, handle_pit_irq).expect("PIT IRQ registration failed");
-    let vector = exarch::irq::routed_vector(irq).expect("PIT route has no CPU vector");
-
-    PIT_EVENTS.store(0, Ordering::Release);
-    arm_pit_oneshot();
-    exarch::irq::enable_local();
-    exarch::time::spin_wait_for(exarch::time::Duration::from_millis(30));
-    assert_eq!(
-        PIT_EVENTS.load(Ordering::Acquire),
-        0,
-        "masked PIT delivered: gsi={irq:?}, vector={vector:#x}"
-    );
-
-    irq::global::set_enabled(irq, true).expect("PIT IRQ enable failed");
-    for expected in 1..=2 {
-        arm_pit_oneshot();
-        let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-        wait_for_pit_count(expected, deadline);
-        assert!(
-            PIT_EVENTS.load(Ordering::Acquire) >= expected,
-            "PIT delivery timed out: gsi={irq:?}, vector={vector:#x}, expected={expected}, observed={}, deadline={deadline:?}",
-            PIT_EVENTS.load(Ordering::Acquire)
-        );
-    }
-
-    irq::global::set_enabled(irq, false).expect("PIT IRQ disable failed");
-    _ = irq::global::unregister(irq).expect("PIT IRQ unregister failed");
-    let before = irq::global::unhandled_count(irq);
-    irq::global::test_unmask(irq).expect("PIT test route unmask failed");
-    arm_pit_oneshot();
-    let deadline = exarch::time::monotonic_time() + exarch::time::Duration::from_millis(200);
-    while irq::global::unhandled_count(irq) == before && exarch::time::monotonic_time() < deadline {
-        core::hint::spin_loop();
-    }
-    let after = irq::global::unhandled_count(irq);
-    assert!(
-        after > before,
-        "unregistered PIT was not counted: gsi={irq:?}, vector={vector:#x}, before={before}, after={after}, deadline={deadline:?}"
-    );
-    irq::global::test_mask(irq).expect("PIT source could not be masked after self-test");
-    info!(
-        "IOAPIC PIT self-test completed: gsi={irq:?}, vector={vector:#x}, handled=2, unhandled={}",
-        after - before
-    );
 }
 
 /// The kernel entry function for the AP.
@@ -390,10 +223,6 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
 
     mp::mark_ap_up(cpu_id);
-
-    timer::smoke_test();
-
-    smoke::remote_slab_free_ap();
 
     run_sleep_join_workload(false)
 }

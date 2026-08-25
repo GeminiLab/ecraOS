@@ -3,8 +3,6 @@
 //! This implementation currently registers only the supervisor timer interrupt.
 
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::PhysAddr;
@@ -58,10 +56,6 @@ pub struct RiscvExternalIrqConfig {
     pub source_count: usize,
     /// Stores the supervisor context for each online hart.
     pub contexts: Box<[RiscvPlicContext]>,
-    /// Stores the UART source used by the bounded controller self-test.
-    pub uart_source: GlobalIrq,
-    /// Stores the UART MMIO base used by the bounded controller self-test.
-    pub uart_base: PhysAddr,
 }
 
 /// Identifies one hart's supervisor PLIC context.
@@ -86,14 +80,9 @@ struct Plic {
 }
 
 static PLIC: LazyInit<SpinNoIrq<Plic>> = LazyInit::new();
-static UART_SOURCE: AtomicUsize = AtomicUsize::new(0);
-static UART_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Initializes the PLIC and disables all discovered supervisor sources.
 pub fn init_external(config: RiscvExternalIrqConfig) {
-    assert!(
-        config.uart_source.raw() > 0 && config.uart_source.raw() as usize <= config.source_count
-    );
     let maximum_context = config
         .contexts
         .iter()
@@ -124,33 +113,9 @@ pub fn init_external(config: RiscvExternalIrqConfig) {
         plic.write32(CONTEXT_BASE + context.context * CONTEXT_STRIDE, 0);
     }
     PLIC.init_once(SpinNoIrq::new(plic));
-    UART_SOURCE.store(config.uart_source.raw() as usize, Ordering::Release);
-    UART_BASE.store(config.uart_base.as_usize(), Ordering::Release);
     let mut valid = alloc::vec![true; config.source_count + 1];
     valid[0] = false;
     crate::irq::init_external_registry(&valid);
-}
-
-/// Returns the device-tree UART PLIC source used by the boot self-test.
-pub fn uart_source() -> Result<GlobalIrq, IrqError> {
-    let source = UART_SOURCE.load(Ordering::Acquire);
-    if source == 0 {
-        Err(IrqError::Unsupported)
-    } else {
-        Ok(GlobalIrq::new(
-            u32::try_from(source).map_err(|_| IrqError::InvalidNumber)?,
-        ))
-    }
-}
-
-/// Returns the device-tree UART MMIO base used by the boot self-test.
-pub fn uart_base() -> Result<PhysAddr, IrqError> {
-    let base = UART_BASE.load(Ordering::Acquire);
-    if base == 0 {
-        Err(IrqError::Unsupported)
-    } else {
-        Ok(PhysAddr::from_usize(base))
-    }
 }
 
 /// Claims, dispatches, and completes every pending source for the current hart.
@@ -253,22 +218,6 @@ impl Plic {
             );
         }
     }
-}
-
-/// Unmasks a PLIC source only for the unregistered-delivery boot test.
-pub fn test_unmask(irq: GlobalIrq) -> Result<(), IrqError> {
-    PLIC.get()
-        .ok_or(IrqError::Unsupported)?
-        .lock()
-        .set_enabled(irq, true)
-}
-
-/// Masks a PLIC source after the unregistered-delivery boot test.
-pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
-    PLIC.get()
-        .ok_or(IrqError::Unsupported)?
-        .lock()
-        .set_enabled(irq, false)
 }
 
 /// The interrupt marker bit in `scause`.

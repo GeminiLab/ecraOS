@@ -93,7 +93,7 @@ pub fn next_sleep_deadline() -> Option<exarch::time::TimeValue> {
 
 /// Runs the current CPU's cooperative idle loop.
 ///
-/// Secondary CPUs enter this after completing their existing startup smoke checks.
+/// Secondary CPUs enter this after completing their existing startup initialization.
 pub fn run_idle() -> ! {
     scheduler::enter_idle()
 }

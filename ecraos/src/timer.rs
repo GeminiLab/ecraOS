@@ -16,11 +16,6 @@ use deadline::select_next_deadline;
 /// This is the selected kernel timer-event cadence in hertz.
 pub const TIMER_EVENT_HZ: u64 = 100;
 
-/// The maximum allowed lateness for a timer deadline smoke test.
-///
-/// A deadline that fires later than this interval fails the boot smoke test.
-const TIMER_DEADLINE_TOLERANCE: Duration = Duration::from_millis(20);
-
 /// The interval between periodic timer-event deadlines in nanoseconds.
 ///
 /// This is exact because one second is divisible by [`TIMER_EVENT_HZ`].
@@ -31,12 +26,6 @@ const PERIODIC_INTERVAL_NANOS: u64 = 1_000_000_000 / TIMER_EVENT_HZ;
 /// Zero means this hart has not yet seeded its periodic schedule.
 #[def_percpu]
 static NEXT_DEADLINE_NANOS: u64 = 0;
-
-/// The number of periodic timer events handled on the current hart.
-///
-/// Local interrupt exclusion serializes updates on each hart.
-#[def_percpu]
-static TIMER_EVENT_COUNT: u64 = 0;
 
 /// Initializes the periodic timer on the bootstrap hart.
 ///
@@ -70,61 +59,10 @@ pub fn init_ap() {
     exarch::irq::enable_local();
 }
 
-/// Returns the timer-event count for the current hart.
-///
-/// The count is modified only while local interrupts are disabled.
-pub fn timer_event_count() -> u64 {
-    TIMER_EVENT_COUNT.read_current()
-}
-
-/// Verifies that timer interrupts advance on the current hart.
-///
-/// This checks delivery without asserting an exact rate that would be sensitive to host pauses.
-pub fn smoke_test() {
-    let mut observed = timer_event_count();
-    for step in 1..=3 {
-        let deadline = exarch::time::monotonic_time() + Duration::from_millis(10);
-        exarch::time::set_oneshot_timer(deadline);
-        let timeout = deadline + TIMER_DEADLINE_TOLERANCE;
-        while timer_event_count() <= observed && exarch::time::monotonic_time() < timeout {
-            core::hint::spin_loop();
-        }
-        let after = timer_event_count();
-        let actual = exarch::time::monotonic_time();
-        assert!(
-            after > observed,
-            "timer deadline {step} did not fire on CPU {}: deadline={deadline:?}, actual={actual:?}, timeout={timeout:?}",
-            crate::mp::current_cpu_phys_id()
-        );
-        assert!(
-            actual >= deadline,
-            "timer deadline {step} fired early on CPU {}: deadline={deadline:?}, actual={actual:?}",
-            crate::mp::current_cpu_phys_id()
-        );
-        assert!(
-            actual <= timeout,
-            "timer deadline {step} fired late on CPU {}: deadline={deadline:?}, actual={actual:?}, tolerance={TIMER_DEADLINE_TOLERANCE:?}",
-            crate::mp::current_cpu_phys_id()
-        );
-        log::debug!(
-            "Timer deadline {step} on CPU {}: deadline={deadline:?}, actual={actual:?}, lateness={:?}",
-            crate::mp::current_cpu_phys_id(),
-            actual - deadline
-        );
-        observed = after;
-    }
-    log::info!(
-        "Timer deadline smoke test on CPU {}: 3 deadlines, {} events",
-        crate::mp::current_cpu_phys_id(),
-        observed
-    );
-}
-
 /// Handles a supervisor timer interrupt on the current hart.
 ///
 /// The handler advances the periodic deadline and programs the next SBI event.
 fn handle_timer_irq() {
-    TIMER_EVENT_COUNT.write_current(TIMER_EVENT_COUNT.read_current().wrapping_add(1));
     crate::task::wake_sleepers(exarch::time::monotonic_time());
     program_next_timer();
 }

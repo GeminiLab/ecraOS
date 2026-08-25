@@ -74,55 +74,10 @@ pub fn init_external_controller(config: X86ExternalIrqConfig) {
     crate::arch::x86_64::irq::init_external(config);
 }
 
-/// Resolves an x86 legacy ISA source through ACPI overrides.
-#[cfg(target_arch = "x86_64")]
-pub fn legacy_irq_source(isa_source: u8) -> Result<GlobalIrq, IrqError> {
-    crate::arch::x86_64::irq::gsi_for_isa(isa_source)
-}
-
-/// Returns the x86 CPU vector allocated for an external source.
-#[cfg(target_arch = "x86_64")]
-pub fn routed_vector(irq: GlobalIrq) -> Result<u8, IrqError> {
-    crate::arch::x86_64::irq::vector_for_irq(irq)
-}
-
-/// Unmasks an x86 source only for the unregistered-delivery boot test.
-#[cfg(target_arch = "x86_64")]
-pub fn test_unmask(irq: GlobalIrq) -> Result<(), IrqError> {
-    crate::arch::x86_64::irq::test_unmask(irq)
-}
-
-/// Masks an x86 source after the unregistered-delivery boot test.
-#[cfg(target_arch = "x86_64")]
-pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
-    crate::arch::x86_64::irq::test_mask(irq)
-}
-
 /// Initializes the current architecture's external interrupt controller.
 #[cfg(target_arch = "riscv64")]
 pub fn init_external_controller(config: RiscvExternalIrqConfig) {
     crate::arch::riscv64::irq::init_external(config);
-}
-
-/// Returns the device-tree UART source and MMIO base for the PLIC self-test.
-#[cfg(target_arch = "riscv64")]
-pub fn uart_test_source() -> Result<(GlobalIrq, memory_addr::PhysAddr), IrqError> {
-    Ok((
-        crate::arch::riscv64::irq::uart_source()?,
-        crate::arch::riscv64::irq::uart_base()?,
-    ))
-}
-
-/// Unmasks a RISC-V source only for the unregistered-delivery boot test.
-#[cfg(target_arch = "riscv64")]
-pub fn test_unmask(irq: GlobalIrq) -> Result<(), IrqError> {
-    crate::arch::riscv64::irq::test_unmask(irq)
-}
-
-/// Masks a RISC-V source after the unregistered-delivery boot test.
-#[cfg(target_arch = "riscv64")]
-pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
-    crate::arch::riscv64::irq::test_mask(irq)
 }
 
 /// Architecture interrupt operations.

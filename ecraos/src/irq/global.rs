@@ -74,27 +74,3 @@ pub fn dispatch(frame: &mut TrapFrame, irq: GlobalIrq) -> TrapDisposition {
         None => TrapDisposition::Unhandled,
     }
 }
-
-/// Returns the unregistered-delivery count for one global source.
-///
-/// This diagnostic is owned by the kernel registry and does not represent a CPU-local vector.
-pub fn unhandled_count(irq: GlobalIrq) -> usize {
-    REGISTRY
-        .get()
-        .map(|registry| registry.unhandled_count(irq))
-        .unwrap_or(0)
-}
-
-/// Unmasks a source for a controller self-test without changing kernel registration state.
-///
-/// The self-test uses this only after unregistering a source to verify unhandled accounting.
-pub fn test_unmask(irq: GlobalIrq) -> Result<(), IrqError> {
-    irq::test_unmask(irq)
-}
-
-/// Masks a source after a controller self-test.
-///
-/// This leaves the kernel source disabled and hardware quiescent.
-pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
-    irq::test_mask(irq)
-}

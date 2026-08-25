@@ -69,16 +69,11 @@ pub struct X86ExternalIrqConfig {
 static EXTERNAL_CONTROLLER: LazyInit<SpinNoIrq<ExternalController>> = LazyInit::new();
 static VECTOR_TO_GSI: [AtomicUsize; 256] = [const { AtomicUsize::new(0) }; 256];
 
-#[derive(Debug, Clone, Copy)]
-struct Route {
-    vector: u8,
-}
-
 struct ExternalController {
     ioapics: IoApicSet,
     overrides: Box<[X86IrqOverride]>,
     bsp_apic_id: u8,
-    routes: Box<[Option<Route>]>,
+    routes: Box<[bool]>,
     next_vector: u16,
 }
 
@@ -93,15 +88,20 @@ impl ExternalController {
             ioapics,
             overrides: config.overrides,
             bsp_apic_id,
-            routes: vec![None; max_gsi].into_boxed_slice(),
+            routes: vec![false; max_gsi].into_boxed_slice(),
             next_vector: 0x30,
         }
     }
 
-    fn prepare_route(&mut self, irq: GlobalIrq) -> Result<Route, IrqError> {
+    fn prepare_route(&mut self, irq: GlobalIrq) -> Result<(), IrqError> {
         let gsi = irq.raw();
-        if let Some(route) = self.routes.get(irq.raw() as usize).and_then(|route| *route) {
-            return Ok(route);
+        if self
+            .routes
+            .get(irq.raw() as usize)
+            .copied()
+            .ok_or(IrqError::InvalidNumber)?
+        {
+            return Ok(());
         }
         let (polarity, trigger) = self
             .overrides
@@ -113,13 +113,12 @@ impl ExternalController {
         self.ioapics
             .prepare_source(gsi, vector, self.bsp_apic_id, polarity, trigger)
             .map_err(|_| IrqError::InvalidNumber)?;
-        let route = Route { vector };
         *self
             .routes
             .get_mut(irq.raw() as usize)
-            .ok_or(IrqError::InvalidNumber)? = Some(route);
+            .ok_or(IrqError::InvalidNumber)? = true;
         VECTOR_TO_GSI[vector as usize].store(irq.raw() as usize + 1, Ordering::Release);
-        Ok(route)
+        Ok(())
     }
 
     fn allocate_vector(&mut self) -> Option<u8> {
@@ -135,20 +134,6 @@ impl ExternalController {
             }
         }
         None
-    }
-
-    fn legacy_gsi(&self, isa_source: u8) -> u32 {
-        self.overrides
-            .iter()
-            .find(|override_entry| override_entry.isa_source == isa_source)
-            .map(|override_entry| override_entry.gsi)
-            .unwrap_or(isa_source as u32)
-    }
-
-    fn vector_for_irq(&self, irq: GlobalIrq) -> Option<u8> {
-        self.routes
-            .get(irq.raw() as usize)
-            .and_then(|route| route.map(|route| route.vector))
     }
 }
 
@@ -173,36 +158,6 @@ pub fn gsi_for_vector(vector: u8) -> Option<GlobalIrq> {
         .checked_sub(1)
         .and_then(|gsi| u32::try_from(gsi).ok())
         .map(GlobalIrq::new)
-}
-
-/// Resolves a legacy ISA source through ACPI interrupt-source overrides.
-pub fn gsi_for_isa(isa_source: u8) -> Result<GlobalIrq, IrqError> {
-    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-    Ok(GlobalIrq::new(controller.lock().legacy_gsi(isa_source)))
-}
-
-/// Returns the allocated CPU vector for a prepared external source.
-pub fn vector_for_irq(irq: GlobalIrq) -> Result<u8, IrqError> {
-    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-    controller
-        .lock()
-        .vector_for_irq(irq)
-        .ok_or(IrqError::NotRegistered)
-}
-
-/// Temporarily unmasks a source for the unregistered-delivery boot self-test.
-pub fn test_unmask(irq: GlobalIrq) -> Result<(), IrqError> {
-    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-    controller.lock().ioapics.unmask(irq.raw());
-    Ok(())
-}
-
-/// Masks an x86 source after the unregistered-delivery boot test.
-#[cfg(target_arch = "x86_64")]
-pub fn test_mask(irq: GlobalIrq) -> Result<(), IrqError> {
-    let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
-    controller.lock().ioapics.mask(irq.raw());
-    Ok(())
 }
 
 /// Masks a routed x86 global source before local APIC completion.

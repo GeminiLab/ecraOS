@@ -762,24 +762,6 @@ fn probe_device_tree(addr: PhysAddr) {
     }
     assert!(!contexts.is_empty(), "PLIC has no supervisor contexts");
 
-    let uart_node = index
-        .compatible_nodes("ns16550a")
-        .next()
-        .expect("Device Tree has no ns16550a UART");
-    let uart_reg = uart_node
-        .props()
-        .find(|prop| prop.name().map(|name| name == "reg").unwrap_or(false))
-        .expect("UART node has no reg property");
-    let uart_source = uart_node
-        .props()
-        .find(|prop| {
-            prop.name()
-                .map(|name| name == "interrupts")
-                .unwrap_or(false)
-        })
-        .expect("UART node has no interrupts property")
-        .u32(0)
-        .expect("invalid UART interrupt source") as usize;
     exarch::irq::init_external_controller(exarch::irq::RiscvExternalIrqConfig {
         physical_base: PhysAddr::from_usize(
             usize::try_from(plic_reg.u64(0).expect("invalid PLIC reg base"))
@@ -789,13 +771,6 @@ fn probe_device_tree(addr: PhysAddr) {
             .expect("PLIC size exceeds address width"),
         source_count: plic_ndev,
         contexts: contexts.into_boxed_slice(),
-        uart_source: exarch::irq::GlobalIrq::new(
-            u32::try_from(uart_source).expect("UART PLIC source exceeds u32"),
-        ),
-        uart_base: PhysAddr::from_usize(
-            usize::try_from(uart_reg.u64(0).expect("invalid UART reg base"))
-                .expect("UART base exceeds address width"),
-        ),
     });
 
     drop(index);
