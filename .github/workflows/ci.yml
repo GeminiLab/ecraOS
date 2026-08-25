@@ -42,7 +42,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ripgrep
+          sudo apt-get install --yes --no-install-recommends ripgrep libslirp0
 
       - name: Install QEMU
         uses: arceos-org/setup-qemu@v1
