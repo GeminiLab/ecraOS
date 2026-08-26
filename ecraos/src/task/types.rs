@@ -1,20 +1,33 @@
 //! Kernel task related types.
 
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{
+    boxed::Box,
+    sync::{Arc, Weak},
+};
 use core::{
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
 };
 
 use kspin::SpinNoIrq;
 
-use super::stack::KernelStack;
+use super::TaskError;
 use super::wait_queue::{TaskWaitQueue, TaskWaitQueueGuard, validate_join};
+use super::{
+    domain::{DomainId, DomainRef, SchedulingDomain},
+    stack::KernelStack,
+};
 
 /// A stable kernel task identifier.
 ///
 /// Identifiers remain associated with a task for its entire lifetime.
 pub type TaskId = u64;
+
+/// A shared reference to one task.
+pub type TaskRef = Arc<Task>;
+
+/// A non-owning reference to one task.
+pub type WeakTaskRef = Weak<Task>;
 
 /// Kernel task lifecycle states.
 ///
@@ -35,6 +48,13 @@ pub enum TaskState {
     Blocked,
     /// A task that has completed and can never run again.
     Exited,
+}
+
+/// The published outcome of a task that reached `Exited`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskExitStatus {
+    /// The task body returned normally.
+    Completed,
 }
 
 /// Errors returned by rejected task lifecycle transitions.
@@ -157,6 +177,8 @@ pub(crate) unsafe fn execution_arg_into_arc<T>(argument: usize) -> Arc<T> {
 pub(super) struct Completion {
     /// Whether the task closure has returned.
     completed: AtomicBool,
+    /// Stable encoded exit outcome.
+    status: AtomicU8,
     /// The internal wait queue used by joiners.
     waiters: TaskWaitQueue,
 }
@@ -168,6 +190,7 @@ impl Completion {
     const fn new() -> Self {
         Self {
             completed: AtomicBool::new(false),
+            status: AtomicU8::new(0),
             waiters: TaskWaitQueue::new(),
         }
     }
@@ -176,6 +199,7 @@ impl Completion {
     ///
     /// Release ordering makes all closure effects visible before completion is observed.
     fn publish_completed(&self) {
+        self.status.store(1, Ordering::Relaxed);
         self.completed.store(true, Ordering::Release);
     }
 
@@ -184,6 +208,15 @@ impl Completion {
     /// The acquire load observes closure effects before a joiner returns.
     pub(super) fn is_completed(&self) -> bool {
         self.completed.load(Ordering::Acquire)
+    }
+
+    /// Returns the published exit outcome, if the task has completed.
+    pub(super) fn status(&self) -> Option<TaskExitStatus> {
+        if self.is_completed() {
+            Some(TaskExitStatus::Completed)
+        } else {
+            None
+        }
     }
 
     /// Locks the completion waiter queue.
@@ -223,12 +256,20 @@ pub struct Task {
     completion: Arc<Completion>,
     /// Whether execution is still using this task's stack.
     current: AtomicBool,
+    /// Whether this task is registered on a synchronization wait queue.
+    waiting: AtomicBool,
     /// Whether the context is ready for publication or saving at a switch boundary.
     context_initialized: AtomicBool,
     /// The scheduler placement policy for this task.
     placement: TaskPlacement,
     /// The monotonically increasing generation of the current sleep request.
     sleep_generation: AtomicU64,
+    /// Remaining timer ticks for the current preemptive slice.
+    remaining_slice: AtomicU64,
+    /// Weak ownership link to the scheduling domain.
+    domain: SpinNoIrq<Weak<SchedulingDomain>>,
+    /// Stable domain identity retained after the domain is destroyed.
+    domain_id: AtomicU64,
 }
 
 // SAFETY: Task construction requires a Send closure. All shared mutable state is atomic or
@@ -269,9 +310,13 @@ impl Task {
             body: UnsafeCell::new(Some(Box::new(body))),
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(false),
+            waiting: AtomicBool::new(false),
             context_initialized: AtomicBool::new(false),
             sleep_generation: AtomicU64::new(0),
+            remaining_slice: AtomicU64::new(0),
             placement,
+            domain: SpinNoIrq::new(Weak::new()),
+            domain_id: AtomicU64::new(0),
         });
         Ok(task)
     }
@@ -289,9 +334,13 @@ impl Task {
             body: UnsafeCell::new(None),
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(true),
+            waiting: AtomicBool::new(false),
             context_initialized: AtomicBool::new(true),
             sleep_generation: AtomicU64::new(0),
+            remaining_slice: AtomicU64::new(0),
             placement: TaskPlacement::Pinned(cpu_id),
+            domain: SpinNoIrq::new(Weak::new()),
+            domain_id: AtomicU64::new(0),
         })
     }
 
@@ -300,6 +349,59 @@ impl Task {
     /// The value never changes during the task lifetime.
     pub const fn id(&self) -> TaskId {
         self.id
+    }
+
+    /// Returns the task's current scheduling domain, if it remains alive.
+    pub fn domain(&self) -> Option<DomainRef> {
+        let _guard = kernel_guard::NoPreempt::new();
+        self.domain.lock().upgrade()
+    }
+
+    /// Returns the stable scheduling-domain identifier.
+    pub fn domain_id(&self) -> DomainId {
+        self.domain_id.load(Ordering::Acquire)
+    }
+
+    /// Associates a newly created task with one scheduling domain.
+    pub(super) fn set_domain(&self, domain: &DomainRef) {
+        let _guard = kernel_guard::NoPreempt::new();
+        *self.domain.lock() = Arc::downgrade(domain);
+        self.domain_id.store(domain.id(), Ordering::Release);
+        let ticks = domain
+            .policy()
+            .slice_ticks(core::time::Duration::from_millis(10))
+            .unwrap_or(0);
+        self.remaining_slice.store(ticks, Ordering::Release);
+    }
+
+    /// Accounts one timer tick and reports whether the slice expired.
+    pub(super) fn account_tick(&self) -> bool {
+        let mut current = self.remaining_slice.load(Ordering::Acquire);
+        while current != 0 {
+            match self.remaining_slice.compare_exchange_weak(
+                current,
+                current - 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return current == 1,
+                Err(observed) => current = observed,
+            }
+        }
+        false
+    }
+
+    /// Restores a full slice after a cooperative yield or replacement-free tick.
+    pub(super) fn reset_slice(&self) {
+        let ticks = self
+            .domain()
+            .and_then(|domain| {
+                domain
+                    .policy()
+                    .slice_ticks(core::time::Duration::from_millis(10))
+            })
+            .unwrap_or(0);
+        self.remaining_slice.store(ticks, Ordering::Release);
     }
 
     /// Returns the task's scheduler placement policy.
@@ -312,6 +414,7 @@ impl Task {
     /// The protected state machine rejects publication before context preparation and duplicate
     /// publication.
     pub fn make_runnable(&self) -> Result<(), TaskStateError> {
+        let _guard = kernel_guard::NoPreempt::new();
         assert!(
             self.context_initialized.load(Ordering::Acquire),
             "task context was not prepared before publication"
@@ -325,6 +428,7 @@ impl Task {
     /// runnable or making scheduler state active. The context owns one strong reference that the
     /// initial trampoline reconstructs exactly once.
     pub(crate) fn prepare_context(self: &Arc<Self>) {
+        let _guard = kernel_guard::NoPreempt::new();
         let state = self.state.lock();
         assert_eq!(
             *state,
@@ -391,13 +495,25 @@ impl Task {
         *self.state.lock()
     }
 
+    /// Waits cooperatively for this task to reach `Exited`.
+    pub fn join(&self) -> Result<(), TaskError> {
+        let mut handle = JoinHandle {
+            task_id: self.id,
+            completion: Arc::clone(&self.completion),
+            task: Weak::new(),
+            joined: false,
+        };
+        handle.join()
+    }
+
     /// Creates a join handle for this task's completion state.
     ///
     /// The returned handle does not retain the task stack after task exit.
-    pub(crate) fn join_handle(&self) -> JoinHandle {
+    pub(crate) fn join_handle(self: &Arc<Self>) -> JoinHandle {
         JoinHandle {
             task_id: self.id,
             completion: Arc::clone(&self.completion),
+            task: Arc::downgrade(self),
             joined: false,
         }
     }
@@ -407,11 +523,14 @@ impl Task {
     /// The returned waiters must be routed to runnable queues after this task's completion lock is
     /// no longer held.
     pub(super) fn complete(&self, cpu_id: usize) -> alloc::vec::Vec<Arc<Task>> {
-        self.completion.publish_completed();
         self.state
             .lock()
             .exit(cpu_id)
             .expect("task completed outside its owning CPU");
+        if let Some(domain) = self.domain() {
+            domain.retire_task();
+        }
+        self.completion.publish_completed();
         self.completion.take_waiters()
     }
 
@@ -419,6 +538,7 @@ impl Task {
     ///
     /// Exactly one waiter generation may wake this task.
     pub(crate) fn wake_from_completion(&self) -> Result<(), TaskStateError> {
+        let _guard = kernel_guard::NoPreempt::new();
         self.state.lock().make_runnable()
     }
 
@@ -426,6 +546,7 @@ impl Task {
     ///
     /// The scheduler calls this only while the task is Running and the completion queue is locked.
     pub(crate) fn block(&self, cpu_id: usize) -> Result<(), TaskStateError> {
+        let _guard = kernel_guard::NoPreempt::new();
         self.state.lock().block(cpu_id)
     }
 
@@ -446,6 +567,7 @@ impl Task {
         if self.sleep_generation.load(Ordering::Acquire) != generation {
             return false;
         }
+        let _guard = kernel_guard::NoPreempt::new();
         let result = self.state.lock().make_runnable();
         result.is_ok()
     }
@@ -469,6 +591,19 @@ impl Task {
     /// Deferred reaping must call this only from another active stack.
     pub(crate) fn mark_not_current(&self) {
         self.current.store(false, Ordering::Release);
+    }
+
+    /// Claims this task's single wait-queue registration slot.
+    pub(crate) fn claim_waiting(&self) -> Result<(), TaskError> {
+        self.waiting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| TaskError::AlreadyWaiting)
+    }
+
+    /// Releases this task's wait-queue registration slot.
+    pub(crate) fn release_waiting(&self) {
+        self.waiting.store(false, Ordering::Release);
     }
 }
 
@@ -508,6 +643,8 @@ pub struct JoinHandle {
     task_id: TaskId,
     /// Completion state shared with the task and all observers.
     completion: Arc<Completion>,
+    /// Weak target used for cross-domain wake placement without retaining the task.
+    task: Weak<Task>,
     /// Whether this handle has consumed its join operation.
     joined: bool,
 }
@@ -516,13 +653,14 @@ impl JoinHandle {
     /// Waits cooperatively until the target task exits.
     ///
     /// Joining the current task is rejected because it cannot make progress while blocked.
-    pub fn join(mut self) {
+    pub fn join(&mut self) -> Result<(), TaskError> {
+        if self.joined {
+            return Err(TaskError::AlreadyJoined);
+        }
         let current_task_id = super::scheduler::current_task_id();
-        assert_eq!(
-            validate_join(current_task_id, self.task_id),
-            Ok(()),
-            "task attempted to join itself"
-        );
+        if validate_join(current_task_id, self.task_id).is_err() {
+            return Err(TaskError::WouldDeadlock);
+        }
         while !self.completion.is_completed() {
             if current_task_id.is_some() {
                 super::scheduler::block_current_on(&self.completion);
@@ -531,6 +669,7 @@ impl JoinHandle {
             }
         }
         self.joined = true;
+        Ok(())
     }
 
     /// Returns whether the target task has exited.
@@ -539,5 +678,10 @@ impl JoinHandle {
     #[expect(unused)]
     pub fn is_finished(&self) -> bool {
         self.completion.is_completed()
+    }
+
+    /// Returns the completed task outcome without consuming the join handle.
+    pub fn status(&self) -> Option<TaskExitStatus> {
+        self.completion.status()
     }
 }

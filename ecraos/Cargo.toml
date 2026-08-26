@@ -15,6 +15,7 @@ expt = { path = "../expt" }
 exslab = { path = "../exslab" }
 heapless = "0.9"
 kspin = { version = "0.2", features = ["smp"] }
+kernel_guard = { version = "0.2", features = ["preempt"] }
 lazyinit.workspace = true
 log.workspace = true
 memory_addr.workspace = true

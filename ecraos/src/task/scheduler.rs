@@ -14,7 +14,7 @@ use lazyinit::LazyInit;
 use memory_addr::VirtAddrRange;
 
 use super::{
-    JoinHandle, Task, TaskId,
+    DomainError, DomainPolicy, DomainRef, JoinHandle, Task, TaskId, TaskRef, create_domain,
     run_queue::TaskRunQueue,
     stack::KernelStack,
     timer_queue::TimerQueue,
@@ -64,6 +64,10 @@ static PENDING_SLEEP_WAKE: SpinNoIrq<Vec<(u64, Arc<Task>)>> = SpinNoIrq::new(Vec
 /// Only the local CPU accesses this token with interrupts disabled.
 #[def_percpu]
 static CURRENT_TASK: usize = 0;
+
+/// The current CPU's strong scheduling-domain token.
+#[def_percpu]
+static CURRENT_DOMAIN: usize = 0;
 
 /// This CPU's permanent idle-task `Arc` token.
 ///
@@ -124,6 +128,15 @@ fn run_queue(cpu_id: usize) -> &'static SpinNoIrq<TaskRunQueue> {
 
 /// Returns the queue CPU selected by one task's placement policy.
 fn placement_cpu(task: &Task, preferred_cpu: usize) -> usize {
+    if let Some(domain) = task.domain() {
+        let members = domain.cpu_snapshot();
+        if members.contains(preferred_cpu) {
+            return preferred_cpu;
+        }
+        if let Some(cpu) = domain.select_cpu() {
+            return cpu;
+        }
+    }
     match task.placement() {
         TaskPlacement::AnyCpu => preferred_cpu,
         TaskPlacement::Pinned(cpu_id) => cpu_id,
@@ -132,6 +145,17 @@ fn placement_cpu(task: &Task, preferred_cpu: usize) -> usize {
 
 /// Enqueues one task on its placement-selected queue.
 fn enqueue_task(task: Arc<Task>, preferred_cpu: usize) {
+    // Queue publication follows NoPreemptIrqSave -> domain metadata -> Queue locks. This guard is
+    // intentionally short-lived and is dropped before any context switch. A future lock-free
+    // queue could replace this lock after its memory-ordering proof.
+    let _guard = kernel_guard::NoPreemptIrqSave::new();
+    let Some(domain) = task.domain() else {
+        return;
+    };
+    if domain.cpu_snapshot().snapshot().is_empty() {
+        domain.suspend(task);
+        return;
+    }
     let cpu_id = placement_cpu(&task, preferred_cpu);
     run_queue(cpu_id).lock().enqueue(task);
 }
@@ -183,6 +207,17 @@ unsafe fn current_task() -> Arc<Task> {
     unsafe { clone_token(raw) }
 }
 
+/// Returns a clone of the current CPU's scheduling domain.
+unsafe fn current_domain() -> DomainRef {
+    let raw = CURRENT_DOMAIN.read_current();
+    assert_ne!(raw, 0, "current CPU has no scheduling domain");
+    let pointer = raw as *const super::SchedulingDomain;
+    // SAFETY: The per-CPU token is a live Arc protected by local interrupt exclusion.
+    unsafe { Arc::increment_strong_count(pointer) };
+    // SAFETY: The preceding increment created exactly one owned Arc for this result.
+    unsafe { Arc::from_raw(pointer) }
+}
+
 /// Returns the current owned task identifier.
 ///
 /// Local interrupts are disabled only for the raw per-CPU ownership read and restored afterward.
@@ -191,6 +226,7 @@ pub(super) fn current_task_id() -> Option<TaskId> {
         return None;
     }
 
+    let _guard = kernel_guard::NoPreempt::new();
     let irq_enabled = exarch::irq::local_enabled();
     exarch::irq::disable_local();
     // SAFETY: Local interrupts are disabled while cloning the per-CPU Arc token.
@@ -199,6 +235,16 @@ pub(super) fn current_task_id() -> Option<TaskId> {
         exarch::irq::enable_local();
     }
     Some(id)
+}
+
+/// Returns the current ordinary task reference, excluding the idle task.
+pub(super) fn current_task_ref() -> Option<TaskRef> {
+    if !initialized() {
+        return None;
+    }
+    let task = unsafe { current_task() };
+    let idle = unsafe { idle_task() };
+    (task.id() != idle.id()).then_some(task)
 }
 
 /// Returns a clone of this CPU's idle task.
@@ -386,6 +432,11 @@ pub(super) fn init_current_cpu(current_stack: VirtAddrRange) {
 
     // Allocate and initialize the idle task.
     let cpu_id = crate::mp::current_cpu_id();
+    let root_domain = create_domain(DomainPolicy::Cooperative)
+        .expect("failed to create the initial cooperative scheduling domain");
+    root_domain
+        .add_cpu(cpu_id)
+        .expect("failed to assign the bootstrap CPU to its domain");
     let idle = Task::new_detached_with_placement(
         allocate_task_id(),
         idle_body,
@@ -397,13 +448,18 @@ pub(super) fn init_current_cpu(current_stack: VirtAddrRange) {
         .expect("failed to initialize idle task state");
 
     // Adopt the current stack as a pinned root task.
-    let root = Task::adopt_current(
+    let mut root = Task::adopt_current(
         allocate_task_id(),
         KernelStack::adopt_existing(current_stack),
         cpu_id,
     );
+    Arc::get_mut(&mut root)
+        .expect("root task unexpectedly has another owner")
+        .set_domain(&root_domain);
+    root_domain.account_task();
 
     CURRENT_TASK.write_current(Arc::into_raw(root) as usize);
+    CURRENT_DOMAIN.write_current(Arc::into_raw(root_domain) as usize);
     IDLE_TASK.write_current(Arc::into_raw(idle) as usize);
     DEFERRED_REAP.write_current(0);
     PREEMPT_COUNT.write_current(0);
@@ -416,15 +472,101 @@ pub(super) fn init_current_cpu(current_stack: VirtAddrRange) {
 pub(super) fn spawn(body: impl FnOnce() + Send + 'static) -> JoinHandle {
     assert_scheduler_initialized();
 
-    let task = Task::new_detached(allocate_task_id(), body).expect("failed to create kernel task");
+    let domain = unsafe { current_domain() };
+    let mut task =
+        Task::new_detached(allocate_task_id(), body).expect("failed to create kernel task");
+    Arc::get_mut(&mut task)
+        .expect("new task unexpectedly has another owner")
+        .set_domain(&domain);
     let handle = task.join_handle();
     task.prepare_context();
     task.make_runnable()
         .expect("the new kernel task could not become Runnable");
 
+    domain.account_task();
     enqueue_task(task, crate::mp::current_cpu_id());
 
     handle
+}
+
+/// Switches the running task and its CPU to another active scheduling domain.
+pub(super) fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
+    assert_scheduler_initialized();
+    let _guard = kernel_guard::NoPreemptIrqSave::new();
+    let cpu_id = crate::mp::current_cpu_id();
+    let current = unsafe { current_task() };
+    let idle = unsafe { idle_task() };
+    if current.id() == idle.id() || !matches!(current.state(), super::TaskState::Running { .. }) {
+        return Err(DomainError::InvalidTarget);
+    }
+    let source = current.domain().ok_or(DomainError::DomainDestroyed)?;
+    if source.id() == domain.id() {
+        return match domain.lifecycle() {
+            super::DomainLifecycle::Active => Ok(()),
+            super::DomainLifecycle::Destroyed => Err(DomainError::DomainDestroyed),
+            super::DomainLifecycle::Draining | super::DomainLifecycle::Destroying => {
+                Err(DomainError::DomainDestroying)
+            }
+        };
+    }
+    if domain.lifecycle() != super::DomainLifecycle::Active {
+        return Err(if domain.lifecycle() == super::DomainLifecycle::Destroyed {
+            DomainError::DomainDestroyed
+        } else {
+            DomainError::DomainDestroying
+        });
+    }
+    // Membership changes are committed before task metadata. If the destination update fails,
+    // the source remains authoritative. A future lock-free CPU-membership structure may replace
+    // this ordered metadata protocol after its memory-ordering proof.
+    domain.add_cpu(cpu_id)?;
+    if let Err(error) = source.remove_cpu(cpu_id) {
+        let _ = domain.remove_cpu(cpu_id);
+        return Err(error);
+    }
+    source.retire_task();
+    domain.account_task();
+    current.set_domain(domain);
+    let previous = CURRENT_DOMAIN.read_current();
+    CURRENT_DOMAIN.write_current(Arc::into_raw(Arc::clone(domain)) as usize);
+    // SAFETY: `previous` is the strong Arc token held by the old current-domain slot.
+    unsafe { drop(Arc::from_raw(previous as *const super::SchedulingDomain)) };
+    Ok(())
+}
+
+/// Spawns one task into an explicitly selected scheduling domain.
+///
+/// The caller selects queue placement only after the new task is fully prepared. A domain without
+/// an active CPU keeps the task in its suspended FIFO queue until CPU membership is established.
+pub(super) fn spawn_in_domain(
+    domain: &DomainRef,
+    body: impl FnOnce() + Send + 'static,
+) -> Result<TaskRef, DomainError> {
+    assert_scheduler_initialized();
+    let mut task = Task::new_detached(allocate_task_id(), body).map_err(|_| DomainError::Busy)?;
+    Arc::get_mut(&mut task)
+        .expect("new task unexpectedly has another owner")
+        .set_domain(domain);
+    task.prepare_context();
+    task.make_runnable()
+        .expect("new domain task could not become Runnable");
+    domain.account_task();
+    let result = Arc::clone(&task);
+    match domain.select_cpu() {
+        Some(cpu) => enqueue_task(task, cpu),
+        None => domain.suspend(task),
+    }
+    Ok(result)
+}
+
+/// Publishes suspended domain tasks to a newly active CPU.
+pub(super) fn drain_suspended(domain: &super::SchedulingDomain, cpu_id: usize) {
+    if !domain.cpu_snapshot().contains(cpu_id) {
+        return;
+    }
+    for task in domain.take_suspended() {
+        enqueue_task(task, cpu_id);
+    }
 }
 
 /// Wakes completion waiters and publishes each task to its placement-selected FIFO queue once.
@@ -603,6 +745,7 @@ pub(super) fn yield_now() {
     current
         .yield_runnable(cpu_id)
         .expect("current task could not yield from Running");
+    current.reset_slice();
     // Idle is retained outside the local run queue. All other tasks move behind existing work.
     // SAFETY: The permanent idle token is valid and local interrupts are disabled.
     let idle = unsafe { idle_task() };

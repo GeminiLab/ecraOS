@@ -61,9 +61,9 @@ fn run_sleep_join_workload(is_bsp: bool) -> ! {
         })
     });
 
-    let joiner = task::spawn(move || {
-        for (worker_index, worker) in workers.into_iter().enumerate() {
-            worker.join();
+    let mut joiner = task::spawn(move || {
+        for (worker_index, mut worker) in workers.into_iter().enumerate() {
+            let _ = worker.join();
             info!(
                 "Join task on CPU {} joined sleep task {worker_index}/{WORKER_COUNT}",
                 mp::current_cpu_id()
@@ -75,7 +75,8 @@ fn run_sleep_join_workload(is_bsp: bool) -> ! {
         );
     });
 
-    joiner.join();
+    let _ = joiner.join();
+
     if is_bsp {
         exarch::power::poweroff()
     } else {

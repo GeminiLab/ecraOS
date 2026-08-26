@@ -84,7 +84,6 @@ impl<T, K: Copy + Ord> FifoQueue<T, K> {
     /// Removes one exact member without changing the order of other entries.
     ///
     /// A missing key leaves both the entries and membership set unchanged.
-    #[expect(unused)]
     pub fn remove(&mut self, key: K) -> Option<T> {
         self.remove_if(key, |_| true)
     }

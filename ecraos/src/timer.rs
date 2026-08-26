@@ -44,6 +44,7 @@ pub fn init_bsp() {
 fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> TrapDisposition {
     match interrupt {
         LocalInterrupt::Timer => {
+            crate::task::timer_tick();
             handle_timer_irq();
             TrapDisposition::Handled
         }

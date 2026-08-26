@@ -86,7 +86,11 @@ impl TaskWaitQueue {
     ///
     /// The guard disables local interrupts and must be dropped before switching contexts.
     pub(super) fn lock(&self) -> TaskWaitQueueGuard<'_> {
+        // Completion locks follow NoPreemptIrqSave -> domain metadata -> Queue -> task lifecycle
+        // -> completion locks. A future lock-free wait queue could replace this lock after its
+        // memory-ordering proof.
         TaskWaitQueueGuard {
+            _preempt: kernel_guard::NoPreemptIrqSave::new(),
             guard: self.inner.lock(),
         }
     }
@@ -96,6 +100,8 @@ impl TaskWaitQueue {
 ///
 /// The guard owns the lock across waiter publication and block commit to close the wakeup race.
 pub(super) struct TaskWaitQueueGuard<'a> {
+    /// Scheduler guard held for the lifetime of the queue lock.
+    _preempt: kernel_guard::NoPreemptIrqSave,
     /// The IRQ-safe queue lock guard.
     guard: SpinNoIrqGuard<'a, VecDeque<TaskWaiter>>,
 }

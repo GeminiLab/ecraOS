@@ -4,6 +4,17 @@ use memory_addr::{PhysAddr, VirtAddr};
 struct KernelImpl;
 
 #[crate_interface::impl_interface]
+impl kernel_guard::KernelGuardIf for KernelImpl {
+    fn enable_preempt() {
+        crate::task::preempt::enable_preempt();
+    }
+
+    fn disable_preempt() {
+        crate::task::preempt::disable_preempt();
+    }
+}
+
+#[crate_interface::impl_interface]
 impl exarch::kernel_if::KernelIf for KernelImpl {
     fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
         crate::mem::virt_to_phys(addr)

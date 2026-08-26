@@ -5,16 +5,58 @@
 use alloc::sync::Arc;
 use memory_addr::VirtAddrRange;
 
+mod domain;
+pub(crate) mod preempt;
+mod queue;
 mod run_queue;
 mod scheduler;
 mod stack;
+mod sync;
 mod timer_queue;
+mod trace;
 mod types;
 mod wait_queue;
 
+pub use domain::{
+    CpuSet, DomainError, DomainId, DomainLifecycle, DomainPolicy, DomainRef, SchedulingDomain,
+    create_domain, lookup_domain,
+};
+pub use preempt::{RescheduleGuard, can_schedule_now, request_reschedule};
+pub use queue::{PhysicalQueue, QueueState, QueueStateError};
+pub use sync::{Condvar, Mutex, MutexGuard, Semaphore, WaitQueue};
+pub use trace::{TraceEvent, TraceEventKind, TraceRing};
 #[expect(unused)]
 pub use types::TaskStateError;
-pub use types::{JoinHandle, Task, TaskId, TaskState};
+pub use types::{JoinHandle, Task, TaskExitStatus, TaskId, TaskRef, TaskState, WeakTaskRef};
+
+/// Unified task and synchronization operation errors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskError {
+    /// The caller is not an ordinary task.
+    NotTaskContext,
+    /// The caller is inside a critical section.
+    InCriticalSection,
+    /// The requested operation cannot block.
+    CannotBlock,
+    /// The task already occupies a wait queue.
+    AlreadyWaiting,
+    /// The operation would wait for the caller itself.
+    WouldDeadlock,
+    /// A one-shot join handle was already consumed.
+    AlreadyJoined,
+    /// A timed operation reached its deadline.
+    TimedOut,
+    /// Required scheduler storage could not be allocated.
+    AllocationFailed,
+    /// A target task or domain is invalid.
+    InvalidTarget,
+    /// Outstanding ownership prevents the operation.
+    Busy,
+    /// The domain is draining or destroying.
+    DomainDestroying,
+    /// The domain is permanently destroyed.
+    DomainDestroyed,
+}
 
 /// Initializes the scheduler for the current CPU.
 ///
@@ -31,9 +73,24 @@ pub fn spawn(body: impl FnOnce() + Send + 'static) -> JoinHandle {
     scheduler::spawn(body)
 }
 
+/// Switches the running task and current CPU to another scheduling domain.
+pub fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
+    scheduler::switch_current_to(domain)
+}
+
 /// Returns the current kernel task identity when called from an active scheduler.
 pub fn current_task_id() -> Option<TaskId> {
     scheduler::current_task_id()
+}
+
+/// Returns the current ordinary task reference, if called from task context.
+pub fn current_task() -> Option<TaskRef> {
+    scheduler::current_task_ref()
+}
+
+/// Accounts one local timer tick without switching from interrupt context.
+pub fn timer_tick() {
+    preempt::timer_tick();
 }
 
 /// Cooperatively yields the current execution context.
