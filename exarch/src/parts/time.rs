@@ -23,11 +23,8 @@ impl Nanos {
     }
 }
 
-/// Platform time operations.
-///
-/// The wrapper forwards calls to the selected architecture implementation.
-#[look_at(crate::arch::current::time, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::time:
     /// Returns monotonic platform ticks since early initialization.
     pub fn monotonic_ticks() -> Ticks;
 

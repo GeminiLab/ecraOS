@@ -46,11 +46,8 @@ pub enum ShutdownReason {
     Panicked,
 }
 
-/// Power operations implemented by the platform.
-///
-/// The wrapper forwards calls to the selected architecture implementation.
-#[look_at(crate::arch::current::power, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::power:
     /// Brings up a physical CPU.
     ///
     /// The return value reports whether the architecture accepted the startup request.

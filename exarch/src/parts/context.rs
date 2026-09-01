@@ -4,8 +4,9 @@ use memory_addr::VirtAddr;
 
 pub use crate::arch::current::context::TaskContext;
 
-#[look_at::look_at(crate::arch::current::context, flatten)]
-mod _wrapper {
+look_at::look_at! {
+    @crate::arch::current::context:
+
     /// Initializes a task context to enter a non-returning function.
     ///
     /// The caller must provide an aligned, writable kernel stack and keep `entry` callable with `arg`.

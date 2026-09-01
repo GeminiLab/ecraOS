@@ -8,10 +8,12 @@ use core::fmt::Write;
 
 use look_at::look_at;
 
-#[look_at(crate::arch::current::debug_console, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::debug_console:
+
     /// Writes every byte in `bytes` to the console device.
     pub fn write_bytes(bytes: &[u8]);
+
     /// Reads as many bytes as are immediately available, storing them in `bytes`.
     ///
     /// Returns how many bytes were read (may be less than `bytes.len()` if the input is idle).

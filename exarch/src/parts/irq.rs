@@ -80,11 +80,8 @@ pub fn init_external_controller(config: RiscvExternalIrqConfig) {
     crate::arch::riscv64::irq::init_external(config);
 }
 
-/// Architecture interrupt operations.
-///
-/// Each architecture reports unsupported registration and dispatch explicitly.
-#[look_at(crate::arch::current::irq, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::irq:
     /// Enables interrupts globally on the current CPU.
     ///
     /// Callers must ensure all interrupt sources have valid handlers.

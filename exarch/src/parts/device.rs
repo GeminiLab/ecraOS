@@ -11,11 +11,9 @@ pub enum DeviceInfoSource {
 
 pub struct DeviceInfoToBeImplemented {}
 
-/// Platform device information operations.
-///
-/// The wrapper forwards calls to the selected architecture implementation.
-#[look_at(crate::arch::current::device, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::device:
+
     /// Probes platform-provided device information sources.
     pub fn probe_device_info_sources(arg: ecraldr_base::PlatformBootArg) -> Vec<DeviceInfoSource>;
 }

@@ -4,8 +4,9 @@ pub use ecraldr_base::PlatformBootArg;
 
 use look_at::look_at;
 
-#[look_at(crate::arch::current::init, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::init:
+
     /// Early platform initialization.
     ///
     /// This method should be called immediately after the kernel entry runs,

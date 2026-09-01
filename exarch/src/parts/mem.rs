@@ -277,11 +277,8 @@ impl VirtAddrSpaceModes {
     }
 }
 
-/// Platform memory operations.
-///
-/// The wrapper forwards calls to the selected architecture implementation.
-#[look_at(crate::arch::current::mem, flatten)]
-mod _wrapper {
+look_at! {
+    @crate::arch::current::mem:
     /// Collects the memory regions from the platform boot argument.
     ///
     /// The returned memory regions should not contain the
