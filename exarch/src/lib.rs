@@ -8,7 +8,5 @@ extern crate alloc;
 mod arch;
 pub mod kernel_if;
 mod parts;
-pub mod trap;
 
-pub use arch::current::context::TrapFrame;
 pub use parts::*;

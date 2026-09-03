@@ -7,13 +7,13 @@ use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::PhysAddr;
 use riscv::{
-    interrupt::supervisor::{self, Interrupt},
+    interrupt::supervisor::{self, Interrupt as RiscInterrupt},
     register::sstatus,
 };
 
 use crate::{
-    irq::{GlobalIrq, IrqError},
-    trap::{SemanticTrap, TrapDisposition, merge_dispositions},
+    irq::IrqError,
+    trap::{Interrupt, Trap, TrapDisposition, TrapFrame},
 };
 
 /// A RISC-V PLIC source identifier.
@@ -43,7 +43,7 @@ impl PlicSourceId {
 ///
 /// This target alias lets common trap code name a global source without conflating it with x86
 /// GSIs or raw `scause` values.
-pub type ArchGlobalIrq = PlicSourceId;
+pub type GlobalIrq = PlicSourceId;
 
 /// Describes the RISC-V PLIC external-controller topology.
 #[derive(Debug, Clone)]
@@ -119,7 +119,7 @@ pub fn init_external(config: RiscvExternalIrqConfig) {
 }
 
 /// Claims, dispatches, and completes every pending source for the current hart.
-pub fn handle_external(frame: &mut crate::TrapFrame) -> TrapDisposition {
+pub fn handle_external(frame: &mut TrapFrame) -> TrapDisposition {
     let Some(plic) = PLIC.get() else {
         return TrapDisposition::Unhandled;
     };
@@ -145,11 +145,12 @@ pub fn handle_external(frame: &mut crate::TrapFrame) -> TrapDisposition {
             plic.lock().complete(source);
             continue;
         }
-        let source_disposition = crate::trap::handle(frame, SemanticTrap::GlobalIrq(irq));
+        let source_disposition =
+            crate::trap::handle(frame, Trap::Interrupt(Interrupt::Global(irq)));
         if source_disposition == TrapDisposition::Unhandled {
             plic.lock().mask(irq);
         }
-        disposition = merge_dispositions(disposition, source_disposition);
+        disposition += source_disposition;
         // Complete only after semantic dispatch and any required masking.
         plic.lock().complete(source);
     }
@@ -228,17 +229,17 @@ pub const INTC_IRQ_BASE: usize = 1 << (usize::BITS - 1);
 /// The supervisor software interrupt cause.
 ///
 /// This cause remains masked until an IPI implementation is added.
-pub const SOFTWARE_IRQ_NUM: usize = INTC_IRQ_BASE | Interrupt::SupervisorSoft as usize;
+pub const SOFTWARE_IRQ_NUM: usize = INTC_IRQ_BASE | RiscInterrupt::SupervisorSoft as usize;
 
 /// The supervisor timer interrupt cause.
 ///
 /// This is the only IRQ accepted by the current registration implementation.
-pub const TIMER_IRQ_NUM: usize = INTC_IRQ_BASE | Interrupt::SupervisorTimer as usize;
+pub const TIMER_IRQ_NUM: usize = INTC_IRQ_BASE | RiscInterrupt::SupervisorTimer as usize;
 
 /// The supervisor external interrupt cause.
 ///
 /// This cause remains masked until a PLIC implementation is added.
-pub const EXTERNAL_IRQ_NUM: usize = INTC_IRQ_BASE | Interrupt::SupervisorExternal as usize;
+pub const EXTERNAL_IRQ_NUM: usize = INTC_IRQ_BASE | RiscInterrupt::SupervisorExternal as usize;
 
 /// Enables interrupts globally on the current hart.
 pub fn enable_local() {
@@ -283,7 +284,7 @@ pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
 pub(super) fn init_percpu() {
     // SAFETY: global interrupts remain disabled until the kernel installs and arms the timer.
     unsafe {
-        supervisor::enable_interrupt(Interrupt::SupervisorTimer);
-        supervisor::enable_interrupt(Interrupt::SupervisorExternal);
+        supervisor::enable_interrupt(RiscInterrupt::SupervisorTimer);
+        supervisor::enable_interrupt(RiscInterrupt::SupervisorExternal);
     }
 }

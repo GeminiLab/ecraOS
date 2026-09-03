@@ -4,7 +4,7 @@
 
 use core::time::Duration;
 
-use exarch::trap::{Handler, LocalInterrupt, TrapDisposition, TrapFrame};
+use exarch::trap::{LocalInterrupt, LocalInterruptHandler, TrapDisposition, TrapFrame};
 use expercpu::def_percpu;
 
 mod deadline;
@@ -31,11 +31,7 @@ static NEXT_DEADLINE_NANOS: u64 = 0;
 ///
 /// This registers the shared handler before arming and enabling local interrupts.
 pub fn init_bsp() {
-    assert_eq!(
-        crate::irq::register(Handler::LocalInterrupt(handle_local_interrupt)),
-        Ok(()),
-        "failed to register the local timer handler"
-    );
+    crate::irq::register::<LocalInterruptHandler>(handle_local_interrupt);
     program_next_timer();
     exarch::irq::enable_local();
 }

@@ -25,6 +25,7 @@ mod mp;
 mod percpu;
 mod task;
 mod timer;
+mod trap;
 
 macro_rules! kprintln {
     ($($arg:tt)*) => {

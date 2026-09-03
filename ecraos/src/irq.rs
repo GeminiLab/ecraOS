@@ -6,26 +6,28 @@
 pub mod global;
 
 use exarch::trap::{
-    Exception, Handler, HandlerSlots, SemanticTrap, TrapDisposition, TrapFrame, TrapFrameAccess,
+    Exception, ExceptionHandler, GlobalIrqHandler, HandlerSlots, Trap, TrapDisposition, TrapFrame,
+    TrapFrameAccess, TrapHandler,
 };
 
 /// The kernel-owned semantic handler slots.
 ///
-/// The slots become immutable once their corresponding handlers are registered during boot.
+/// The slots are initialized during boot and may be replaced or cleared during controlled
+/// lifecycle transitions.
 static HANDLERS: HandlerSlots = HandlerSlots::new();
 
-/// Registers one semantic kernel handler exactly once.
+/// Registers or replaces one semantic kernel handler.
 ///
-/// Registration must complete before the corresponding local interrupt source is enabled. The
-/// handler table intentionally has no unregister operation yet.
-pub fn register(handler: Handler) -> Result<(), exarch::trap::RegisterError> {
+/// Registration must complete before the corresponding local interrupt source is enabled. Handler
+/// slots may be replaced or cleared during controlled lifecycle transitions.
+pub fn register<H: TrapHandler>(handler: H) {
     HANDLERS.register(handler)
 }
 
 /// Dispatches a decoded semantic trap through the kernel-owned handler slots.
 ///
 /// Unknown interrupt values are completed by architecture code and never enter this function.
-pub fn handle(frame: &mut TrapFrame, trap: SemanticTrap) -> TrapDisposition {
+pub fn handle(frame: &mut TrapFrame, trap: Trap) -> TrapDisposition {
     HANDLERS.dispatch(frame, trap)
 }
 
@@ -35,8 +37,8 @@ pub fn handle(frame: &mut TrapFrame, trap: SemanticTrap) -> TrapDisposition {
 struct TrapHandlerImpl;
 
 #[crate_interface::impl_interface]
-impl exarch::trap::TrapHandler for TrapHandlerImpl {
-    fn handle(frame: &mut TrapFrame, trap: SemanticTrap) -> TrapDisposition {
+impl exarch::trap::KernelTrapIf for TrapHandlerImpl {
+    fn handle(frame: &mut TrapFrame, trap: Trap) -> TrapDisposition {
         crate::irq::handle(frame, trap)
     }
 }
@@ -74,6 +76,6 @@ fn handle_global_irq(frame: &mut TrapFrame, irq: exarch::trap::GlobalIrq) -> Tra
 pub fn init() {
     global::init();
 
-    _ = register(Handler::Exception(handle_exception));
-    _ = register(Handler::GlobalIrq(handle_global_irq));
+    _ = register::<ExceptionHandler>(handle_exception);
+    _ = register::<GlobalIrqHandler>(handle_global_irq);
 }

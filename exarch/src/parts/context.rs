@@ -2,10 +2,11 @@
 
 use memory_addr::VirtAddr;
 
-pub use crate::arch::current::context::TaskContext;
-
 look_at::look_at! {
     @crate::arch::current::context:
+
+    /// A target-specific task context.
+    pub type TaskContext;
 
     /// Initializes a task context to enter a non-returning function.
     ///

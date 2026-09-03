@@ -10,7 +10,7 @@ use x86_64::instructions::interrupts;
 
 use crate::{
     arch::x86_64::imp::ioapic::{IoApicConfig, IoApicSet, Polarity, TriggerMode},
-    irq::{GlobalIrq, IrqError},
+    irq::IrqError,
 };
 
 /// An x86 global system interrupt identifier.
@@ -40,7 +40,7 @@ impl Gsi {
 /// The x86 global interrupt identifier.
 ///
 /// This target alias lets common trap code name a global source without erasing its GSI semantics.
-pub type ArchGlobalIrq = Gsi;
+pub type GlobalIrq = Gsi;
 
 /// Describes an ACPI ISA interrupt source override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

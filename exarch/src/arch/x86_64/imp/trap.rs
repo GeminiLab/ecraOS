@@ -7,7 +7,7 @@ use x86::{controlregs::cr2, irq::*};
 use x86_64::structures::idt::PageFaultErrorCode;
 
 use super::super::context::TrapFrame;
-use crate::trap::{Exception, LocalInterrupt, PageFaultFlags, SemanticTrap, TrapDisposition};
+use crate::trap::{Exception, Interrupt, LocalInterrupt, PageFaultFlags, Trap, TrapDisposition};
 
 core::arch::global_asm!(include_str!("trap.S"));
 
@@ -21,7 +21,7 @@ fn handle_page_fault(tf: &mut TrapFrame) {
     if !matches!(
         crate::trap::handle(
             tf,
-            SemanticTrap::Exception(Exception::PageFault {
+            Trap::Exception(Exception::PageFault {
                 address: vaddr,
                 flags: access_flags,
                 is_user: tf.is_user(),
@@ -46,12 +46,12 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
     match tf.vector as u8 {
         PAGE_FAULT_VECTOR => handle_page_fault(tf),
         BREAKPOINT_VECTOR => {
-            _ = crate::trap::handle(tf, SemanticTrap::Exception(Exception::Breakpoint));
+            _ = crate::trap::handle(tf, Trap::Exception(Exception::Breakpoint));
         }
         GENERAL_PROTECTION_FAULT_VECTOR => {
             _ = crate::trap::handle(
                 tf,
-                SemanticTrap::Exception(Exception::GeneralProtection {
+                Trap::Exception(Exception::GeneralProtection {
                     error_code: tf.error_code as usize,
                 }),
             );
@@ -59,10 +59,13 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
         IRQ_VECTOR_START..=IRQ_VECTOR_END => {
             let vector = tf.vector as u8;
             if vector == super::apic::vectors::APIC_TIMER_VECTOR {
-                _ = crate::trap::handle(tf, SemanticTrap::LocalInterrupt(LocalInterrupt::Timer));
+                _ = crate::trap::handle(
+                    tf,
+                    Trap::Interrupt(Interrupt::Local(LocalInterrupt::Timer)),
+                );
                 super::apic::end_of_interrupt();
             } else if let Some(irq) = crate::arch::x86_64::irq::gsi_for_vector(vector) {
-                let result = crate::trap::handle(tf, SemanticTrap::GlobalIrq(irq));
+                let result = crate::trap::handle(tf, Trap::Interrupt(Interrupt::Global(irq)));
                 if matches!(result, TrapDisposition::Unhandled) {
                     crate::arch::x86_64::irq::mask_source(irq);
                 }
@@ -79,7 +82,7 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
                 INVALID_OPCODE_VECTOR => Exception::InvalidInstruction,
                 _ => Exception::Unknown(crate::trap::RawTrap(tf.vector as usize)),
             };
-            _ = crate::trap::handle(tf, SemanticTrap::Exception(exception));
+            _ = crate::trap::handle(tf, Trap::Exception(exception));
         }
     }
 }
