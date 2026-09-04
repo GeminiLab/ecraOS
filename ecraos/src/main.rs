@@ -17,7 +17,6 @@ extern crate alloc;
 use log::{error, info};
 
 mod device;
-mod irq;
 mod kernel_if;
 mod logging;
 mod mem;
@@ -176,7 +175,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     // Probe devices.
     device::probe_devices(boot_arg.plat_arg);
 
-    irq::init();
+    trap::init();
 
     timer::init_bsp();
 

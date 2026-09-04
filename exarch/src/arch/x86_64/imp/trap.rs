@@ -64,10 +64,10 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
                     Trap::Interrupt(Interrupt::Local(LocalInterrupt::Timer)),
                 );
                 super::apic::end_of_interrupt();
-            } else if let Some(irq) = crate::arch::x86_64::irq::gsi_for_vector(vector) {
+            } else if let Some(irq) = crate::arch::x86_64::trap::gsi_for_vector(vector) {
                 let result = crate::trap::handle(tf, Trap::Interrupt(Interrupt::Global(irq)));
                 if matches!(result, TrapDisposition::Unhandled) {
-                    crate::arch::x86_64::irq::mask_source(irq);
+                    crate::arch::x86_64::trap::mask_source(irq);
                 }
                 super::apic::end_of_interrupt();
             } else if vector == super::apic::vectors::APIC_SPURIOUS_VECTOR {

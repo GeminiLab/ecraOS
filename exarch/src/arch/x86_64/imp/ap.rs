@@ -64,6 +64,7 @@ const AP_START_ARGS_OFFSET_ID_PT_PML4: usize = offset_of!(APStartArgs, id_pt_pml
 const AP_START_ARGS_OFFSET_STACK_TOP: usize = offset_of!(APStartArgs, stack_top);
 const AP_START_ARGS_OFFSET_ENTRY_ADDR: usize = offset_of!(APStartArgs, entry_addr);
 const AP_START_ARGS_OFFSET_GDT_DESC: usize = offset_of!(APStartArgs, gdt_desc);
+#[expect(unused)]
 const AP_START_ARGS_OFFSET_GDT: usize = offset_of!(APStartArgs, gdt);
 const AP_START_ARGS_OFFSET_CR0: usize = offset_of!(APStartArgs, cr0);
 const AP_START_ARGS_OFFSET_CR4: usize = offset_of!(APStartArgs, cr4);

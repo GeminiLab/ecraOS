@@ -3,13 +3,13 @@
 use memory_addr::VirtAddr;
 pub use page_table_entry::MappingFlags as PageFaultFlags;
 
-use super::GlobalIrq;
+pub use super::irq::ArchIrq;
 
 /// A raw architecture trap identifier.
 ///
 /// x86 stores an IDT vector and RISC-V stores the complete `scause` bit pattern. This type is
 /// internal to an architecture decoder and is never a global interrupt source identifier (which
-/// is represented by [`GlobalIrq`]).
+/// is represented by [`ArchIrq`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RawTrap(pub usize);
 
@@ -86,8 +86,8 @@ pub enum Interrupt {
     Local(LocalInterrupt),
     /// A controller-backed global interrupt source.
     ///
-    /// This is dispatched to the kernel's GlobalIrq source table.
-    Global(GlobalIrq),
+    /// This is dispatched to the kernel's ArchIrq source table.
+    Global(ArchIrq),
     /// An otherwise unclassified asynchronous interrupt.
     ///
     /// Architecture code logs, masks when possible, and acknowledges this interrupt without a

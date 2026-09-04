@@ -6,7 +6,8 @@ use core::{
 };
 
 use super::{
-    GlobalIrq, TrapFrame,
+    TrapFrame,
+    irq::ArchIrq,
     semantic::{Exception, Interrupt, LocalInterrupt, Trap},
 };
 
@@ -45,21 +46,6 @@ impl AddAssign for TrapDisposition {
     }
 }
 
-/// Reports whether an unhandled local source requires architecture masking.
-///
-/// Software interrupts have no completion operation, so an unhandled one must be disabled before
-/// returning from the trap handler.
-#[cfg_attr(not(target_arch = "riscv64"), allow(dead_code))]
-pub(crate) const fn should_mask_unhandled_local(
-    interrupt: LocalInterrupt,
-    disposition: TrapDisposition,
-) -> bool {
-    match (interrupt, disposition) {
-        (LocalInterrupt::Software, TrapDisposition::Unhandled) => true,
-        _ => false,
-    }
-}
-
 /// A kernel exception handler.
 ///
 /// The handler may update the saved frame before returning and panics directly for fatal
@@ -74,7 +60,7 @@ pub type LocalInterruptHandler = fn(&mut TrapFrame, LocalInterrupt) -> TrapDispo
 /// A kernel global interrupt handler.
 ///
 /// The handler maps a typed controller source to the kernel-owned device handler table.
-pub type GlobalIrqHandler = fn(&mut TrapFrame, GlobalIrq) -> TrapDisposition;
+pub type GlobalIrqHandler = fn(&mut TrapFrame, ArchIrq) -> TrapDisposition;
 
 /// A classification of kernel trap handlers.
 ///
@@ -92,7 +78,7 @@ pub enum TrapHandlerKind {
     /// Selects the handler for [`Trap::Interrupt`]s with [`Interrupt::Global`] sources.
     ///
     /// This variant maps to the global-IRQ slot.
-    GlobalIrq,
+    ArchIrq,
 }
 
 /// Private sealing support for [`TrapHandler`].
@@ -136,7 +122,7 @@ unsafe impl TrapHandler for LocalInterruptHandler {
 // SAFETY: This implementation returns the global-IRQ kind and its matching function-pointer type.
 unsafe impl TrapHandler for GlobalIrqHandler {
     fn into_raw(self) -> (TrapHandlerKind, *const ()) {
-        (TrapHandlerKind::GlobalIrq, self as *const ())
+        (TrapHandlerKind::ArchIrq, self as *const ())
     }
 }
 
@@ -170,7 +156,7 @@ impl HandlerSlots {
         match kind {
             TrapHandlerKind::Exception => &self.exception,
             TrapHandlerKind::LocalInterrupt => &self.local_interrupt,
-            TrapHandlerKind::GlobalIrq => &self.global_irq,
+            TrapHandlerKind::ArchIrq => &self.global_irq,
         }
     }
 
@@ -249,7 +235,7 @@ mod tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
-        super::{Exception, GlobalIrq, Interrupt, LocalInterrupt, RawTrap, TrapFrame},
+        super::{ArchIrq, Exception, Interrupt, LocalInterrupt, RawTrap, TrapFrame},
         ExceptionHandler, GlobalIrqHandler, HandlerSlots, LocalInterruptHandler, Trap,
         TrapDisposition, TrapHandlerKind,
     };
@@ -309,7 +295,7 @@ mod tests {
     }
 
     /// Records one global-IRQ handler invocation.
-    fn handle_global_irq(_frame: &mut TrapFrame, _irq: GlobalIrq) -> TrapDisposition {
+    fn handle_global_irq(_frame: &mut TrapFrame, _irq: ArchIrq) -> TrapDisposition {
         REGISTRATION_GLOBAL_CALLS.fetch_add(1, Ordering::Relaxed);
         TrapDisposition::Handled
     }
@@ -321,7 +307,7 @@ mod tests {
     }
 
     /// Records one empty-slot-test global-IRQ handler invocation.
-    fn empty_slot_global(_frame: &mut TrapFrame, _irq: GlobalIrq) -> TrapDisposition {
+    fn empty_slot_global(_frame: &mut TrapFrame, _irq: ArchIrq) -> TrapDisposition {
         EMPTY_SLOT_GLOBAL_CALLS.fetch_add(1, Ordering::Relaxed);
         TrapDisposition::Handled
     }
@@ -353,7 +339,7 @@ mod tests {
         assert_eq!(
             slots.dispatch(
                 &mut frame,
-                Trap::Interrupt(Interrupt::Global(GlobalIrq::new(2))),
+                Trap::Interrupt(Interrupt::Global(ArchIrq::new(2))),
             ),
             TrapDisposition::Handled
         );
@@ -393,7 +379,7 @@ mod tests {
         assert_eq!(
             slots.dispatch(
                 &mut frame,
-                Trap::Interrupt(Interrupt::Global(GlobalIrq::new(2))),
+                Trap::Interrupt(Interrupt::Global(ArchIrq::new(2))),
             ),
             TrapDisposition::Handled
         );

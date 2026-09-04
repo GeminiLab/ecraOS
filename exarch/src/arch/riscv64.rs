@@ -7,12 +7,12 @@ pub mod context;
 pub mod debug_console;
 pub mod device;
 pub mod init;
-pub mod irq;
 pub mod mem;
 pub mod power;
 pub mod reloc_hook;
 pub mod time;
 pub mod trap;
+pub mod trap_entry;
 
 static DTB: LazyInit<DevTree<'_>> = LazyInit::new();
 
@@ -27,12 +27,12 @@ pub fn init_early_bsp(arg: PlatformBootArg) {
     }
 
     time::init();
-    trap::init_percpu();
+    trap_entry::init_percpu();
 }
 
 /// Runs early per-hart architecture initialization.
 ///
 /// This installs trap handling while global interrupts remain disabled.
 pub fn init_early_ap() {
-    trap::init_percpu();
+    trap_entry::init_percpu();
 }

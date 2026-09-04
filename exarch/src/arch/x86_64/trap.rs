@@ -1,16 +1,15 @@
-//! x86-64 local interrupt control.
-//!
-//! IRQ registration remains unsupported until the x86 controller path adopts the common API.
+//! x86-64 interrupt controller and local interrupt support.
 
 use alloc::{boxed::Box, vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
+
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use x86_64::instructions::interrupts;
 
 use crate::{
     arch::x86_64::imp::ioapic::{IoApicConfig, IoApicSet, Polarity, TriggerMode},
-    irq::IrqError,
+    trap::irq::IrqError,
 };
 
 /// An x86 global system interrupt identifier.
@@ -40,7 +39,7 @@ impl Gsi {
 /// The x86 global interrupt identifier.
 ///
 /// This target alias lets common trap code name a global source without erasing its GSI semantics.
-pub type GlobalIrq = Gsi;
+pub type ArchIrq = Gsi;
 
 /// Describes an ACPI ISA interrupt source override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +92,7 @@ impl ExternalController {
         }
     }
 
-    fn prepare_route(&mut self, irq: GlobalIrq) -> Result<(), IrqError> {
+    fn prepare_route(&mut self, irq: ArchIrq) -> Result<(), IrqError> {
         let gsi = irq.raw();
         if self
             .routes
@@ -138,7 +137,7 @@ impl ExternalController {
 }
 
 /// Initializes the x86 external controller from ACPI data.
-pub fn init_external(config: X86ExternalIrqConfig) {
+pub fn init_external_controller(config: X86ExternalIrqConfig) {
     // SAFETY: VMM initialization has established device mappings before ACPI discovery reaches
     // this function.
     let controller = unsafe { ExternalController::new(config) };
@@ -148,22 +147,22 @@ pub fn init_external(config: X86ExternalIrqConfig) {
         valid[gsi] = controller.ioapics.contains_gsi(gsi as u32);
     }
     EXTERNAL_CONTROLLER.init_once(SpinNoIrq::new(controller));
-    crate::irq::init_external_registry(&valid);
+    crate::trap::irq::init_external_registry(&valid);
 }
 
 /// Returns the GSI routed to an x86 external vector on the BSP.
-pub fn gsi_for_vector(vector: u8) -> Option<GlobalIrq> {
+pub fn gsi_for_vector(vector: u8) -> Option<ArchIrq> {
     VECTOR_TO_GSI[vector as usize]
         .load(Ordering::Acquire)
         .checked_sub(1)
         .and_then(|gsi| u32::try_from(gsi).ok())
-        .map(GlobalIrq::new)
+        .map(ArchIrq::new)
 }
 
 /// Masks a routed x86 global source before local APIC completion.
 ///
 /// The trap adapter calls this for a source whose kernel handler returned `Unhandled`.
-pub fn mask_source(irq: GlobalIrq) {
+pub fn mask_source(irq: ArchIrq) {
     if let Some(controller) = EXTERNAL_CONTROLLER.get() {
         controller.lock().ioapics.mask(irq.raw());
     }
@@ -184,11 +183,8 @@ pub fn local_enabled() -> bool {
     interrupts::are_enabled()
 }
 
-/// Returns the architecture-local timer interrupt vector.
-pub const TIMER_IRQ_NUM: usize = super::imp::apic::TIMER_VECTOR;
-
 /// Prepares an external source while keeping it masked.
-pub fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
+pub fn prepare_irq(irq: ArchIrq) -> Result<(), IrqError> {
     let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
     let mut controller = controller.lock();
     controller.prepare_route(irq)?;
@@ -196,9 +192,12 @@ pub fn prepare(irq: GlobalIrq) -> Result<(), IrqError> {
 }
 
 /// Enables or disables a prepared external source.
-pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
+pub fn set_irq_enabled(irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
     let controller = EXTERNAL_CONTROLLER.get().ok_or(IrqError::Unsupported)?;
     let controller = controller.lock();
+    if !controller.ioapics.contains_gsi(irq.raw()) {
+        return Err(IrqError::InvalidNumber);
+    }
     if enabled {
         controller.ioapics.unmask(irq.raw());
     } else {

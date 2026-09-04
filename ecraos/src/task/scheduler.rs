@@ -227,12 +227,12 @@ pub(super) fn current_task_id() -> Option<TaskId> {
     }
 
     let _guard = kernel_guard::NoPreempt::new();
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     // SAFETY: Local interrupts are disabled while cloning the per-CPU Arc token.
     let id = unsafe { current_task().id() };
     if irq_enabled {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
     Some(id)
 }
@@ -357,8 +357,8 @@ fn claim_target(target: Arc<Task>, cpu_id: usize) -> Result<Arc<Task>, TargetErr
 pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
     assert_scheduler_initialized();
 
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
     let current = unsafe { current_task() };
@@ -366,7 +366,7 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
         Ok(next) => next,
         Err(error) => {
             if irq_enabled {
-                exarch::irq::enable_local();
+                exarch::trap::enable_local();
             }
             return Err(error);
         }
@@ -387,7 +387,7 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
     Ok(())
 }
@@ -396,8 +396,8 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
 pub(super) fn exit_and_yield_to(target: Arc<Task>) -> ! {
     assert_scheduler_initialized();
 
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
     let current = unsafe { current_task() };
@@ -631,8 +631,8 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) {
         return;
     }
 
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
     // SAFETY: Local interrupts remain disabled while cloning the current ownership token.
@@ -661,7 +661,7 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) {
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
 }
 
@@ -672,8 +672,8 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) {
 pub(super) fn block_current_on(completion: &Completion) {
     assert_scheduler_initialized();
 
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
     // SAFETY: Local interrupts remain disabled while cloning the current ownership token.
@@ -683,7 +683,7 @@ pub(super) fn block_current_on(completion: &Completion) {
         drop(waiters);
         drop(current);
         if irq_enabled {
-            exarch::irq::enable_local();
+            exarch::trap::enable_local();
         }
         return;
     }
@@ -701,7 +701,7 @@ pub(super) fn block_current_on(completion: &Completion) {
             .expect("woken task could not return to Runnable");
         drop(current);
         if irq_enabled {
-            exarch::irq::enable_local();
+            exarch::trap::enable_local();
         }
         return;
     }
@@ -718,7 +718,7 @@ pub(super) fn block_current_on(completion: &Completion) {
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
 }
 
@@ -729,8 +729,8 @@ pub(super) fn block_current_on(completion: &Completion) {
 pub(super) fn yield_now() {
     assert_scheduler_initialized();
 
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     publish_pending_sleep_wakes();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
@@ -738,7 +738,7 @@ pub(super) fn yield_now() {
     let current = unsafe { current_task() };
     let mut queue = run_queue(cpu_id).lock();
     if queue.is_empty() {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
         return;
     }
 
@@ -758,7 +758,7 @@ pub(super) fn yield_now() {
     if next.id() == current.id() {
         drop(queue);
         if irq_enabled {
-            exarch::irq::enable_local();
+            exarch::trap::enable_local();
         }
         return;
     }
@@ -770,7 +770,7 @@ pub(super) fn yield_now() {
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
 }
 
@@ -780,7 +780,7 @@ pub(super) fn yield_now() {
 pub(super) fn finish_initial_switch() {
     finish_switch();
     if FIRST_ENTRY_IRQ_ENABLED.read_current() {
-        exarch::irq::enable_local();
+        exarch::trap::enable_local();
     }
 }
 
@@ -788,8 +788,8 @@ pub(super) fn finish_initial_switch() {
 ///
 /// Completion publication and the Exited transition have already occurred in the task trampoline.
 pub(super) fn exit_current(task: Arc<Task>) -> ! {
-    let irq_enabled = exarch::irq::local_enabled();
-    exarch::irq::disable_local();
+    let irq_enabled = exarch::trap::local_enabled();
+    exarch::trap::disable_local();
     finish_switch();
     let cpu_id = crate::mp::current_cpu_id();
     let previous_context = task.context_ptr();

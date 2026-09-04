@@ -6,6 +6,7 @@ use memory_addr::VirtAddr;
 pub use page_table_entry::MappingFlags as PageFaultFlags;
 
 mod handlers;
+pub mod irq;
 mod semantic;
 
 pub use self::{handlers::*, semantic::*};
@@ -41,14 +42,25 @@ pub trait TrapFrameAccess {
 }
 
 look_at! {
-    @crate::arch::current::irq:
+    @crate::arch::current::trap:
 
-    /// A target-specific global interrupt source identifier.
+    /// Enables all interrupts on the current CPU.
     ///
-    /// x86 aliases this type to a GSI and RISC-V aliases it to a PLIC source identifier. The
-    /// distinct target-specific newtypes prevent local vectors and controller source identifiers
-    /// from mixing.
-    pub type GlobalIrq;
+    /// Some architectures may have separate flags for subcategories of interrupts, these flags are
+    /// and should be left unchanged, which means the kernel may need to enable them separately.
+    pub fn enable_local();
+
+    /// Disables all interrupts on the current CPU.
+    ///
+    /// Some architectures may have separate flags for subcategories of interrupts, these flags are
+    /// and should be left unchanged.
+    pub fn disable_local();
+
+    /// Returns whether interrupts are globally enabled on the current CPU.
+    ///
+    /// Some architectures may have separate flags for subcategories of interrupts, these flags are
+    /// not and should not be checked here.
+    pub fn local_enabled() -> bool;
 }
 
 #[def_interface(gen_caller)]
@@ -72,16 +84,13 @@ pub trait KernelTrapIf {
 /// These tests describe the typed boundary before its architecture decoders are implemented.
 #[cfg(test)]
 mod tests {
-    use super::{
-        Exception, GlobalIrq, Interrupt, LocalInterrupt, RawTrap, Trap, TrapDisposition,
-        should_mask_unhandled_local,
-    };
+    use super::{ArchIrq, Exception, Interrupt, LocalInterrupt, RawTrap, Trap, TrapDisposition};
 
     /// Verifies that semantic trap variants preserve their distinct domains.
     #[test]
     fn semantic_trap_preserves_distinct_domains() {
         let raw = RawTrap(0xfeed);
-        let global = GlobalIrq::new(7);
+        let global = ArchIrq::new(7);
 
         assert!(matches!(
             Trap::Exception(Exception::Unknown(raw)),
@@ -116,22 +125,5 @@ mod tests {
             TrapDisposition::Handled + TrapDisposition::Handled,
             TrapDisposition::Handled
         );
-    }
-
-    /// Verifies that unhandled software interrupts require masking.
-    #[test]
-    fn unhandled_software_interrupt_requires_masking() {
-        assert!(should_mask_unhandled_local(
-            LocalInterrupt::Software,
-            TrapDisposition::Unhandled
-        ));
-        assert!(!should_mask_unhandled_local(
-            LocalInterrupt::Timer,
-            TrapDisposition::Unhandled
-        ));
-        assert!(!should_mask_unhandled_local(
-            LocalInterrupt::Software,
-            TrapDisposition::Handled
-        ));
     }
 }

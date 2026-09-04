@@ -386,7 +386,7 @@ fn init_acpi_platform(tables: &acpi::AcpiTables<AcpiHandler>) {
     use alloc::vec;
 
     use acpi::platform::interrupt::{InterruptModel, Polarity, TriggerMode};
-    use exarch::irq::{
+    use exarch::trap::irq::{
         IoApicConfig, Polarity as ExarchPolarity, TriggerMode as ExarchTriggerMode,
         X86ExternalIrqConfig, X86IrqOverride,
     };
@@ -452,7 +452,7 @@ fn init_acpi_platform(tables: &acpi::AcpiTables<AcpiHandler>) {
         })
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    exarch::irq::init_external_controller(X86ExternalIrqConfig {
+    exarch::trap::irq::init_external_controller(X86ExternalIrqConfig {
         io_apics,
         overrides,
         bsp_apic_id: processors.boot_processor.local_apic_id,
@@ -754,7 +754,7 @@ fn probe_device_tree(addr: PhysAddr) {
             continue;
         }
         if let Some(&hart_id) = interrupt_controllers.get(&phandle) {
-            contexts.push(exarch::irq::RiscvPlicContext {
+            contexts.push(exarch::trap::irq::RiscvPlicContext {
                 hart_id,
                 context: entry,
             });
@@ -762,7 +762,7 @@ fn probe_device_tree(addr: PhysAddr) {
     }
     assert!(!contexts.is_empty(), "PLIC has no supervisor contexts");
 
-    exarch::irq::init_external_controller(exarch::irq::RiscvExternalIrqConfig {
+    exarch::trap::irq::init_external_controller(exarch::trap::irq::RiscvExternalIrqConfig {
         physical_base: PhysAddr::from_usize(
             usize::try_from(plic_reg.u64(0).expect("invalid PLIC reg base"))
                 .expect("PLIC base exceeds address width"),

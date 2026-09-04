@@ -4,8 +4,8 @@
 //! module owns device handler registration, enabled state, and unhandled accounting.
 
 use exarch::{
-    irq::{self, GlobalIrq, IrqError, IrqHandler, Registry},
-    trap::{TrapDisposition, TrapFrame},
+    trap::irq::{self, ArchIrq, IrqError, IrqHandler, Registry},
+    trap::{self, TrapDisposition, TrapFrame},
 };
 use lazyinit::LazyInit;
 
@@ -26,8 +26,8 @@ pub fn init() {
 ///
 /// Route preparation is delegated to the architecture, while the callable handler is stored only
 /// in this kernel-owned table.
-pub fn register(irq: GlobalIrq, handler: IrqHandler) -> Result<(), IrqError> {
-    irq::prepare_global(irq)?;
+pub fn register(irq: ArchIrq, handler: IrqHandler) -> Result<(), IrqError> {
+    trap::irq::prepare_irq(irq)?;
     REGISTRY
         .get()
         .ok_or(IrqError::Unsupported)?
@@ -37,8 +37,8 @@ pub fn register(irq: GlobalIrq, handler: IrqHandler) -> Result<(), IrqError> {
 /// Unregisters a kernel device handler after disabling its hardware source.
 ///
 /// The source remains masked until a later explicit registration and enable operation.
-pub fn unregister(irq: GlobalIrq) -> Result<IrqHandler, IrqError> {
-    irq::set_global_enabled(irq, false)?;
+pub fn unregister(irq: ArchIrq) -> Result<IrqHandler, IrqError> {
+    trap::irq::set_irq_enabled(irq, false)?;
     REGISTRY.get().ok_or(IrqError::Unsupported)?.unregister(irq)
 }
 
@@ -46,16 +46,16 @@ pub fn unregister(irq: GlobalIrq) -> Result<IrqHandler, IrqError> {
 ///
 /// Disabling masks hardware before clearing logical delivery, while enabling publishes logical
 /// state before unmasking the controller source.
-pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
+pub fn set_enabled(irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
     if !enabled {
-        irq::set_global_enabled(irq, false)?;
+        trap::irq::set_irq_enabled(irq, false)?;
     }
     REGISTRY
         .get()
         .ok_or(IrqError::Unsupported)?
         .set_enabled(irq, enabled)?;
     if enabled {
-        irq::set_global_enabled(irq, true)?;
+        trap::irq::set_irq_enabled(irq, true)?;
     }
     Ok(())
 }
@@ -64,7 +64,7 @@ pub fn set_enabled(irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
 ///
 /// The architecture adapter masks an unhandled result before it acknowledges or completes the
 /// hardware delivery.
-pub fn dispatch(frame: &mut TrapFrame, irq: GlobalIrq) -> TrapDisposition {
+pub fn dispatch(frame: &mut TrapFrame, irq: ArchIrq) -> TrapDisposition {
     let _ = frame;
     match REGISTRY.get() {
         Some(registry) => registry

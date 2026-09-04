@@ -18,9 +18,6 @@ pub(super) mod vectors {
     pub const APIC_ERROR_VECTOR: u8 = 0xf2;
 }
 
-/// The local APIC timer vector.
-pub const TIMER_VECTOR: usize = APIC_TIMER_VECTOR as usize;
-
 // const IO_APIC_BASE: PhysAddr = pa!(0xFEC0_0000);
 
 #[def_percpu]

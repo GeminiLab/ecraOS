@@ -66,7 +66,7 @@ pub fn enable_preempt() {
 /// Returns whether a scheduler context switch is currently permitted.
 pub fn can_schedule_now() -> bool {
     // SAFETY: This is a diagnostic safe-point check and callers already serialize task state.
-    (unsafe { *PREEMPT_DEPTH.current_ref_raw() == 0 }) && exarch::irq::local_enabled()
+    (unsafe { *PREEMPT_DEPTH.current_ref_raw() == 0 }) && exarch::trap::local_enabled()
 }
 
 /// Requests a local reschedule at the next safe point.

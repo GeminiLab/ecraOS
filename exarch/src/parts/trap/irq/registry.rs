@@ -5,7 +5,7 @@ use core::{
 };
 use kspin::SpinNoIrq;
 
-use super::{GlobalIrq, IrqError, IrqHandler};
+use super::{ArchIrq, IrqError, IrqHandler};
 
 const ENABLED: usize = 1;
 const ACTIVE_STEP: usize = 2;
@@ -61,7 +61,7 @@ impl Registry {
     }
 
     /// Registers a handler while leaving its source disabled.
-    pub fn register(&self, irq: GlobalIrq, handler: IrqHandler) -> Result<(), IrqError> {
+    pub fn register(&self, irq: ArchIrq, handler: IrqHandler) -> Result<(), IrqError> {
         let _guard = self.control_lock.lock();
         let slot = self.slot(irq)?;
         slot.handler
@@ -71,7 +71,7 @@ impl Registry {
     }
 
     /// Unregisters a handler after masking and draining in-flight calls.
-    pub fn unregister(&self, irq: GlobalIrq) -> Result<IrqHandler, IrqError> {
+    pub fn unregister(&self, irq: ArchIrq) -> Result<IrqHandler, IrqError> {
         let _guard = self.control_lock.lock();
         let slot = self.slot(irq)?;
         slot.state.fetch_and(!ENABLED, Ordering::AcqRel);
@@ -88,7 +88,7 @@ impl Registry {
     }
 
     /// Changes logical delivery state without touching architecture hardware.
-    pub fn set_enabled(&self, irq: GlobalIrq, enabled: bool) -> Result<(), IrqError> {
+    pub fn set_enabled(&self, irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
         let _guard = self.control_lock.lock();
         let slot = self.slot(irq)?;
         if slot.handler.load(Ordering::Acquire) == 0 {
@@ -106,7 +106,7 @@ impl Registry {
     }
 
     /// Dispatches a source and reports whether a handler ran.
-    pub fn dispatch(&self, irq: GlobalIrq) -> Option<UnhandledReason> {
+    pub fn dispatch(&self, irq: ArchIrq) -> Option<UnhandledReason> {
         let Ok(slot) = self.slot(irq) else {
             return Some(UnhandledReason::Unregistered);
         };
@@ -149,13 +149,13 @@ impl Registry {
     }
 
     /// Returns the number of unregistered deliveries for a source.
-    pub fn unhandled_count(&self, irq: GlobalIrq) -> usize {
+    pub fn unhandled_count(&self, irq: ArchIrq) -> usize {
         self.slot(irq)
             .map(|slot| slot.unhandled.load(Ordering::Relaxed))
             .unwrap_or(0)
     }
 
-    fn slot(&self, irq: GlobalIrq) -> Result<&Slot, IrqError> {
+    fn slot(&self, irq: ArchIrq) -> Result<&Slot, IrqError> {
         self.slots
             .get(irq.raw() as usize)
             .filter(|slot| slot.valid)
@@ -169,7 +169,7 @@ mod tests {
 
     use super::{
         super::{IrqError, IrqHandler},
-        GlobalIrq, Registry, UnhandledReason,
+        ArchIrq, Registry, UnhandledReason,
     };
 
     static HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -183,14 +183,14 @@ mod tests {
         HANDLER_CALLS.store(0, Ordering::Relaxed);
         let registry = Registry::new(&[true]);
 
-        assert_eq!(registry.register(GlobalIrq::new(0), handler), Ok(()));
+        assert_eq!(registry.register(ArchIrq::new(0), handler), Ok(()));
         assert_eq!(
-            registry.dispatch(GlobalIrq::new(0)),
+            registry.dispatch(ArchIrq::new(0)),
             Some(UnhandledReason::Disabled)
         );
         assert_eq!(HANDLER_CALLS.load(Ordering::Relaxed), 0);
-        assert_eq!(registry.set_enabled(GlobalIrq::new(0), true), Ok(()));
-        assert_eq!(registry.dispatch(GlobalIrq::new(0)), None);
+        assert_eq!(registry.set_enabled(ArchIrq::new(0), true), Ok(()));
+        assert_eq!(registry.dispatch(ArchIrq::new(0)), None);
         assert_eq!(HANDLER_CALLS.load(Ordering::Relaxed), 1);
     }
 
@@ -198,17 +198,17 @@ mod tests {
     fn duplicate_and_invalid_registration_return_typed_errors() {
         let registry = Registry::new(&[true, false]);
 
-        assert_eq!(registry.register(GlobalIrq::new(0), handler), Ok(()));
+        assert_eq!(registry.register(ArchIrq::new(0), handler), Ok(()));
         assert_eq!(
-            registry.register(GlobalIrq::new(0), handler),
+            registry.register(ArchIrq::new(0), handler),
             Err(IrqError::AlreadyRegistered)
         );
         assert_eq!(
-            registry.register(GlobalIrq::new(1), handler),
+            registry.register(ArchIrq::new(1), handler),
             Err(IrqError::InvalidNumber)
         );
         assert_eq!(
-            registry.register(GlobalIrq::new(2), handler),
+            registry.register(ArchIrq::new(2), handler),
             Err(IrqError::InvalidNumber)
         );
     }
@@ -217,20 +217,20 @@ mod tests {
     fn unregister_returns_handler_and_counts_later_unhandled_delivery() {
         let registry = Registry::new(&[true]);
 
-        registry.register(GlobalIrq::new(0), handler).unwrap();
-        registry.set_enabled(GlobalIrq::new(0), true).unwrap();
+        registry.register(ArchIrq::new(0), handler).unwrap();
+        registry.set_enabled(ArchIrq::new(0), true).unwrap();
         assert!(matches!(
-            registry.unregister(GlobalIrq::new(0)),
+            registry.unregister(ArchIrq::new(0)),
             Ok(previous) if core::ptr::fn_addr_eq(previous, handler as IrqHandler)
         ));
         assert_eq!(
-            registry.unregister(GlobalIrq::new(0)),
+            registry.unregister(ArchIrq::new(0)),
             Err(IrqError::NotRegistered)
         );
         assert_eq!(
-            registry.dispatch(GlobalIrq::new(0)),
+            registry.dispatch(ArchIrq::new(0)),
             Some(UnhandledReason::Unregistered)
         );
-        assert_eq!(registry.unhandled_count(GlobalIrq::new(0)), 1);
+        assert_eq!(registry.unhandled_count(ArchIrq::new(0)), 1);
     }
 }

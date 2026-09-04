@@ -4,7 +4,6 @@
 
 use core::time::Duration;
 
-use exarch::trap::{LocalInterrupt, LocalInterruptHandler, TrapDisposition, TrapFrame};
 use expercpu::def_percpu;
 
 mod deadline;
@@ -31,21 +30,8 @@ static NEXT_DEADLINE_NANOS: u64 = 0;
 ///
 /// This registers the shared handler before arming and enabling local interrupts.
 pub fn init_bsp() {
-    crate::irq::register::<LocalInterruptHandler>(handle_local_interrupt);
     program_next_timer();
-    exarch::irq::enable_local();
-}
-
-/// Converts the semantic local timer trap into the periodic timer callback.
-fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> TrapDisposition {
-    match interrupt {
-        LocalInterrupt::Timer => {
-            crate::task::timer_tick();
-            handle_timer_irq();
-            TrapDisposition::Handled
-        }
-        LocalInterrupt::Software => TrapDisposition::Unhandled,
-    }
+    exarch::trap::enable_local();
 }
 
 /// Initializes the periodic timer on an application hart.
@@ -53,13 +39,13 @@ fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> 
 /// The bootstrap hart has already installed the shared timer handler.
 pub fn init_ap() {
     program_next_timer();
-    exarch::irq::enable_local();
+    exarch::trap::enable_local();
 }
 
 /// Handles a supervisor timer interrupt on the current hart.
 ///
 /// The handler advances the periodic deadline and programs the next SBI event.
-fn handle_timer_irq() {
+pub(crate) fn timer_tick() {
     crate::task::wake_sleepers(exarch::time::monotonic_time());
     program_next_timer();
 }
