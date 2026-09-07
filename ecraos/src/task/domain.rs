@@ -143,6 +143,8 @@ pub struct SchedulingDomain {
     id: DomainId,
     policy: DomainPolicy,
     lifecycle: SpinNoIrq<DomainLifecycle>,
+    /// Serializes CPU membership and suspended runnable ownership transitions.
+    ownership: SpinNoIrq<()>,
     cpus: SpinNoIrq<CpuSet>,
     suspended: SpinNoIrq<VecDeque<Arc<Task>>>,
     task_count: AtomicUsize,
@@ -165,7 +167,8 @@ impl SchedulingDomain {
 
     /// Returns the current lifecycle state.
     pub fn lifecycle(&self) -> DomainLifecycle {
-        // Lock order is NoPreemptIrqSave, then domain metadata locks in ascending DomainId.
+        // Lock order is NoPreemptIrqSave -> ownership -> domain metadata locks in ascending
+        // DomainId.
         // A future lock-free lifecycle structure may replace this lock after its
         // memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
@@ -197,6 +200,7 @@ impl SchedulingDomain {
         // A future lock-free lifecycle/accounting structure may replace these locks after its
         // memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
+        let _ownership = self.ownership.lock();
         let lifecycle = self.lifecycle.lock();
         match *lifecycle {
             DomainLifecycle::Active => {}
@@ -224,30 +228,54 @@ impl SchedulingDomain {
 
     /// Adds one CPU to this domain.
     pub fn add_cpu(&self, cpu: usize) -> Result<(), DomainError> {
-        // Lock order is NoPreemptIrqSave, then this domain metadata lock, then any CPU Queue lock.
-        // A future lock-free CPU-membership structure may replace this lock after its
-        // memory-ordering proof.
+        // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
+        // A future lock-free ownership and CPU-membership structure may replace these locks after
+        // its memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
+        let _ownership = self.ownership.lock();
         let lifecycle = self.lifecycle.lock();
         if *lifecycle != DomainLifecycle::Active {
             return Err(DomainError::DomainDestroying);
         }
         let result = self.cpus.lock().insert(cpu);
         drop(lifecycle);
+        drop(_ownership);
         if result.is_ok() && super::scheduler::initialized() {
             super::scheduler::drain_suspended(self, cpu);
         }
         result
     }
 
-    /// Removes one CPU from this domain when it has no queued ownership.
-    pub fn remove_cpu(&self, cpu: usize) -> Result<(), DomainError> {
-        // Lock order is NoPreemptIrqSave, then this domain metadata lock, then any CPU Queue lock.
-        // A future lock-free CPU-membership structure may replace this lock after its
-        // memory-ordering proof.
+    /// Adds one CPU without draining suspended tasks.
+    ///
+    /// Domain-switch transactions use this two-phase form so membership can be rolled back
+    /// before suspended ownership is published. The caller must invoke `drain_suspended` only
+    /// after every related queue and membership update has committed.
+    pub(super) fn add_cpu_deferred(&self, cpu: usize) -> Result<(), DomainError> {
+        // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
+        // A future lock-free ownership and CPU-membership structure may replace these locks after
+        // its memory-ordering proof.
+        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _ownership = self.ownership.lock();
         let lifecycle = self.lifecycle.lock();
         if *lifecycle != DomainLifecycle::Active {
             return Err(DomainError::DomainDestroying);
+        }
+        self.cpus.lock().insert(cpu)
+    }
+
+    /// Removes one CPU from this domain when it has no queued ownership.
+    pub fn remove_cpu(&self, cpu: usize) -> Result<(), DomainError> {
+        // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
+        // A future lock-free ownership and CPU-membership structure may replace these locks after
+        // its memory-ordering proof.
+        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _ownership = self.ownership.lock();
+        let lifecycle = self.lifecycle.lock();
+        match *lifecycle {
+            DomainLifecycle::Active | DomainLifecycle::Draining => {}
+            DomainLifecycle::Destroying => return Err(DomainError::DomainDestroying),
+            DomainLifecycle::Destroyed => return Err(DomainError::DomainDestroyed),
         }
         self.cpus.lock().remove(cpu)
     }
@@ -264,24 +292,34 @@ impl SchedulingDomain {
 
     /// Begins explicit domain destruction after all ownership has drained.
     pub fn destroy(&self) -> Result<(), DomainError> {
-        // Lifecycle, task accounting, suspended ownership, and CPU membership are checked under
-        // the domain lock order. No queue or task lock is acquired here. A future lock-free
-        // destruction protocol may replace these locks after its memory-ordering proof.
+        // Ownership serialization precedes lifecycle, suspended ownership, and CPU membership.
+        // This avoids ever nesting suspended -> cpus or cpus -> suspended locks. The order is
+        // NoPreemptIrqSave -> ownership -> domain metadata -> ownership snapshots. A future
+        // lock-free destruction protocol may replace these locks after its memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
-        let mut lifecycle = self.lifecycle.lock();
-        match *lifecycle {
-            DomainLifecycle::Active => *lifecycle = DomainLifecycle::Draining,
-            DomainLifecycle::Draining => {}
-            DomainLifecycle::Destroying | DomainLifecycle::Destroyed => {
-                return Err(DomainError::DomainDestroyed);
+        let _ownership = self.ownership.lock();
+        {
+            let mut lifecycle = self.lifecycle.lock();
+            match *lifecycle {
+                DomainLifecycle::Active => *lifecycle = DomainLifecycle::Draining,
+                DomainLifecycle::Draining => {}
+                DomainLifecycle::Destroying | DomainLifecycle::Destroyed => {
+                    return Err(DomainError::DomainDestroyed);
+                }
             }
         }
-        if self.task_count() != 0
-            || self.in_flight.load(Ordering::Acquire) != 0
-            || !self.suspended.lock().is_empty()
-            || !self.cpu_snapshot().snapshot().is_empty()
-        {
+
+        let has_tasks = self.task_count() != 0;
+        let has_in_flight = self.in_flight.load(Ordering::Acquire) != 0;
+        let has_suspended = !self.suspended.lock().is_empty();
+        let has_cpus = !self.cpus.lock().snapshot().is_empty();
+        if has_tasks || has_in_flight || has_suspended || has_cpus {
             return Err(DomainError::Busy);
+        }
+
+        let mut lifecycle = self.lifecycle.lock();
+        if *lifecycle != DomainLifecycle::Draining {
+            return Err(DomainError::DomainDestroying);
         }
         *lifecycle = DomainLifecycle::Destroying;
         *lifecycle = DomainLifecycle::Destroyed;
@@ -298,19 +336,41 @@ impl SchedulingDomain {
         assert_ne!(previous, 0, "domain task accounting underflow");
     }
     pub(super) fn suspend(&self, task: Arc<Task>) {
+        // Lock order is NoPreemptIrqSave -> ownership -> suspended runnable ownership. A future
+        // lock-free suspended structure may replace this lock after its memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
+        let _ownership = self.ownership.lock();
         self.suspended.lock().push_back(task);
+    }
+
+    /// Appends runnable ownership that cannot remain on a draining physical queue.
+    ///
+    /// This operation is used only after all destination queues reserved their capacity. It keeps
+    /// FIFO order intact when a source domain has no remaining active CPU.
+    pub(super) fn suspend_fifo(&self, mut tasks: VecDeque<Arc<Task>>) {
+        // Lock order is NoPreemptIrqSave -> ownership -> suspended runnable ownership. Queue locks
+        // have already been released before this handoff. A future lock-free suspended structure
+        // may replace this lock after its memory-ordering proof.
+        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _ownership = self.ownership.lock();
+        self.suspended.lock().append(&mut tasks);
     }
 
     /// Removes suspended runnable tasks for publication after CPU membership returns.
     pub(super) fn take_suspended(&self) -> VecDeque<Arc<Task>> {
+        // Lock order is NoPreemptIrqSave -> ownership -> suspended runnable ownership. A future
+        // lock-free suspended structure may replace this lock after its memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
+        let _ownership = self.ownership.lock();
         core::mem::take(&mut *self.suspended.lock())
     }
 
     /// Returns the number of suspended runnable tasks.
     pub fn suspended_len(&self) -> usize {
+        // Lock order is NoPreemptIrqSave -> ownership -> suspended runnable ownership. A future
+        // lock-free suspended structure may replace this lock after its memory-ordering proof.
         let _guard = kernel_guard::NoPreempt::new();
+        let _ownership = self.ownership.lock();
         self.suspended.lock().len()
     }
 }
@@ -329,6 +389,7 @@ pub fn create_domain(policy: DomainPolicy) -> Result<DomainRef, DomainError> {
         id,
         policy,
         lifecycle: SpinNoIrq::new(DomainLifecycle::Active),
+        ownership: SpinNoIrq::new(()),
         cpus: SpinNoIrq::new(CpuSet::empty()),
         suspended: SpinNoIrq::new(VecDeque::new()),
         task_count: AtomicUsize::new(0),

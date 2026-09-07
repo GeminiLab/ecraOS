@@ -97,6 +97,7 @@ fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> 
         LocalInterrupt::Timer => {
             crate::task::timer_tick();
             crate::timer::timer_tick();
+            crate::task::timer_interrupt_exit();
             TrapDisposition::Handled
         }
         LocalInterrupt::Software => TrapDisposition::Unhandled,

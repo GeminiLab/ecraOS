@@ -77,6 +77,47 @@ impl<T> PhysicalQueue<T> {
         Ok(())
     }
 
+    /// Appends a FIFO batch to the active queue of its domain.
+    ///
+    /// The caller drains a source queue before invoking this operation, so extending the backing
+    /// deque preserves the source ordering at the destination tail.
+    pub fn append_fifo(
+        &mut self,
+        domain: DomainId,
+        entries: VecDeque<T>,
+    ) -> Result<(), QueueStateError> {
+        if self.state != QueueState::Active(domain) {
+            return Err(QueueStateError::WrongDomain);
+        }
+        self.entries.extend(entries);
+        Ok(())
+    }
+
+    /// Returns whether the queue contains no runnable task.
+    ///
+    /// The result is meaningful only while the caller retains the queue lock and has revalidated
+    /// its attachment state.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Returns the number of queued runnable tasks.
+    ///
+    /// The result is an advisory snapshot used only while the caller retains the queue lock.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Reserves queue capacity before a draining transaction begins.
+    ///
+    /// A domain-switch transaction invokes this on every destination before the source enters
+    /// `Draining`, which lets it fail without changing queue attachment state.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), QueueStateError> {
+        self.entries
+            .try_reserve(additional)
+            .map_err(|_| QueueStateError::AllocationFailed)
+    }
+
     /// Pops the oldest task from the active queue of its domain.
     pub fn pop(&mut self, domain: DomainId) -> Result<Option<T>, QueueStateError> {
         if self.state != QueueState::Active(domain) {
@@ -91,6 +132,22 @@ impl<T> PhysicalQueue<T> {
             return Err(QueueStateError::WrongDomain);
         }
         Ok(self.entries.pop_back())
+    }
+
+    /// Removes the first matching entry from the active queue of its domain.
+    ///
+    /// This narrow deterministic lookup supports the compatibility `yield_to` API. Normal
+    /// scheduling always uses [`Self::pop`] and therefore remains FIFO.
+    pub fn take_matching(
+        &mut self,
+        domain: DomainId,
+        matches: impl FnMut(&T) -> bool,
+    ) -> Result<Option<T>, QueueStateError> {
+        if self.state != QueueState::Active(domain) {
+            return Err(QueueStateError::WrongDomain);
+        }
+        let index = self.entries.iter().position(matches);
+        Ok(index.and_then(|index| self.entries.remove(index)))
     }
 
     /// Removes every entry in FIFO order while the queue is draining.
@@ -125,6 +182,8 @@ pub enum QueueStateError {
     WrongDomain,
     /// A drain completion was requested while entries remained.
     NotEmpty,
+    /// Queue backing storage could not reserve required transaction capacity.
+    AllocationFailed,
 }
 
 #[cfg(test)]
@@ -158,5 +217,25 @@ mod tests {
         queue.push(7, 1).unwrap();
         assert_eq!(queue.steal_tail(8), Err(QueueStateError::WrongDomain));
         assert_eq!(queue.steal_tail(7), Ok(Some(1)));
+    }
+
+    #[test]
+    fn draining_queue_accepts_fifo_transfer_before_deactivation() {
+        let mut source = PhysicalQueue::new();
+        let mut destination = PhysicalQueue::new();
+        source.activate(7).unwrap();
+        destination.activate(7).unwrap();
+        source.push(7, 1).unwrap();
+        source.push(7, 2).unwrap();
+        source.begin_drain(7).unwrap();
+
+        destination
+            .append_fifo(7, source.drain_fifo(7).unwrap())
+            .unwrap();
+        source.finish_drain(7).unwrap();
+
+        assert_eq!(destination.pop(7), Ok(Some(1)));
+        assert_eq!(destination.pop(7), Ok(Some(2)));
+        assert_eq!(source.state(), QueueState::Inactive);
     }
 }

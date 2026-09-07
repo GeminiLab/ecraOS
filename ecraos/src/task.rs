@@ -1,4 +1,4 @@
-//! Cooperative kernel task runtime.
+//! Scheduling-domain kernel task runtime.
 //!
 //! Connects task ownership, synchronized FIFO scheduling, and cooperative blocking.
 
@@ -27,7 +27,9 @@ pub use sync::{Condvar, Mutex, MutexGuard, Semaphore, WaitQueue};
 pub use trace::{TraceEvent, TraceEventKind, TraceRing};
 #[expect(unused)]
 pub use types::TaskStateError;
-pub use types::{JoinHandle, Task, TaskExitStatus, TaskId, TaskRef, TaskState, WeakTaskRef};
+pub use types::{
+    JoinHandle, Task, TaskExitStatus, TaskId, TaskRef, TaskState, WaitResult, WeakTaskRef,
+};
 
 /// Unified task and synchronization operation errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,7 +65,9 @@ pub enum TaskError {
 /// This function should and should only be called once per CPU during its initialization. The
 /// current stack is adopted as a pinned root task.
 ///
-/// Currently, the scheduler is just a per-CPU cooperative scheduler.
+/// Scheduling domains may be cooperative or timer-preemptive. Timer interrupts only force a
+/// switch for tasks in preemptive domains, while cooperative domains consume pending requests at
+/// explicit safe points.
 pub fn init_scheduler_current_cpu(current_stack: VirtAddrRange) {
     scheduler::init_current_cpu(current_stack)
 }
@@ -88,9 +92,17 @@ pub fn current_task() -> Option<TaskRef> {
     scheduler::current_task_ref()
 }
 
-/// Accounts one local timer tick without switching from interrupt context.
+/// Accounts one local timer tick before the interrupt-exit scheduling safe point.
 pub fn timer_tick() {
     preempt::timer_tick();
+}
+
+/// Handles the task scheduler portion of a local timer interrupt exit.
+///
+/// Timer wake publication precedes this call. Preemptive domains consume a pending request here
+/// only when `kernel_guard` reports that the interrupted task was outside a critical section.
+pub fn timer_interrupt_exit() {
+    scheduler::timer_interrupt_exit();
 }
 
 /// Cooperatively yields the current execution context.
@@ -122,14 +134,14 @@ pub fn exit_and_yield_to(target: Arc<Task>) -> ! {
 ///
 /// A zero duration yields immediately. Positive durations block cooperatively until the monotonic
 /// deadline is delivered by the kernel timer.
-pub fn sleep(duration: exarch::time::Duration) {
-    sleep_until(exarch::time::monotonic_time().saturating_add(duration));
+pub fn sleep(duration: exarch::time::Duration) -> Result<(), TaskError> {
+    sleep_until(exarch::time::monotonic_time().saturating_add(duration))
 }
 
 /// Sleeps the current task until an absolute monotonic deadline.
 ///
 /// A past deadline yields immediately and never enters the sleeper queue.
-pub fn sleep_until(deadline: exarch::time::TimeValue) {
+pub fn sleep_until(deadline: exarch::time::TimeValue) -> Result<(), TaskError> {
     scheduler::sleep_until(deadline)
 }
 

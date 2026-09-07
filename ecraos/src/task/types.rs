@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
 
 use kspin::SpinNoIrq;
@@ -46,6 +46,10 @@ pub enum TaskState {
     },
     /// A task waiting for its current wait generation to be woken.
     Blocked,
+    /// A task sleeping until its local timer deadline.
+    Sleeping,
+    /// A task registered on one wait queue and one timer deadline.
+    TimedWaiting,
     /// A task that has completed and can never run again.
     Exited,
 }
@@ -55,6 +59,15 @@ pub enum TaskState {
 pub enum TaskExitStatus {
     /// The task body returned normally.
     Completed,
+}
+
+/// The outcome of one timed wait.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WaitResult {
+    /// The wait queue notified the task before its deadline.
+    Woken,
+    /// The wait deadline expired before notification.
+    TimedOut,
 }
 
 /// Errors returned by rejected task lifecycle transitions.
@@ -98,7 +111,9 @@ impl TaskState {
             }
             Self::Runnable => Err(TaskStateError::AlreadyRunnable),
             Self::Exited => Err(TaskStateError::Exited),
-            Self::Running { .. } => Err(TaskStateError::InvalidTransition),
+            Self::Running { .. } | Self::Sleeping | Self::TimedWaiting => {
+                Err(TaskStateError::InvalidTransition)
+            }
         }
     }
 
@@ -113,7 +128,9 @@ impl TaskState {
             }
             Self::Running { .. } => Err(TaskStateError::AlreadyRunning),
             Self::Exited => Err(TaskStateError::Exited),
-            Self::Created | Self::Blocked => Err(TaskStateError::InvalidTransition),
+            Self::Created | Self::Blocked | Self::Sleeping | Self::TimedWaiting => {
+                Err(TaskStateError::InvalidTransition)
+            }
         }
     }
 
@@ -128,9 +145,11 @@ impl TaskState {
             }
             Self::Running { .. } => Err(TaskStateError::WrongCpu),
             Self::Exited => Err(TaskStateError::Exited),
-            Self::Created | Self::Runnable | Self::Blocked => {
-                Err(TaskStateError::InvalidTransition)
-            }
+            Self::Created
+            | Self::Runnable
+            | Self::Blocked
+            | Self::Sleeping
+            | Self::TimedWaiting => Err(TaskStateError::InvalidTransition),
         }
     }
 
@@ -145,9 +164,11 @@ impl TaskState {
             }
             Self::Running { .. } => Err(TaskStateError::WrongCpu),
             Self::Exited => Err(TaskStateError::Exited),
-            Self::Created | Self::Runnable | Self::Blocked => {
-                Err(TaskStateError::InvalidTransition)
-            }
+            Self::Created
+            | Self::Runnable
+            | Self::Blocked
+            | Self::Sleeping
+            | Self::TimedWaiting => Err(TaskStateError::InvalidTransition),
         }
     }
 }
@@ -258,12 +279,18 @@ pub struct Task {
     current: AtomicBool,
     /// Whether this task is registered on a synchronization wait queue.
     waiting: AtomicBool,
+    /// Raw pointer to the one synchronization wait queue owning this registration.
+    wait_queue: AtomicU64,
+    /// Result published by the winner of a timed wait wake/timeout race.
+    wait_result: AtomicU8,
     /// Whether the context is ready for publication or saving at a switch boundary.
     context_initialized: AtomicBool,
     /// The scheduler placement policy for this task.
     placement: TaskPlacement,
     /// The monotonically increasing generation of the current sleep request.
     sleep_generation: AtomicU64,
+    /// The CPU owning the current timer entry, or `usize::MAX` when none is registered.
+    timer_cpu: AtomicUsize,
     /// Remaining timer ticks for the current preemptive slice.
     remaining_slice: AtomicU64,
     /// Weak ownership link to the scheduling domain.
@@ -311,8 +338,11 @@ impl Task {
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
+            wait_queue: AtomicU64::new(0),
+            wait_result: AtomicU8::new(0),
             context_initialized: AtomicBool::new(false),
             sleep_generation: AtomicU64::new(0),
+            timer_cpu: AtomicUsize::new(usize::MAX),
             remaining_slice: AtomicU64::new(0),
             placement,
             domain: SpinNoIrq::new(Weak::new()),
@@ -335,8 +365,11 @@ impl Task {
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(true),
             waiting: AtomicBool::new(false),
+            wait_queue: AtomicU64::new(0),
+            wait_result: AtomicU8::new(0),
             context_initialized: AtomicBool::new(true),
             sleep_generation: AtomicU64::new(0),
+            timer_cpu: AtomicUsize::new(usize::MAX),
             remaining_slice: AtomicU64::new(0),
             placement: TaskPlacement::Pinned(cpu_id),
             domain: SpinNoIrq::new(Weak::new()),
@@ -482,9 +515,11 @@ impl Task {
             }
             TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
             TaskState::Exited => Err(TaskStateError::Exited),
-            TaskState::Created | TaskState::Runnable | TaskState::Blocked => {
-                Err(TaskStateError::InvalidTransition)
-            }
+            TaskState::Created
+            | TaskState::Runnable
+            | TaskState::Blocked
+            | TaskState::Sleeping
+            | TaskState::TimedWaiting => Err(TaskStateError::InvalidTransition),
         }
     }
 
@@ -542,12 +577,76 @@ impl Task {
         self.state.lock().make_runnable()
     }
 
+    /// Wakes one synchronization waiter and publishes the notification result.
+    pub(crate) fn wake_from_wait(&self) -> Result<(), TaskStateError> {
+        let _guard = kernel_guard::NoPreempt::new();
+        let mut state = self.state.lock();
+        match *state {
+            TaskState::Blocked => state.make_runnable(),
+            TaskState::TimedWaiting => {
+                *state = TaskState::Runnable;
+                self.wait_result.store(1, Ordering::Release);
+                self.timer_cpu.store(usize::MAX, Ordering::Release);
+                Ok(())
+            }
+            _ => Err(TaskStateError::InvalidTransition),
+        }
+    }
+
+    /// Times out one synchronization waiter if its generation is still current.
+    pub(crate) fn timeout_wait(&self, generation: u64) -> bool {
+        if self.sleep_generation.load(Ordering::Acquire) != generation {
+            return false;
+        }
+        let _guard = kernel_guard::NoPreempt::new();
+        let mut state = self.state.lock();
+        if *state != TaskState::TimedWaiting {
+            return false;
+        }
+        *state = TaskState::Runnable;
+        self.wait_result.store(2, Ordering::Release);
+        self.timer_cpu.store(usize::MAX, Ordering::Release);
+        true
+    }
+
+    /// Rolls back a timed wait that could not acquire timer ownership.
+    pub(crate) fn cancel_timed_wait(&self, generation: u64, cpu_id: usize) -> bool {
+        if self.sleep_generation.load(Ordering::Acquire) != generation {
+            return false;
+        }
+        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let mut state = self.state.lock();
+        if *state != TaskState::TimedWaiting {
+            return false;
+        }
+        *state = TaskState::Running { cpu_id };
+        self.timer_cpu.store(usize::MAX, Ordering::Release);
+        self.wait_result.store(0, Ordering::Release);
+        true
+    }
+
     /// Blocks this task on its owning CPU.
     ///
     /// The scheduler calls this only while the task is Running and the completion queue is locked.
     pub(crate) fn block(&self, cpu_id: usize) -> Result<(), TaskStateError> {
         let _guard = kernel_guard::NoPreempt::new();
         self.state.lock().block(cpu_id)
+    }
+
+    /// Moves a running task into timer-owned sleeping state.
+    pub(crate) fn sleep(&self, cpu_id: usize) -> Result<(), TaskStateError> {
+        let _guard = kernel_guard::NoPreempt::new();
+        let mut state = self.state.lock();
+        match *state {
+            TaskState::Running { cpu_id: owner } if owner == cpu_id => {
+                *state = TaskState::Sleeping;
+                self.timer_cpu.store(cpu_id, Ordering::Release);
+                Ok(())
+            }
+            TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
+            TaskState::Exited => Err(TaskStateError::Exited),
+            _ => Err(TaskStateError::InvalidTransition),
+        }
     }
 
     /// Starts one uniquely identified sleep request.
@@ -560,6 +659,11 @@ impl Task {
             .expect("task sleep generation space exhausted")
     }
 
+    /// Returns the generation of the current timer operation.
+    pub(crate) fn sleep_generation(&self) -> u64 {
+        self.sleep_generation.load(Ordering::Acquire)
+    }
+
     /// Wakes a task if the timer entry still names its current sleep request.
     ///
     /// Stale entries are discarded without changing a newer sleep or another blocked state.
@@ -568,7 +672,17 @@ impl Task {
             return false;
         }
         let _guard = kernel_guard::NoPreempt::new();
-        let result = self.state.lock().make_runnable();
+        let result = {
+            let mut state = self.state.lock();
+            match *state {
+                TaskState::Sleeping => {
+                    *state = TaskState::Runnable;
+                    self.timer_cpu.store(usize::MAX, Ordering::Release);
+                    Ok(())
+                }
+                _ => state.make_runnable(),
+            }
+        };
         result.is_ok()
     }
 
@@ -604,6 +718,50 @@ impl Task {
     /// Releases this task's wait-queue registration slot.
     pub(crate) fn release_waiting(&self) {
         self.waiting.store(false, Ordering::Release);
+    }
+
+    /// Associates this task with its synchronization wait queue.
+    pub(crate) fn set_wait_queue(&self, queue: *const ()) {
+        self.wait_queue
+            .store(queue as usize as u64, Ordering::Release);
+    }
+
+    /// Removes and returns the synchronization wait queue pointer.
+    pub(crate) fn take_wait_queue(&self) -> Option<*const ()> {
+        let value = self.wait_queue.swap(0, Ordering::AcqRel);
+        (value != 0).then_some(value as usize as *const ())
+    }
+
+    /// Begins one timed wait and returns its generation token.
+    pub(crate) fn begin_timed_wait(&self, cpu_id: usize) -> Result<u64, TaskStateError> {
+        let generation = self.begin_sleep();
+        let _guard = kernel_guard::NoPreempt::new();
+        let mut state = self.state.lock();
+        match *state {
+            TaskState::Running { cpu_id: owner } if owner == cpu_id => {
+                *state = TaskState::TimedWaiting;
+                self.wait_result.store(0, Ordering::Release);
+                self.timer_cpu.store(cpu_id, Ordering::Release);
+                Ok(generation)
+            }
+            TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
+            _ => Err(TaskStateError::InvalidTransition),
+        }
+    }
+
+    /// Returns the timer CPU for the current timed wait, if one is registered.
+    pub(crate) fn timer_cpu(&self) -> Option<usize> {
+        let cpu = self.timer_cpu.load(Ordering::Acquire);
+        (cpu != usize::MAX).then_some(cpu)
+    }
+
+    /// Returns and clears the result of the most recent timed wait.
+    pub(crate) fn take_wait_result(&self) -> Option<WaitResult> {
+        match self.wait_result.swap(0, Ordering::AcqRel) {
+            1 => Some(WaitResult::Woken),
+            2 => Some(WaitResult::TimedOut),
+            _ => None,
+        }
     }
 }
 

@@ -69,6 +69,17 @@ pub fn can_schedule_now() -> bool {
     (unsafe { *PREEMPT_DEPTH.current_ref_raw() == 0 }) && exarch::trap::local_enabled()
 }
 
+/// Returns whether an interrupt-exit scheduling point may preempt the local task.
+///
+/// Local interrupts are necessarily disabled while a timer handler executes, so this predicate
+/// intentionally tests only the `kernel_guard`-backed preemption depth. Ordinary blocking APIs
+/// continue to use their stricter task-context checks.
+pub fn can_preempt_from_interrupt() -> bool {
+    // SAFETY: The timer handler reads only its local per-CPU nesting counter before deciding
+    // whether to consume a deferred request.
+    unsafe { *PREEMPT_DEPTH.current_ref_raw() == 0 }
+}
+
 /// Requests a local reschedule at the next safe point.
 pub fn request_reschedule() {
     // SAFETY: Queue publication precedes this Release store. The per-CPU bit may be published by

@@ -1,4 +1,4 @@
-//! Cooperative sleeper deadline queue.
+//! Timer-owned sleeper and timed-wait deadline queue.
 //!
 //! Keeps deadline ordering and generation filtering independent from architecture timer code.
 
@@ -56,6 +56,17 @@ impl TimerQueue {
     /// Callers use the return value to decide whether hardware one-shot programming needs an
     /// update.
     pub fn push(&mut self, deadline: Duration, task_id: u64, generation: u64) -> bool {
+        self.try_push(deadline, task_id, generation)
+            .expect("timer queue allocation failed")
+    }
+
+    /// Tries to insert one wakeup without panicking on backing-storage exhaustion.
+    pub fn try_push(
+        &mut self,
+        deadline: Duration,
+        task_id: u64,
+        generation: u64,
+    ) -> Result<bool, ()> {
         let previous = self.next_deadline();
         let entry = TimerEntry {
             deadline,
@@ -63,18 +74,18 @@ impl TimerQueue {
             generation,
             sequence: self.next_sequence,
         };
-        self.next_sequence = self.next_sequence.wrapping_add(1);
         let index = self.entries.partition_point(|current| {
             (current.deadline, current.sequence) <= (entry.deadline, entry.sequence)
         });
+        self.entries.try_reserve(1).map_err(|_| ())?;
+        self.next_sequence = self.next_sequence.wrapping_add(1);
         self.entries.insert(index, entry);
-        previous != self.next_deadline()
+        Ok(previous != self.next_deadline())
     }
 
     /// Cancels one exact task-generation entry.
     ///
     /// Returns whether an entry was removed. A stale cancellation is harmless.
-    #[expect(unused)]
     pub fn cancel(&mut self, task_id: u64, generation: u64) -> bool {
         let Some(index) = self
             .entries
@@ -112,5 +123,22 @@ pub const fn saturating_deadline(deadline: Duration, duration: Duration) -> Dura
     match deadline.checked_add(duration) {
         Some(value) => value,
         None => Duration::MAX,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::time::Duration;
+
+    use super::TimerQueue;
+
+    #[test]
+    fn exact_cancellation_releases_one_generation() {
+        let mut queue = TimerQueue::new();
+        queue.push(Duration::from_nanos(10), 4, 1);
+        queue.push(Duration::from_nanos(20), 4, 2);
+        assert!(queue.cancel(4, 1));
+        assert_eq!(queue.next_deadline(), Some(Duration::from_nanos(20)));
+        assert!(!queue.cancel(4, 1));
     }
 }
