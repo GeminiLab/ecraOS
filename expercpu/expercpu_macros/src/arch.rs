@@ -87,6 +87,16 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
     // };
     // let aarch64_asm = format!("mrs {{}}, {aarch64_tpidr}");
 
+    if cfg!(feature = "host-test") {
+        let offset = gen_offset(symbol);
+        return quote! {
+            {
+                let base = expercpu::__priv::host_current_base();
+                (base.as_usize() + #offset) as *const #ty
+            }
+        };
+    }
+
     macos_unimplemented(quote! {
         #[cfg(target_arch = "x86_64")]
         {
@@ -136,6 +146,10 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
 ///
 /// The type of the variable must be one of the following: `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
 pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
+    if cfg!(feature = "host-test") {
+        return quote! {{ unsafe { *self.current_ptr() } }};
+    }
+
     let ty_str = quote!(#ty).to_string();
     let rv64_op = match ty_str.as_str() {
         "u8" | "bool" => "lbu",
@@ -252,6 +266,10 @@ pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStre
 ///
 /// The type of the variable must be one of the following: `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
 pub fn gen_write_current_raw(symbol: &Ident, val: &Ident, ty: &Type) -> proc_macro2::TokenStream {
+    if cfg!(feature = "host-test") {
+        return quote! {{ unsafe { *(self.current_ptr() as *mut #ty) = #val; } }};
+    }
+
     let ty_str = quote!(#ty).to_string();
     let ty_fixup = if ty_str.as_str() == "bool" {
         format_ident!("u8")

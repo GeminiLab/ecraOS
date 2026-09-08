@@ -1,5 +1,8 @@
 #![cfg(target_os = "linux")]
 
+#[cfg(feature = "host-test")]
+use core::num::NonZeroU32;
+
 use expercpu::*;
 use memory_addr::VirtAddr;
 
@@ -140,6 +143,55 @@ fn current_accessors_read_write_and_reset_current_cpu_area() {
     assert_initial_values();
 
     keep_active_area_for_process_lifetime(layout, base);
+}
+
+/// Verifies that host test threads receive independent per-CPU state.
+///
+/// Each worker mutates the same declared variables and must observe only its
+/// own values through the host backend.
+#[cfg(feature = "host-test")]
+#[test]
+fn host_test_gives_each_thread_an_isolated_percpu_area() {
+    use std::thread;
+
+    expercpu::host_test::initialize(NonZeroU32::new(2).unwrap());
+
+    let first = thread::spawn(|| {
+        let base = expercpu::host_test::bind_current_cpu(0);
+        BOOL.write_current(false);
+        U8.write_current(11);
+        STRUCT.with_current(|value| {
+            value.foo = 111;
+            value.bar = 11;
+        });
+        (
+            base,
+            BOOL.read_current(),
+            U8.read_current(),
+            STRUCT.with_current(|value| (value.foo, value.bar)),
+        )
+    });
+    let second = thread::spawn(|| {
+        let base = expercpu::host_test::bind_current_cpu(1);
+        BOOL.write_current(true);
+        U8.write_current(22);
+        STRUCT.with_current(|value| {
+            value.foo = 222;
+            value.bar = 22;
+        });
+        (
+            base,
+            BOOL.read_current(),
+            U8.read_current(),
+            STRUCT.with_current(|value| (value.foo, value.bar)),
+        )
+    });
+
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    assert_ne!(first.0, second.0);
+    assert_eq!((first.1, first.2, first.3), (false, 11, (111, 11)));
+    assert_eq!((second.1, second.2, second.3), (true, 22, (222, 22)));
 }
 
 #[cfg(feature = "remote-access")]

@@ -2,9 +2,17 @@
 //!
 //! Defines and initializes per-CPU data areas for ecraOS.
 
-#![no_std]
+#![cfg_attr(not(feature = "host-test"), no_std)]
 
 extern crate expercpu_macros;
+
+#[cfg(all(feature = "host-test", not(target_os = "linux")))]
+compile_error!("the expercpu `host-test` backend currently supports Linux only");
+
+#[cfg(feature = "host-test")]
+extern crate std;
+#[cfg(feature = "host-test")]
+pub mod host_test;
 
 use core::alloc::Layout;
 
@@ -27,6 +35,9 @@ unsafe extern "C" {
 
 #[doc(hidden)]
 pub mod __priv {
+    #[cfg(feature = "host-test")]
+    pub use crate::host_test::current_base as host_current_base;
+
     #[cfg(feature = "preempt")]
     pub use kernel_guard::NoPreempt as NoPreemptGuard;
 }
@@ -143,6 +154,7 @@ unsafe fn init_from(base: VirtAddr, from: VirtAddr) {
 }
 
 /// Reads the architecture-specific per-CPU data register.
+#[cfg(not(feature = "host-test"))]
 pub fn read_percpu_reg() -> VirtAddr {
     let tp: usize;
     unsafe {
@@ -169,6 +181,11 @@ pub fn read_percpu_reg() -> VirtAddr {
     VirtAddr::from_usize(tp + expercpu_macros::percpu_symbol_vma!(_percpu_start))
 }
 
+#[cfg(feature = "host-test")]
+pub fn read_percpu_reg() -> VirtAddr {
+    host_test::current_base()
+}
+
 /// Writes the architecture-specific per-CPU data register.
 ///
 /// # Safety
@@ -176,6 +193,7 @@ pub fn read_percpu_reg() -> VirtAddr {
 /// `tp` must be the valid per-CPU area base for the current CPU, and setting
 /// the architecture-specific per-CPU register to that base must be valid for
 /// the current execution context.
+#[cfg(not(feature = "host-test"))]
 pub unsafe fn write_percpu_reg(tp: VirtAddr) {
     let tp = tp.as_usize() - expercpu_macros::percpu_symbol_vma!(_percpu_start);
 
@@ -200,5 +218,10 @@ pub unsafe fn write_percpu_reg(tp: VirtAddr) {
     }
 }
 
-#[allow(unused_imports)]
-use crate as expercpu;
+#[cfg(feature = "host-test")]
+pub unsafe fn write_percpu_reg(tp: VirtAddr) {
+    host_test::set_current_base(tp);
+}
+
+// #[allow(unused_imports)]
+// use crate as expercpu;

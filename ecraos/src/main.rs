@@ -15,6 +15,7 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
+
 use log::{error, info};
 
 mod device;
@@ -24,6 +25,7 @@ mod mem;
 mod mp;
 mod percpu;
 mod task;
+mod test_guard;
 mod timer;
 mod trap;
 
@@ -299,10 +301,13 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     // Initialize memory for the AP.
     mem::init_ap();
 
+    // Perform later platform initialization for the AP.
     exarch::init::init_later_ap();
 
+    // Initialize the timer for the AP.
     timer::init_ap();
 
+    // Initialize the scheduler for the AP.
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
 
     mp::mark_ap_up(cpu_id);
@@ -311,7 +316,7 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 }
 
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.
-#[cfg(not(test))]
+#[cfg(not(feature = "host-test"))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     use exarch::power::{ShutdownReason, shutdown};

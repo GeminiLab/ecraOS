@@ -3,6 +3,11 @@ name = "ecraos"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# ecraOS is being tested on a host machine.
+host-test = ["expercpu/host-test"]
+
 [dependencies]
 bitmaps = { version = "3.2.1", default-features = false }
 crate_interface = { version = "0.3", features = ["weak_default"] }
@@ -29,3 +34,6 @@ acpi = "6"
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 fdt-rs = { version = "0.4", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
