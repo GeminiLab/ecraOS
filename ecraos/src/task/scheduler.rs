@@ -438,7 +438,7 @@ fn finish_switch() {
 
 /// Errors returned when a deterministic target cannot be claimed locally.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TargetError {
+pub enum TargetError {
     /// The requested target is already the current task.
     SelfTarget,
     /// The target is not Runnable or is still in a switch handoff window.

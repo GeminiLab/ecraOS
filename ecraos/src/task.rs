@@ -23,6 +23,7 @@ pub use domain::{
 };
 pub use preempt::{RescheduleGuard, can_schedule_now, request_reschedule};
 pub use queue::{PhysicalQueue, QueueState, QueueStateError};
+pub use scheduler::TargetError;
 pub use sync::{Condvar, Mutex, MutexGuard, Semaphore, WaitQueue};
 pub use trace::{TraceEvent, TraceEventKind, TraceRing};
 pub use types::TaskStateError;
@@ -112,7 +113,7 @@ pub fn yield_now() {
 }
 
 /// Yields cooperatively to one locally runnable task.
-pub fn yield_to(target: Arc<Task>) -> Result<(), scheduler::TargetError> {
+pub fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
     scheduler::yield_to(target)
 }
 
