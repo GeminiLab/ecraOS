@@ -15,17 +15,15 @@
 /// available in the kernel.
 extern crate alloc;
 
-use alloc::sync::Arc;
-
 use log::{error, info};
 
 mod device;
 mod kernel_if;
 mod logging;
 mod mem;
-mod mp;
+pub mod mp;
 mod percpu;
-mod task;
+pub mod task;
 mod test_guard;
 mod timer;
 mod trap;
@@ -48,132 +46,6 @@ const HELLO_ECRAOS: &str = "Hello, ecraOS!";
 const DISCLAIMER: &str = "ecraOS is a derivative of the ArceOS project.";
 /// Horizontal line printed at startup.
 const HLINE: &str = "------------------------------------------------------------";
-
-/// Runs the Stage 2B preemptive and synchronization smoke workload.
-///
-/// The workload is BSP-only so the APs can continue exercising the independent cooperative
-/// sleep/join path. CPU-bound workers intentionally avoid `yield_now` to make timer preemption
-/// observable, while the synchronization workers cover blocking wakeup and permit reservation.
-fn run_stage2b_smoke() {
-    let domain = task::create_domain(task::DomainPolicy::Preemptive {
-        time_slice: exarch::time::Duration::from_millis(10),
-    })
-    .expect("failed to create preemptive smoke domain");
-    task::switch_current_to(&domain).expect("failed to switch into preemptive smoke domain");
-    info!("Stage 2B switched into preemptive domain {}", domain.id());
-
-    let cpu_workers: [task::JoinHandle; 2] = core::array::from_fn(|worker| {
-        task::spawn(move || {
-            let deadline = exarch::time::monotonic_time()
-                .saturating_add(exarch::time::Duration::from_millis(100));
-            while exarch::time::monotonic_time() < deadline {
-                core::hint::spin_loop();
-            }
-            info!("Preemptive CPU-bound worker {worker} completed");
-        })
-    });
-    for mut worker in cpu_workers {
-        worker.join().expect("preemptive worker join failed");
-    }
-    info!("Stage 2B CPU-bound joins passed");
-
-    let mutex = Arc::new(task::Mutex::new(0usize));
-    let condvar = Arc::new(task::Condvar::new());
-    let waiter_mutex = Arc::clone(&mutex);
-    let waiter_condvar = Arc::clone(&condvar);
-    let mut waiter = task::spawn(move || {
-        info!("Condvar waiter started");
-        let mut guard = waiter_mutex.lock().expect("mutex waiter lock failed");
-        while *guard == 0 {
-            guard = waiter_condvar
-                .wait(guard)
-                .expect("condvar waiter block failed");
-        }
-        info!("Condvar waiter observed notification");
-    });
-    let notifier_mutex = Arc::clone(&mutex);
-    let notifier_condvar = Arc::clone(&condvar);
-    let mut notifier = task::spawn(move || {
-        info!("Condvar notifier started");
-        let mut guard = notifier_mutex.lock().expect("mutex notifier lock failed");
-        *guard = 1;
-        notifier_condvar.notify_one();
-    });
-    info!("Stage 2B Condvar tasks spawned");
-    waiter.join().expect("condvar waiter join failed");
-    notifier.join().expect("condvar notifier join failed");
-    info!("Stage 2B Condvar join passed");
-
-    let semaphore = Arc::new(task::Semaphore::new(0, 1));
-    let acquire_semaphore = Arc::clone(&semaphore);
-    let mut acquirer = task::spawn(move || {
-        info!("Semaphore acquirer started");
-        acquire_semaphore
-            .acquire()
-            .expect("semaphore acquire wake failed");
-        info!("Semaphore waiter acquired its reserved permit");
-    });
-    let release_semaphore = Arc::clone(&semaphore);
-    let mut releaser = task::spawn(move || {
-        info!("Semaphore releaser started");
-        release_semaphore
-            .release()
-            .expect("semaphore release failed");
-    });
-    info!("Stage 2B Semaphore tasks spawned");
-    acquirer.join().expect("semaphore acquirer join failed");
-    releaser.join().expect("semaphore releaser join failed");
-    info!("Stage 2B preemption and synchronization smoke passed");
-}
-
-/// Runs the per-CPU task sleep and join smoke workload.
-///
-/// Four tasks each sleep for one second four times. A fifth task joins all four workers before
-/// the per-CPU root task performs the BSP or AP terminal transition.
-fn run_sleep_join_workload(is_bsp: bool) -> ! {
-    const WORKER_COUNT: usize = 4;
-    const SLEEP_ROUNDS: usize = 4;
-
-    if is_bsp {
-        run_stage2b_smoke();
-    }
-
-    let workers: [task::JoinHandle; WORKER_COUNT] = core::array::from_fn(|worker_index| {
-        task::spawn(move || {
-            for round in 1..=SLEEP_ROUNDS {
-                let _ = task::sleep(exarch::time::Duration::from_secs(1));
-                info!(
-                    "Sleep task {worker_index} on CPU {} completed round {round}/{SLEEP_ROUNDS}",
-                    mp::current_cpu_id()
-                );
-            }
-        })
-    });
-
-    let mut joiner = task::spawn(move || {
-        for (worker_index, mut worker) in workers.into_iter().enumerate() {
-            let _ = worker.join();
-            info!(
-                "Join task on CPU {} joined sleep task {worker_index}/{WORKER_COUNT}",
-                mp::current_cpu_id()
-            );
-        }
-        info!(
-            "Join task on CPU {} joined all {WORKER_COUNT} sleep tasks",
-            mp::current_cpu_id()
-        );
-    });
-
-    let _ = joiner.join();
-
-    if is_bsp {
-        app_main_bsp();
-        exarch::power::poweroff()
-    } else {
-        app_main_ap();
-        task::run_idle()
-    }
-}
 
 fn print_hello_banner() {
     kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}");
@@ -279,11 +151,13 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
 
     mem::remove_identical_mappings();
 
-    run_sleep_join_workload(true)
+    app_main_bsp();
+
+    exarch::power::poweroff()
 }
 
 #[eii]
-pub fn app_main_bsp();
+pub fn app_main_bsp() {}
 
 #[eii]
 pub fn app_main_ap() {
@@ -327,7 +201,9 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 
     mp::mark_ap_up(cpu_id);
 
-    run_sleep_join_workload(false)
+    app_main_ap();
+
+    task::run_idle()
 }
 
 /// Minimal panic handler: spin forever with interrupts possibly still disabled.

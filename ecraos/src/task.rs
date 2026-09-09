@@ -25,7 +25,6 @@ pub use preempt::{RescheduleGuard, can_schedule_now, request_reschedule};
 pub use queue::{PhysicalQueue, QueueState, QueueStateError};
 pub use sync::{Condvar, Mutex, MutexGuard, Semaphore, WaitQueue};
 pub use trace::{TraceEvent, TraceEventKind, TraceRing};
-#[expect(unused)]
 pub use types::TaskStateError;
 pub use types::{
     JoinHandle, Task, TaskExitStatus, TaskId, TaskRef, TaskState, WaitResult, WeakTaskRef,
@@ -108,13 +107,11 @@ pub fn timer_interrupt_exit() {
 /// Cooperatively yields the current execution context.
 ///
 /// No timer or interrupt-exit path invokes this function during Stage 2A.
-#[expect(unused)]
 pub fn yield_now() {
     scheduler::yield_now()
 }
 
 /// Yields cooperatively to one locally runnable task.
-#[expect(unused)]
 pub fn yield_to(target: Arc<Task>) -> Result<(), scheduler::TargetError> {
     scheduler::yield_to(target)
 }
@@ -125,7 +122,6 @@ fn exit_current(task: Arc<Task>) -> ! {
 }
 
 /// Exits the current task and switches permanently to one locally runnable task.
-#[expect(unused)]
 pub fn exit_and_yield_to(target: Arc<Task>) -> ! {
     scheduler::exit_and_yield_to(target)
 }
@@ -155,7 +151,6 @@ pub fn wake_sleepers(now: exarch::time::TimeValue) {
 /// Returns the earliest timer-blocked task deadline.
 ///
 /// The timer interrupt uses this to program a one-shot deadline.
-#[expect(unused)]
 pub fn next_sleep_deadline() -> Option<exarch::time::TimeValue> {
     scheduler::next_sleep_deadline()
 }

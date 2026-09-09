@@ -22,6 +22,6 @@ cargo test \
     -p ecraldr_base \
     -p ecraldr_base_macros
 
-cargo test -p ecraos --features host-test
+cargo test -p ecraos --lib --features host-test
 
 printf 'Host test suite PASS\n'

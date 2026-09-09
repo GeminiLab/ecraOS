@@ -15,6 +15,8 @@ members = [
     "expt",
     "exslab",
     "smokes/default",
+    "smokes/sleep-join",
+    "smokes/sync-preemption",
     "utils/dyn_static_traits",
     "utils/look_at",
     "utils/maybe_non_generic",

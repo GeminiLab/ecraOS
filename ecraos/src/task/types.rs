@@ -833,7 +833,6 @@ impl JoinHandle {
     /// Returns whether the target task has exited.
     ///
     /// This query never blocks or changes scheduler state.
-    #[expect(unused)]
     pub fn is_finished(&self) -> bool {
         self.completion.is_completed()
     }
