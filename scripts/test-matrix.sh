@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+crate_path="${CRATE:-smokes/default}"
+
 targets=(
     x86_64-unknown-none
     x86_64-unknown-none
@@ -29,6 +31,7 @@ for index in "${!targets[@]}"; do
 
     set +e
     output="$(scripts/run-qemu-test.sh \
+        --crate "$crate_path" \
         --target "$target" \
         --profile "$profile" \
         --cpus "$cpu_count" \

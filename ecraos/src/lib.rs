@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
+#![feature(extern_item_impls)]
 #![deny(unfulfilled_lint_expectations)]
 
 /// The Rust standard allocator interface.
@@ -29,13 +30,17 @@ mod test_guard;
 mod timer;
 mod trap;
 
-macro_rules! kprintln {
-    ($($arg:tt)*) => {
-        exarch::dbcn_println!($($arg)*)
-    };
+#[doc(hidden)]
+pub mod reexport {
+    pub use exarch;
 }
 
-pub(crate) use kprintln;
+#[macro_export]
+macro_rules! kprintln {
+    ($($arg:tt)*) => {
+        crate::reexport::exarch::dbcn_println!($($arg)*)
+    };
+}
 
 /// Banner line printed at startup.
 const HELLO_ECRAOS: &str = "Hello, ecraOS!";
@@ -162,8 +167,10 @@ fn run_sleep_join_workload(is_bsp: bool) -> ! {
     let _ = joiner.join();
 
     if is_bsp {
+        app_main_bsp();
         exarch::power::poweroff()
     } else {
+        app_main_ap();
         task::run_idle()
     }
 }
@@ -273,6 +280,14 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     mem::remove_identical_mappings();
 
     run_sleep_join_workload(true)
+}
+
+#[eii]
+pub fn app_main_bsp();
+
+#[eii]
+pub fn app_main_ap() {
+    task::run_idle()
 }
 
 /// The kernel entry function for the AP.

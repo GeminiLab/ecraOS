@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+crate_path="${CRATE:-smokes/default}"
 target=""
 profile=""
 cpus=""
@@ -13,6 +14,10 @@ qemu_extra_args=()
 
 while (($# > 0)); do
     case "$1" in
+        --crate)
+            crate_path="${2:?missing value for --crate}"
+            shift 2
+            ;;
         --target)
             target="${2:?missing value for --target}"
             shift 2
@@ -45,7 +50,7 @@ while (($# > 0)); do
 done
 
 if [[ -z "$target" || -z "$profile" || -z "$cpus" || -z "$timeout_seconds" ]]; then
-    printf 'usage: %s --target <triple> --profile <debug|release> --cpus <count> --timeout <seconds>\n' "$0" >&2
+    printf 'usage: %s [--crate <path>] --target <triple> --profile <debug|release> --cpus <count> --timeout <seconds>\n' "$0" >&2
     exit 2
 fi
 
@@ -73,10 +78,10 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 log_path="$log_dir/${timestamp}-$$-${target}-${profile}-${cpus}.log"
 
 printf 'QEMU log: %s\n' "$log_path" >&2
-printf 'Target: %s, profile: %s, CPUs: %s\n' \
-    "$target" "$profile" "$cpus" | tee -a "$log_path"
+printf 'Crate: %s, target: %s, profile: %s, CPUs: %s\n' \
+    "$crate_path" "$target" "$profile" "$cpus" | tee -a "$log_path"
 
-builder_args=(--target "$target" --profile "$profile")
+builder_args=(--crate "$crate_path" --target "$target" --profile "$profile")
 if ((clean)); then
     builder_args+=(--clean)
 fi

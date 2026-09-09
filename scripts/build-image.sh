@@ -4,12 +4,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+crate_path="${CRATE:-smokes/default}"
 target=""
 profile=""
 clean=0
 
 while (($# > 0)); do
     case "$1" in
+        --crate)
+            crate_path="${2:?missing value for --crate}"
+            shift 2
+            ;;
         --target)
             target="${2:?missing value for --target}"
             shift 2
@@ -30,9 +35,44 @@ while (($# > 0)); do
 done
 
 if [[ -z "$target" || -z "$profile" ]]; then
-    printf 'usage: %s --target <triple> --profile <debug|release> [--clean]\n' "$0" >&2
+    printf 'usage: %s [--crate <path>] --target <triple> --profile <debug|release> [--clean]\n' "$0" >&2
     exit 2
 fi
+
+if [[ "$crate_path" = /* ]]; then
+    crate_dir="$crate_path"
+else
+    crate_dir="$ROOT/$crate_path"
+fi
+crate_manifest="$crate_dir/Cargo.toml"
+
+if [[ ! -f "$crate_manifest" ]]; then
+    printf 'error: crate manifest not found: %s\n' "$crate_manifest" >&2
+    exit 2
+fi
+
+crate_dir="$(cd "$crate_dir" && pwd -P)"
+crate_manifest="$crate_dir/Cargo.toml"
+metadata="$(cargo metadata --no-deps --format-version 1 --manifest-path "$crate_manifest")"
+kernel_name="$(
+    jq -r --arg manifest "$crate_manifest" '
+        [
+            .packages[]
+            | select(.manifest_path == $manifest)
+            | .targets[]
+            | select(.kind | index("bin"))
+            | .name
+        ]
+        | if length == 1 then .[0] else empty end
+    ' <<<"$metadata"
+)"
+
+if [[ -z "$kernel_name" ]]; then
+    printf 'error: crate must define exactly one binary target: %s\n' "$crate_manifest" >&2
+    exit 2
+fi
+
+target_dir="$(jq -r '.target_directory' <<<"$metadata")"
 
 case "$profile" in
     debug)
@@ -69,15 +109,16 @@ if ((clean)); then
     cargo clean
 fi
 
-artifact_dir="$ROOT/target/$target/$artifact_profile"
-kernel="$artifact_dir/ecraos"
-kernel_stripped="$artifact_dir/ecraos.bin"
+artifact_dir="$target_dir/$target/$artifact_profile"
+kernel="$artifact_dir/$kernel_name"
+kernel_stripped="$artifact_dir/$kernel_name.bin"
 loader="$artifact_dir/$loader_crate"
 loader_stripped="$artifact_dir/$loader_crate.bin"
 
-printf 'Building kernel for %s (%s)\n' "$target" "$profile" >&2
+printf 'Building kernel crate %s for %s (%s)\n' "$crate_path" "$target" "$profile" >&2
 env RUSTFLAGS='-C relocation-model=pie -C link-arg=-Tecraos/link.ld -C link-arg=-pie' \
-    cargo build "${kernel_cargo_args[@]}" -p ecraos --target "$target" "${profile_args[@]}"
+    cargo build "${kernel_cargo_args[@]}" --manifest-path "$crate_manifest" \
+    --target "$target" "${profile_args[@]}"
 
 printf 'Stripping kernel\n' >&2
 rust-objcopy "$kernel" --strip-all -O binary "$kernel_stripped"

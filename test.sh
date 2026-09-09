@@ -4,12 +4,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+crate_path="${CRATE:-smokes/default}"
 target="${TARGET:-x86_64-unknown-none}"
 profile="${PROFILE:-debug}"
 timeout_seconds="${TIMEOUT_SEC:-15}"
 cpus="${CPUS:-1}"
 
-runner_args=(--target "$target" --profile "$profile" --cpus "$cpus" --timeout "$timeout_seconds")
+runner_args=(
+    --target "$target"
+    --profile "$profile"
+    --cpus "$cpus"
+    --timeout "$timeout_seconds"
+    --crate "$crate_path"
+)
 
 if [[ "${CLEAN:-0}" == "1" ]]; then
     runner_args+=(--clean)
