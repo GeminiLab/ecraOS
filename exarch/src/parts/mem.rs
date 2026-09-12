@@ -321,6 +321,8 @@ look_at! {
 
     /// Sets the page table root for the current virtual address space mode.
     ///
-    /// [`VirtAddrSpaceMode::Independent`] is not supported yet.
+    /// For [`VirtAddrSpaceMode::Independent`], the same root may be installed
+    /// in both translation registers when the architecture uses one shared
+    /// table allocation for the lower and upper halves.
     pub fn set_page_table_root(root: PhysAddr);
 }

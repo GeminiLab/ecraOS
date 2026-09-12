@@ -23,9 +23,13 @@ targets=(
     riscv64gc-unknown-none-elf
     riscv64gc-unknown-none-elf
     riscv64gc-unknown-none-elf
+    aarch64-unknown-none-softfloat
+    aarch64-unknown-none-softfloat
+    aarch64-unknown-none-softfloat
+    aarch64-unknown-none-softfloat
 )
-profiles=(debug debug release release debug debug release release)
-cpus=(1 4 1 4 1 2 1 2)
+profiles=(debug debug release release debug debug release release debug debug release release)
+cpus=(1 4 1 4 1 2 1 2 1 2 1 2)
 
 smoke_names=()
 matrix_targets=()

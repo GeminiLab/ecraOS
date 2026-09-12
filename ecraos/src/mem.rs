@@ -31,6 +31,9 @@ pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
 
 /// Converts a physical address into its currently accessible virtual address.
 pub fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
+    if !vmm::is_initialized() {
+        return VirtAddr::from_usize(addr.as_usize());
+    }
     vmm::direct_mapping_phys_to_virt(addr).unwrap_or_else(|| VirtAddr::from_usize(addr.as_usize()))
 }
 
@@ -40,10 +43,12 @@ fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
         return Some(low_identity);
     }
 
-    if let Some(paddr) = vmm::direct_mapping_virt_to_phys(addr)
-        && phys_addr_is_known(paddr)
-    {
-        return Some(paddr);
+    if vmm::is_initialized() {
+        if let Some(paddr) = vmm::direct_mapping_virt_to_phys(addr)
+            && phys_addr_is_known(paddr)
+        {
+            return Some(paddr);
+        }
     }
 
     if let Some(stack) = early::try_bsp_stack()
@@ -226,6 +231,17 @@ unsafe fn call_fn_new_stack_arg2(
             in("a1") arg2,
             in("a2") fn_ptr,
             options(preserves_flags, noreturn),
+        );
+
+        #[cfg(target_arch = "aarch64")]
+        core::arch::asm!(
+            "mov sp, {stack_top}",
+            "br x2",
+            stack_top = in(reg) stack_top,
+            in("x0") arg1,
+            in("x1") arg2,
+            in("x2") fn_ptr,
+            options(noreturn),
         );
     }
 }

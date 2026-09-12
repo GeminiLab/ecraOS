@@ -2,11 +2,11 @@
 
 use ecraldr_base::PlatformBootArg;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
 use fdt_rs::base::DevTree;
 use heapless::Vec as HeaplessVec;
 use lazyinit::LazyInit;
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
 use memory_addr::va;
 use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange};
 
@@ -181,7 +181,7 @@ const PLATFORM_BOOT_RESERVED_ALIGN: usize = 4096;
 
 /// Pushes physical ranges that must survive after early boot.
 fn push_platform_boot_regions(target: &mut MemoryRegions, boot_arg: PlatformBootArg) {
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
     if let PlatformBootArg::DeviceTree(dtb_addr) = boot_arg {
         let dev_tree = unsafe {
             DevTree::from_raw_pointer(va!(dtb_addr.as_usize()).as_ptr())

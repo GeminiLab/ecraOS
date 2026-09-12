@@ -1,7 +1,8 @@
 {
     "rust-analyzer.server.path": "~/.cargo/bin/rust-analyzer",
     // "rust-analyzer.cargo.target": "x86_64-unknown-none",
-    "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
+    // "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
+    "rust-analyzer.cargo.target": "aarch64-unknown-none-softfloat",
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.linkedProjects": ["Cargo.toml"],
     "rust-analyzer.cargo.allTargets": true,

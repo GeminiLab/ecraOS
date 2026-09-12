@@ -93,10 +93,17 @@ case "$target" in
     x86_64-unknown-none)
         loader_crate="ecraldr-x86_64-multiboot"
         kernel_cargo_args=()
+        loader_cargo_args=()
         ;;
     riscv64gc-unknown-none-elf)
         loader_crate="ecraldr-riscv64-none"
         kernel_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
+        loader_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
+        ;;
+    aarch64-unknown-none-softfloat)
+        loader_crate="ecraldr-aarch64-none"
+        kernel_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
+        loader_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
         ;;
     *)
         printf 'error: unsupported target: %s\n' "$target" >&2
@@ -125,7 +132,7 @@ rust-objcopy "$kernel" --strip-all -O binary "$kernel_stripped"
 
 printf 'Building loader %s\n' "$loader_crate" >&2
 env KERNEL_BIN="$kernel_stripped" RUSTFLAGS='-C relocation-model=static' \
-    cargo build -p "$loader_crate" --target "$target" "${profile_args[@]}"
+    cargo build -p "$loader_crate" --target "$target" "${loader_cargo_args[@]}" "${profile_args[@]}"
 
 printf 'Stripping loader\n' >&2
 rust-objcopy "$loader" --strip-all -O binary "$loader_stripped"

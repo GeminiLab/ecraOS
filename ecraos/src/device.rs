@@ -609,6 +609,14 @@ pub fn probe_device_info_source(boot_arg: ecraldr_base::PlatformBootArg) -> Vec<
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if let ecraldr_base::PlatformBootArg::DeviceTree(dtb) = boot_arg {
+            log::info!("Found Device Tree at {:#x}", dtb.as_usize());
+            result.push(DeviceInfoSource::DeviceTree(dtb));
+        }
+    }
+
     result
 }
 
@@ -779,9 +787,52 @@ fn probe_device_tree(addr: PhysAddr) {
     crate::mp::init_cpu_list(cpu_ids.into_boxed_slice(), runtime_boot_cpuid_phys);
 }
 
-#[cfg(not(target_arch = "riscv64"))]
+#[cfg(not(any(target_arch = "riscv64", target_arch = "aarch64")))]
 fn probe_device_tree(_addr: PhysAddr) {
     warn!("Device Tree probing is not supported on this target");
+}
+
+#[cfg(target_arch = "aarch64")]
+fn probe_device_tree(addr: PhysAddr) {
+    use fdt_rs::{
+        base::DevTree,
+        prelude::{FallibleIterator, PropReader},
+    };
+
+    let vaddr = va!(addr.as_usize() + crate::mem::vmm::direct_mapping_offset());
+    let dtb = unsafe { DevTree::from_raw_pointer(vaddr.as_ptr()).expect("failed to load dtb") };
+    let mut cpu_ids = Vec::new();
+    for node in dtb.nodes().iterator() {
+        let node = node.expect("failed to inspect CPU node");
+        let is_cpu = node
+            .props()
+            .find(|prop| Ok(prop.name()? == "device_type" && prop.str()? == "cpu"))
+            .expect("failed to inspect CPU type")
+            .is_some();
+        if !is_cpu {
+            continue;
+        }
+        let enabled = node
+            .props()
+            .find(|prop| Ok(prop.name()? == "status"))
+            .expect("failed to inspect CPU status")
+            .and_then(|prop| prop.str().ok())
+            .is_none_or(|status| status == "okay" || status == "ok");
+        if !enabled {
+            continue;
+        }
+        if let Some(reg) = node
+            .props()
+            .find(|prop| Ok(prop.name()? == "reg"))
+            .expect("failed to inspect CPU reg")
+        {
+            cpu_ids.push(reg.u64(0).expect("invalid CPU affinity") as usize);
+        }
+    }
+    if cpu_ids.is_empty() {
+        panic!("no enabled CPU nodes found in Device Tree");
+    }
+    crate::mp::init_cpu_list(cpu_ids.into_boxed_slice(), crate::mp::current_cpu_phys_id());
 }
 
 /// Probes and prints platform device information sources.

@@ -23,6 +23,11 @@ pub use crate::arch::riscv64::trap::{
     RiscvExternalIrqConfig, RiscvExternalIrqConfig as ArchIrqConfig, RiscvPlicContext,
 };
 
+#[cfg(target_arch = "aarch64")]
+pub use crate::arch::aarch64::trap::{
+    Aarch64ExternalIrqConfig, Aarch64ExternalIrqConfig as ArchIrqConfig,
+};
+
 /// Reports an external IRQ lifecycle or platform validation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrqError {

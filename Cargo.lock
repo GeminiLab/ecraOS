@@ -120,6 +120,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecraldr-aarch64-none"
+version = "0.1.0"
+dependencies = [
+ "ecraldr",
+ "ecraldr_base",
+ "ecraldr_build_rs",
+]
+
+[[package]]
 name = "ecraldr-riscv64-none"
 version = "0.1.0"
 dependencies = [
@@ -202,6 +211,7 @@ checksum = "b6419a5c75e40011b9fe0174db3fe24006ab122fbe1b7e9cc5974b338a755c76"
 name = "exarch"
 version = "0.1.0"
 dependencies = [
+ "aarch64-cpu",
  "bitflags 2.11.1",
  "crate_interface",
  "ecraldr_base",
@@ -219,6 +229,7 @@ dependencies = [
  "raw-cpuid 11.6.0",
  "riscv",
  "sbi-rt",
+ "tock-registers",
  "uart_16550",
  "x2apic",
  "x86",
@@ -266,6 +277,7 @@ dependencies = [
 name = "expt"
 version = "0.1.0"
 dependencies = [
+ "aarch64-cpu",
  "cfg-if",
  "dyn_static_traits",
  "expalloc_trait",

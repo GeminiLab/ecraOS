@@ -1,0 +1,11 @@
+[package]
+name = "ecraldr-aarch64-none"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecraldr = { path = "../ecraldr" }
+ecraldr_base = { path = "../ecraldr_base" }
+
+[build-dependencies]
+ecraldr_build_rs = { path = "../ecraldr_build_rs" }

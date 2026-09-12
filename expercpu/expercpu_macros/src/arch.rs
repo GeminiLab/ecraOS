@@ -29,7 +29,14 @@ pub fn gen_symbol_vma(symbol: &Ident) -> proc_macro2::TokenStream {
                 result = out(reg) value,
                 symbol = sym #symbol,
             );
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+            #[cfg(target_arch = "aarch64")]
+            ::core::arch::asm!(
+                "adrp {value}, {symbol}",
+                "add {value}, {value}, :lo12:{symbol}",
+                value = out(reg) value,
+                symbol = sym #symbol,
+            );
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64")))]
             { unimplemented!() }
             // #[cfg(target_arch = "aarch64")]
             // ::core::arch::asm!(
@@ -124,7 +131,23 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
             );
             ptr
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+        #[cfg(target_arch = "aarch64")]
+        {
+            let ptr: *const #ty;
+            let base: usize;
+            ::core::arch::asm!(
+                "adrp {ptr}, {symbol}",
+                "add {ptr}, {ptr}, :lo12:{symbol}",
+                "mrs {base}, TPIDR_EL1",
+                "add {ptr}, {ptr}, {base}",
+                ptr = out(reg) ptr,
+                base = out(reg) base,
+                symbol = sym #symbol,
+                options(nostack, readonly),
+            );
+            ptr
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64")))]
         { unimplemented!() }
         // #[cfg(not(target_arch = "x86_64"))]
         // {
@@ -254,7 +277,9 @@ pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStre
         // { #la64_code }
         #[cfg(target_arch = "x86_64")]
         { #x64_code }
-        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64")))]
+        #[cfg(target_arch = "aarch64")]
+        { unsafe { *self.current_ptr() } }
+        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64", target_arch = "aarch64")))]
         { unimplemented!() }
         // #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64", target_arch = "x86_64")))]
         // { *self.current_ptr() }
@@ -352,7 +377,9 @@ pub fn gen_write_current_raw(symbol: &Ident, val: &Ident, ty: &Type) -> proc_mac
         // { #la64_code }
         #[cfg(target_arch = "x86_64")]
         { #x64_code }
-        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64")))]
+        #[cfg(target_arch = "aarch64")]
+        { unsafe { *(self.current_ptr() as *mut #ty) = #val; } }
+        #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64", target_arch = "aarch64")))]
         { unimplemented!() }
         // #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64", target_arch = "x86_64")))]
         // { *(self.current_ptr() as *mut #ty) = #val }

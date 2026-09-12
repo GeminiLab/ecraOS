@@ -66,6 +66,9 @@ case "$target" in
     riscv64gc-unknown-none-elf)
         qemu=(qemu-system-riscv64 -machine virt)
         ;;
+    aarch64-unknown-none-softfloat)
+        qemu=(qemu-system-aarch64 -machine virt,gic-version=3 -cpu cortex-a72)
+        ;;
     *)
         printf 'error: unsupported target: %s\n' "$target" >&2
         exit 2
@@ -98,6 +101,19 @@ fi
 printf 'Loader: %s\n' "$loader_path" | tee -a "$log_path"
 
 qemu_args=("${qemu[@]}" -smp "$cpus" -nographic -no-reboot -kernel "$loader_path")
+if [[ "$target" == "aarch64-unknown-none-softfloat" ]]; then
+    dtb_dir="$ROOT/target/qemu-dtb"
+    dtb_path="$dtb_dir/virt-${cpus}.dtb"
+    mkdir -p "$dtb_dir"
+    qemu-system-aarch64 \
+        -machine "virt,gic-version=3,dumpdtb=$dtb_path" \
+        -cpu cortex-a72 \
+        -smp "$cpus" \
+        -display none \
+        -monitor none \
+        >/dev/null 2>>"$log_path"
+    qemu_args+=( -device "loader,file=$dtb_path,addr=0x47f00000" )
+fi
 qemu_args+=("${qemu_extra_args[@]}")
 
 set +e

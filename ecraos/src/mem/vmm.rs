@@ -11,7 +11,7 @@ use size_disp::SizeDisplay;
 
 use crate::{
     kprintln,
-    mem::{allocs, pmm::MemoryRegions, region_flags_to_mapping},
+    mem::{MemoryRegionFlags, allocs, early, pmm::MemoryRegions, region_flags_to_mapping},
 };
 
 /// The layout of the virtual address space.
@@ -30,6 +30,11 @@ pub struct VirtualAddressSpace {
 }
 
 static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
+
+/// Returns whether the virtual address space has been initialized.
+pub fn is_initialized() -> bool {
+    VIRTUAL_ADDRESS_SPACE.get().is_some()
+}
 
 #[inline]
 #[expect(unused)]
@@ -138,13 +143,17 @@ fn select_va_mode(va_modes: VirtAddrSpaceModes) -> VirtAddrSpaceMode {
         va_modes.modes[va_modes.current_index]
     );
 
-    // currently, we choose the largest unified mode
+    // Prefer an address-space mode that covers both halves. AArch64 exposes
+    // these as independent TTBR0 and TTBR1 regimes, while x86-64 and RISC-V
+    // expose a unified root.
     let mut chosen_index = None::<usize>;
     for (index, mode) in va_modes.modes.iter().enumerate() {
-        if matches!(mode, VirtAddrSpaceMode::Unified(..))
-            && chosen_index
-                .map(|index| va_modes.modes[index].upper_va_bits() < mode.upper_va_bits())
-                .unwrap_or(true)
+        if matches!(
+            mode,
+            VirtAddrSpaceMode::Unified(..) | VirtAddrSpaceMode::Independent { .. }
+        ) && chosen_index
+            .map(|index| va_modes.modes[index].upper_va_bits() < mode.upper_va_bits())
+            .unwrap_or(true)
         {
             chosen_index = Some(index);
         }
@@ -223,7 +232,27 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
         let vaddr_high = vaddr_low + virt_phys_offset;
         let size = region.range.size();
 
-        pt.map::<H>(vaddr_low, paddr, size, mapping_flags).unwrap();
+        // The high direct map is needed for all physical memory. The low
+        // identity map only needs to cover code/data used before the jump and
+        // pages allocated for the bootstrap page tables.
+        let early_range = early::phys_addr_range();
+        let needs_full_identity = region
+            .flags
+            .intersects(MemoryRegionFlags::KERNEL | MemoryRegionFlags::BOOT_SERVICE);
+        if needs_full_identity {
+            pt.map::<H>(vaddr_low, paddr, size, mapping_flags).unwrap();
+        } else if region.range.start < early_range.end && early_range.start < region.range.end {
+            let identity_start = region.range.start.max(early_range.start);
+            let identity_end = region.range.end.min(early_range.end);
+            let identity_size = identity_end.as_usize() - identity_start.as_usize();
+            pt.map::<H>(
+                VirtAddr::from_usize(identity_start.as_usize()),
+                identity_start,
+                identity_size,
+                mapping_flags,
+            )
+            .unwrap();
+        }
         pt.map::<H>(vaddr_high, paddr, size, mapping_flags).unwrap();
     }
 
