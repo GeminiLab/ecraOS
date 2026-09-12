@@ -7,7 +7,12 @@ use core::{
 
 use memory_addr::{PhysAddr, VirtAddr, va};
 
-use crate::power::{APEntry, CpuStartError, PhysicalCpuId, ShutdownReason};
+use crate::{
+    kernel_if::virt_to_phys,
+    power::{APEntry, CpuStartError, PhysicalCpuId, ShutdownReason},
+};
+
+core::arch::global_asm!(include_str!("ap_start.S"));
 
 const PSCI_CPU_ON: u64 = 0xC400_0003;
 const PSCI_SYSTEM_OFF: u64 = 0x8400_0008;
@@ -37,7 +42,7 @@ macro_rules! psci_with {
 }
 
 /// Invokes the PSCI function using the appropriate instruction.
-pub fn invoke(function: u64, arg0: u64, arg1: u64, arg2: u64) -> i64 {
+pub fn invoke_psci(function: u64, arg0: u64, arg1: u64, arg2: u64) -> i64 {
     if PSCI_USES_HVC.load(Ordering::Acquire) {
         psci_with!("hvc", function, arg0, arg1, arg2)
     } else {
@@ -45,21 +50,67 @@ pub fn invoke(function: u64, arg0: u64, arg1: u64, arg2: u64) -> i64 {
     }
 }
 
+/// The arguments passed to the AP trampoline.
+///
+/// This structure is placed on the AP boot stack and consumed by the assembly trampoline before
+/// transferring control to the Rust entry point.
+#[repr(C)]
+struct ApBootArgs {
+    /// The physical ID of the CPU being started.
+    phys_id: PhysicalCpuId,
+    /// The physical address of the shared translation-table root.
+    page_table_root: PhysAddr,
+    /// The high-half virtual address of the AP stack top.
+    stack_top: VirtAddr,
+    /// The high-half virtual address of the Rust AP entry.
+    entry: VirtAddr,
+}
+
+unsafe extern "C" {
+    fn _start_ap();
+}
+
 /// Requests PSCI to start one application CPU.
 pub fn cpu_up(
     phys_id: PhysicalCpuId,
-    _page_table_root: PhysAddr,
+    page_table_root: PhysAddr,
     boot_stack_top: VirtAddr,
     entry: APEntry,
 ) -> Result<(), CpuStartError> {
-    let entry_pa = crate::kernel_if::virt_to_phys(va!(entry as *const () as usize));
-    let stack_pa = crate::kernel_if::virt_to_phys(boot_stack_top);
-    let result = invoke(
+    // Write the AP boot arguments to the top of the AP boot stack.
+    let args_addr = VirtAddr::from_usize(
+        boot_stack_top
+            .as_usize()
+            .checked_sub(core::mem::size_of::<ApBootArgs>())
+            .expect("AP boot stack is too small for startup arguments"),
+    );
+    let args = args_addr.as_mut_ptr_of::<ApBootArgs>();
+    // SAFETY: The AP boot stack is exclusively owned by the CPU being started,
+    // and the trampoline consumes these fields before entering Rust.
+    unsafe {
+        core::ptr::write_volatile(
+            args,
+            ApBootArgs {
+                phys_id,
+                page_table_root,
+                stack_top: boot_stack_top,
+                entry: VirtAddr::from_ptr_of(entry as *const ()),
+            },
+        );
+    }
+
+    // Convert the trampoline and arguments to physical addresses for PSCI.
+    let trampoline_pa = virt_to_phys(va!(_start_ap as *const () as usize));
+    let args_pa = virt_to_phys(args_addr);
+
+    // Start the AP by PSCI.
+    let result = invoke_psci(
         PSCI_CPU_ON,
         phys_id as u64,
-        entry_pa.as_usize() as u64,
-        stack_pa.as_usize() as u64,
+        trampoline_pa.as_usize() as u64,
+        args_pa.as_usize() as u64,
     );
+
     match result {
         0 => Ok(()),
         -1 => Err(CpuStartError::Unsupported),
@@ -72,7 +123,7 @@ pub fn cpu_up(
 
 /// Requests a PSCI system shutdown and spins if firmware returns.
 pub fn shutdown(_reason: ShutdownReason) -> ! {
-    let _ = invoke(PSCI_SYSTEM_OFF, 0, 0, 0);
+    let _ = invoke_psci(PSCI_SYSTEM_OFF, 0, 0, 0);
     loop {
         core::hint::spin_loop();
     }

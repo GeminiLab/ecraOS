@@ -44,8 +44,8 @@ pub fn probe_platform(arg: PlatformBootArg) {
             continue;
         };
         let gicd = reg.u64(0).expect("invalid GIC distributor base");
-        let gicr = reg.u64(2).unwrap_or(gicd + 0x10000);
         let size = reg.u64(1).unwrap_or(0x100000);
+        let gicr = reg.u64(2).unwrap_or(gicd + 0x10000);
         GIC_CONFIG.init_once(Aarch64ExternalIrqConfig {
             gicd_base: memory_addr::PhysAddr::from_usize(gicd as usize),
             gicr_base: memory_addr::PhysAddr::from_usize(gicr as usize),
@@ -65,6 +65,7 @@ pub fn init_early(arg: PlatformBootArg) {
 pub fn init_later() {
     if let Some(config) = GIC_CONFIG.get() {
         crate::trap::irq::init_external_controller(config.clone());
+        super::trap::init_percpu();
     }
 }
 
@@ -74,4 +75,6 @@ pub fn init_early_ap() {
 }
 
 /// Runs late application-CPU initialization.
-pub fn init_later_ap() {}
+pub fn init_later_ap() {
+    super::trap::init_percpu();
+}

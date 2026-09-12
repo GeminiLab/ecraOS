@@ -21,6 +21,7 @@ exarch_task_switch:
     ret
 .size exarch_task_switch, . - exarch_task_switch
 
+.global context_entry_trampoline
 .type context_entry_trampoline, %function
 context_entry_trampoline:
     mov x0, x19

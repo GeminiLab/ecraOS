@@ -3,9 +3,14 @@
 .global aarch64_vector_base
 .type aarch64_vector_base, %function
 aarch64_vector_base:
+.set vector_index, 0
 .rept 16
+    sub sp, sp, #16
+    str x16, [sp]
+    mov x16, #vector_index
     b aarch64_vector_entry
-    .space 124
+    .space 112
+    .set vector_index, vector_index + 1
 .endr
 .size aarch64_vector_base, . - aarch64_vector_base
 
@@ -37,6 +42,9 @@ aarch64_vector_entry:
     str x0, [sp, #272]
     mrs x0, far_el1
     str x0, [sp, #280]
+    ldr x17, [sp, #288]
+    str x17, [sp, #128]
+    str x16, [sp, #288]
     mov x0, sp
     bl aarch64_trap_handler
     ldr x0, [sp, #256]
@@ -60,4 +68,6 @@ aarch64_vector_entry:
     ldp x28, x29, [sp, #224]
     ldr x30, [sp, #240]
     add sp, sp, #288
+    ldr x16, [sp]
+    add sp, sp, #16
     eret

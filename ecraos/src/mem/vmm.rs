@@ -236,9 +236,11 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
         // identity map only needs to cover code/data used before the jump and
         // pages allocated for the bootstrap page tables.
         let early_range = early::phys_addr_range();
-        let needs_full_identity = region
-            .flags
-            .intersects(MemoryRegionFlags::KERNEL | MemoryRegionFlags::BOOT_SERVICE);
+        let needs_full_identity = region.flags.intersects(
+            MemoryRegionFlags::KERNEL
+                | MemoryRegionFlags::BOOT_SERVICE
+                | MemoryRegionFlags::EXECUTE,
+        );
         if needs_full_identity {
             pt.map::<H>(vaddr_low, paddr, size, mapping_flags).unwrap();
         } else if region.range.start < early_range.end && early_range.start < region.range.end {

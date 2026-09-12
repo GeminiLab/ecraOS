@@ -90,6 +90,7 @@ const GICD_IGROUPR: usize = 0x080;
 const GICR_WAKER: usize = 0x14;
 const GICR_SGI_BASE: usize = 0x10000;
 const GICR_ISENABLER0: usize = GICR_SGI_BASE + 0x100;
+const GICR_IGROUPR0: usize = GICR_SGI_BASE + 0x080;
 const GICR_IPRIORITYR: usize = GICR_SGI_BASE + 0x400;
 
 /// Returns whether an INTID belongs to the GIC SPI namespace.
@@ -179,6 +180,10 @@ pub fn init_percpu() {
         let gic = gic.lock();
         let waker = gic.read32(gic.redist, GICR_WAKER);
         gic.write32(gic.redist, GICR_WAKER, waker & !(1 << 1));
+        // Run all SGIs and PPIs as non-secure Group 1 interrupts.  This keeps
+        // local timer and software interrupt routing consistent with the SPI
+        // configuration in the distributor.
+        gic.write32(gic.redist, GICR_IGROUPR0, u32::MAX);
         gic.write32(gic.redist, GICR_ISENABLER0, 1 << 27);
         unsafe {
             ((gic.redist + GICR_IPRIORITYR + 27) as *mut u8).write_volatile(0x80);
@@ -242,7 +247,8 @@ mod tests {
 #[unsafe(no_mangle)]
 extern "C" fn aarch64_trap_handler(frame: &mut TrapFrame) {
     let ec = (frame.esr_el1 >> 26) & 0x3f;
-    let disposition = if (frame.esr_el1 & (1 << 31)) != 0 {
+    let is_irq = frame.vector % 4 == 1;
+    let disposition = if is_irq {
         handle_external(frame)
     } else {
         let trap = match ec {

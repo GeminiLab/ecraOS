@@ -105,6 +105,8 @@ pub struct TrapFrame {
     pub esr_el1: usize,
     /// Saved fault address.
     pub far_el1: usize,
+    /// Identifies the vector slot that entered the frame.
+    pub vector: usize,
 }
 
 impl TrapFrameAccess for TrapFrame {
