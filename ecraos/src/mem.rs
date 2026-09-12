@@ -179,6 +179,7 @@ pub fn init_ap() {
     allocs::malloc::init_malloc_current_cpu();
 }
 
+#[cfg(not(target_arch = "aarch64"))]
 pub fn remove_identical_mappings() {
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 }

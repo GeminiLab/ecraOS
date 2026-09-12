@@ -259,6 +259,7 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
     *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
 }
 
+#[cfg(not(target_arch = "aarch64"))]
 pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &MemoryRegions) {
     info!("Removing identical mappings...");
 

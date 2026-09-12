@@ -798,9 +798,38 @@ fn probe_device_tree(addr: PhysAddr) {
         base::DevTree,
         prelude::{FallibleIterator, PropReader},
     };
+    use log::debug;
 
     let vaddr = va!(addr.as_usize() + crate::mem::vmm::direct_mapping_offset());
     let dtb = unsafe { DevTree::from_raw_pointer(vaddr.as_ptr()).expect("failed to load dtb") };
+
+    // CPU `reg` properties use the cell width declared by their `/cpus` parent.
+    // QEMU's `virt` tree declares one address cell, so reading the property as a
+    // native `u64` would skip past the four-byte value and report InvalidOffset.
+    let mut cpu_address_cells = None;
+    for node in dtb.nodes().iterator() {
+        let node = node.expect("failed to inspect device-tree node");
+        if !node
+            .name()
+            .is_ok_and(|name| name.split('@').next() == Some("cpus"))
+        {
+            continue;
+        }
+        cpu_address_cells = node
+            .props()
+            .find(|prop| Ok(prop.name()? == "#address-cells"))
+            .expect("failed to inspect CPU address-cell property")
+            .and_then(|prop| prop.u32(0).ok())
+            .map(|cells| cells as usize);
+        break;
+    }
+    let cpu_address_cells = cpu_address_cells.unwrap_or(2);
+    debug!("CPU address cells: {}", cpu_address_cells);
+    assert!(
+        matches!(cpu_address_cells, 1 | 2),
+        "unsupported CPU address-cell count: {cpu_address_cells}"
+    );
+
     let mut cpu_ids = Vec::new();
     for node in dtb.nodes().iterator() {
         let node = node.expect("failed to inspect CPU node");
@@ -826,7 +855,16 @@ fn probe_device_tree(addr: PhysAddr) {
             .find(|prop| Ok(prop.name()? == "reg"))
             .expect("failed to inspect CPU reg")
         {
-            cpu_ids.push(reg.u64(0).expect("invalid CPU affinity") as usize);
+            let affinity = match cpu_address_cells {
+                1 => u64::from(reg.u32(0).expect("invalid CPU affinity")),
+                2 => {
+                    let high = u64::from(reg.u32(0).expect("invalid CPU affinity"));
+                    let low = u64::from(reg.u32(1).expect("invalid CPU affinity"));
+                    (high << 32) | low
+                }
+                _ => unreachable!("CPU address-cell count validated above"),
+            };
+            cpu_ids.push(usize::try_from(affinity).expect("CPU affinity exceeds usize"));
         }
     }
     if cpu_ids.is_empty() {
