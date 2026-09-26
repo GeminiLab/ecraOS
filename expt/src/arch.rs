@@ -1,4 +1,8 @@
 //! Architecture-specific functions and types.
+//!
+//! Each target module supplies [`crate::PageTableMeta`] implementations and TLB
+//! invalidation primitives for the page-table formats supported by that
+//! architecture.
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;

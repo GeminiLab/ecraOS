@@ -1,137 +1,65 @@
+//! Architecture-flexible page-table management.
+//!
+//! This crate builds and mutates hierarchical page tables described by
+//! [`PageTableMeta`] and entries implementing [`GenericPTE`]. [`PageTable`] keeps
+//! the concrete representation available for compile-time dispatch, while the
+//! [`opaque`] module offers runtime selection among page-table formats.
+//!
+//! Mutations are performed through [`PageTableCursor`]. A cursor batches the TLB
+//! invalidations required by mapping changes and performs them explicitly through
+//! [`PageTableCursor::flush`] or automatically when it is dropped.
+
 #![no_std]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(generic_const_items)]
 
+/// The standard library used by unit tests.
+///
+/// Production builds remain `no_std`, while the test module uses host allocation
+/// and thread-local storage.
 #[cfg(test)]
 extern crate std;
 
-pub mod arch;
-mod meta;
-pub mod opaque;
-pub mod pte {
-    pub use page_table_entry::*;
-}
-
-use core::{
-    marker::PhantomData,
-    ops::{Add, AddAssign},
-};
+use core::marker::PhantomData;
 
 use expalloc_trait::{DynPageAllocator, PageAllocator};
-use heapless::Vec as HeaplessVec;
 use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
+pub mod arch;
+mod meta;
+pub mod opaque;
+/// Page-table entry types and flags.
+///
+/// This module re-exports the entry abstractions supplied by the
+/// [`page_table_entry`] crate.
+pub mod pte {
+    pub use page_table_entry::*;
+}
+pub mod error;
+mod flush;
+
+pub use error::{PagingError, PagingResult};
+pub(crate) use flush::{PendingTlbFlushes, TlbFlush};
 pub use meta::PageTableMeta;
 
-#[derive(Debug, thiserror::Error)]
-pub enum PagingError {
-    #[error("The page is not mapped")]
-    NotMapped,
-    #[error("The page is already mapped")]
-    AlreadyMapped,
-    #[error("The page is mapped to a huge page")]
-    MappedToHugePage,
-    #[error("Allocation failed")]
-    AllocationFailed,
-    #[error("The page cannot be a page at level {level}")]
-    CannotBePage { level: usize },
-}
-
-pub type PagingResult<T = ()> = Result<T, PagingError>;
-
-// #[dyn_static_traits(DynPageAllocator)]
-// pub trait PageAllocator {
-//     fn alloc_page_aligned(bytes_required: usize) -> Option<PhysAddr>;
-//     fn dealloc_page_aligned(addr: PhysAddr, bytes_deallocated: usize);
-//     fn phys_to_virt(addr: PhysAddr) -> VirtAddr;
-// }
-
-struct PageTableMetaAssertions<M: PageTableMeta> {
-    _phantom: PhantomData<M>,
-}
-
-impl<M: PageTableMeta> PageTableMetaAssertions<M> {
-    const VA_BITS_ASSERTIONS: () = assert!(M::VA_BITS <= 64, "Virtual address space must be no more than 64 bits") where [(); M::LEVELS]: Sized;
-    const LEVELS_ASSERTIONS: () = assert!(
-        M::LEVELS <= 5 && M::LEVELS > 0,
-        "Page table level must be no more than 5 and greater than 0"
-    );
-    const MAX_PAGE_LEVEL_ASSERTIONS: () = assert!(
-        // 0 <= M::MAX_PAGE_LEVEL && 
-        M::MAX_PAGE_LEVEL < M::LEVELS,
-        "`M::MAX_PAGE_LEVEL` must be greater or equal than 0 and less than `M::LEVELS`"
-    ) where [(); M::LEVELS]: Sized;
-
-    #[doc(hidden)]
-    #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
-    pub const ASSERTIONS: () = {
-        let _ = Self::VA_BITS_ASSERTIONS;
-        let _ = Self::LEVELS_ASSERTIONS;
-        let _ = Self::MAX_PAGE_LEVEL_ASSERTIONS;
-    } where [(); M::LEVELS]: Sized;
-}
-
-const SMALL_FLUSH_THRESHOLD: usize = 32;
-
-enum TlbFlush<M: PageTableMeta> {
-    None,
-    Page(M::VirtAddr),
-    Full,
-}
-
-enum PendingTlbFlushes<M: PageTableMeta> {
-    None,
-    Pages(HeaplessVec<M::VirtAddr, SMALL_FLUSH_THRESHOLD>),
-    Full,
-}
-
-impl<M: PageTableMeta> AddAssign<TlbFlush<M>> for PendingTlbFlushes<M> {
-    fn add_assign(&mut self, rhs: TlbFlush<M>) {
-        match rhs {
-            TlbFlush::None => {}
-            TlbFlush::Page(vaddr) => match self {
-                PendingTlbFlushes::None => {
-                    let mut pages = HeaplessVec::new();
-                    let _ = pages.push(vaddr);
-                    *self = PendingTlbFlushes::Pages(pages);
-                }
-                PendingTlbFlushes::Pages(pages) => {
-                    if pages.push(vaddr).is_err() {
-                        *self = PendingTlbFlushes::Full;
-                    }
-                }
-                PendingTlbFlushes::Full => {}
-            },
-            TlbFlush::Full => *self = PendingTlbFlushes::Full,
-        }
-    }
-}
-
-impl<M: PageTableMeta> Add<TlbFlush<M>> for PendingTlbFlushes<M> {
-    type Output = Self;
-
-    fn add(mut self, rhs: TlbFlush<M>) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl<M: PageTableMeta> PendingTlbFlushes<M> {
-    fn flush(&mut self) {
-        match self {
-            PendingTlbFlushes::None => {}
-            PendingTlbFlushes::Pages(pages) => {
-                for vaddr in pages.iter().copied() {
-                    M::flush_tlb(Some(vaddr));
-                }
-            }
-            PendingTlbFlushes::Full => M::flush_tlb(None),
-        }
-        *self = PendingTlbFlushes::None;
-    }
+/// A hierarchical page table with architecture-defined geometry.
+///
+/// `M` describes the virtual-address layout and TLB operations, while `PTE`
+/// supplies the concrete entry representation. The value owns no allocation by
+/// itself and identifies its root through a physical address.
+pub struct PageTable<M: PageTableMeta, PTE: GenericPTE> {
+    /// The physical address of the root page table.
+    ///
+    /// The table is accessed through the [`PageAllocator`] supplied to each
+    /// allocating or mutating operation.
+    root: PhysAddr,
+    /// The compile-time association with the metadata and entry types.
+    ///
+    /// Neither type requires runtime storage in a page-table handle.
+    _phantom: PhantomData<(PTE, M)>,
 }
 
 /// A mutating cursor over a page table.
@@ -142,15 +70,21 @@ pub struct PageTableCursor<'a, M: PageTableMeta, PTE: GenericPTE>
 where
     [(); M::LEVELS]: Sized,
 {
+    /// The page table being mutated.
+    ///
+    /// The mutable borrow ensures that only one cursor can update the table at a
+    /// time.
     table: &'a mut PageTable<M, PTE>,
+    /// The TLB invalidations accumulated by cursor operations.
+    ///
+    /// These records are consumed by [`Self::flush`] or [`Drop::drop`].
     pending_flushes: PendingTlbFlushes<M>,
 }
 
-pub struct PageTable<M: PageTableMeta, PTE: GenericPTE> {
-    root: PhysAddr,
-    _phantom: PhantomData<(PTE, M)>,
-}
-
+/// Computes the end of a page without exceeding a range.
+///
+/// Returns [`None`] when adding `page_size` overflows or when the resulting
+/// address lies after `end`.
 fn checked_page_end<A: MemoryAddr>(start: A, end: A, page_size: usize) -> Option<A> {
     let next = usize::checked_add(start.into(), page_size)?;
     if next <= end.into() {
@@ -164,14 +98,17 @@ impl<M: PageTableMeta, PTE: GenericPTE> PageTable<M, PTE>
 where
     [(); M::LEVELS]: Sized,
 {
-    /// Creates a new page table at the given physical address.
+    /// Creates a page-table handle for an existing root.
+    ///
+    /// This function does not inspect or initialize the root table. Later
+    /// operations access it through their selected [`PageAllocator`].
     ///
     /// # Safety
     ///
     /// The caller must ensure that the physical address is valid.
     pub unsafe fn new_at(paddr: PhysAddr) -> Self {
         #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
-        let _ = PageTableMetaAssertions::<M>::ASSERTIONS;
+        let _ = meta::PageTableMetaAssertions::<M>::ASSERTIONS;
 
         Self {
             root: paddr,
@@ -180,6 +117,9 @@ where
     }
 
     /// Allocates and initializes a new root page table through `H`.
+    ///
+    /// The root has the size required by the highest level in `M` and is
+    /// zero-initialized before the handle is returned.
     #[maybe_non_generic(
         new_alloc_dyn,
         type(H => handler: DynPageAllocator),
@@ -209,17 +149,25 @@ where
         }
     }
 
+    /// Returns the byte size of a page table at one level.
+    ///
+    /// The size is the concrete entry size multiplied by the number of entries
+    /// configured for `LEVEL`.
     const fn table_size<const LEVEL: usize>() -> usize {
         size_of::<PTE>() << M::LEVEL_BITS[LEVEL]
     }
 
-    const fn index<const LEVEL: usize>(vaddr: usize) -> usize {
+    /// Extracts the page-table index for one virtual-address level.
+    ///
+    /// `LEVEL` selects the bit range described by
+    /// [`PageTableMeta::LEVEL_BIT_RANGES`].
+    const fn index<const LEVEL: usize>(vaddr_raw: usize) -> usize {
         let (start, end) = M::LEVEL_BIT_RANGES[LEVEL];
 
-        (vaddr >> start) & ((1 << (end - start)) - 1)
+        (vaddr_raw >> start) & ((1 << (end - start)) - 1)
     }
 
-    /// Gets the table at level `LEVEL` from its physical address `paddr`.
+    /// Gets a mutable table at `LEVEL` from its physical address.
     #[maybe_non_generic(table_of_mut_non_const, const(LEVEL => level: usize))]
     #[maybe_non_generic(table_of_mut_dyn, type(H => handler: DynPageAllocator))]
     #[maybe_non_generic(
@@ -236,6 +184,7 @@ where
         }
     }
 
+    /// Allocates and clears a page table at one level.
     #[maybe_non_generic(alloc_table_dyn, type(H => handler: DynPageAllocator))]
     fn alloc_table<const LEVEL: usize, H: PageAllocator>() -> PagingResult<PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
@@ -265,6 +214,11 @@ where
         self.pending_flushes.flush();
     }
 
+    /// Locates and clears an entry at a requested level.
+    ///
+    /// Missing intermediate tables may be allocated, and huge pages may be split,
+    /// according to `create_if_not_exists` and `split_huge_page`. The returned
+    /// index identifies the entry within its containing table.
     #[maybe_non_generic(
         get_page_entry_mut_dyn,
         type(H => handler: DynPageAllocator),
@@ -347,7 +301,11 @@ where
         Ok((p0e, index0))
     }
 
-    /// Gets the table at level `LEVEL` from a PTE of the level above.
+    /// Gets a mutable child table at `LEVEL` from an entry at the level above.
+    ///
+    /// An unused entry can be populated with a newly allocated table. A huge leaf
+    /// can instead be expanded into a child table whose entries preserve the old
+    /// physical mapping and flags.
     #[maybe_non_generic(
         next_table_mut_dyn,
         type(H => handler: DynPageAllocator),
@@ -395,6 +353,11 @@ where
         }
     }
 
+    /// Clears an entry and all leaf mappings below it.
+    ///
+    /// Clearing a leaf records the required TLB invalidation. For a table entry,
+    /// the function recursively clears its descendants while retaining all table
+    /// allocations.
     #[maybe_non_generic(
         clear_pte_dyn,
         type(H => handler: DynPageAllocator),
@@ -427,16 +390,15 @@ where
         }
     }
 
-    /// Split the given range into pages (as large and less as possible), remove
-    /// all current mappings on the range, and call the given function for PTEs
-    /// of each page.
+    /// Splits a range into the fewest largest supported pages and invokes a
+    /// callback for each selected page.
     ///
-    /// The parameters of the function are:
-    /// - The level of the PTE: `0` for the lowest level, `M::LEVELS - 1` for
-    ///   the highest level,
-    /// - The index of the PTE in the table of the level,
-    /// - The start virtual address of the page, and
-    /// - The mutable reference to the PTE of the page.
+    /// The function removes current mappings from the range and calls `f` for the
+    /// entry representing each selected page.
+    ///
+    /// The callback parameters are the entry level, its table index, the page's
+    /// starting virtual address, and a mutable reference to the entry. Level `0`
+    /// is the lowest level and `M::LEVELS - 1` is the highest.
     ///
     /// Before calling the function, the PTE is [cleared](GenericPTE::clear). If
     /// the PTE points to a table, descendant entries are cleared recursively and
@@ -534,10 +496,18 @@ impl<'a, M: PageTableMeta, PTE: GenericPTE> Drop for PageTableCursor<'a, M, PTE>
 where
     [(); M::LEVELS]: Sized,
 {
+    /// Flushes invalidations left pending when the cursor leaves scope.
+    ///
+    /// This guarantees that successfully applied mutations are synchronized even
+    /// when a later cursor operation returns an error.
     fn drop(&mut self) {
         self.flush();
     }
 }
 
+/// Unit tests for concrete traversal, mapping, and TLB behavior.
+///
+/// The tests use a compact three-level format and an in-memory frame allocator
+/// to exercise page-table state deterministically.
 #[cfg(test)]
 mod tests;
