@@ -7,6 +7,39 @@ use core::{fmt::LowerHex, marker::PhantomData, ops::Add};
 
 use memory_addr::MemoryAddr;
 
+/// The range of the virtual address space covered by a page table.
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PageTableCoverage {
+    /// The page table covers the lower portion of the virtual address space.
+    Lower = 0,
+    /// The page table covers the upper portion of the virtual address space.
+    Upper = 1,
+    /// The page table covers both portions of the virtual address space
+    /// symmetrically.
+    Symmetric = 2,
+}
+
+impl PageTableCoverage {
+    /// Converts the encoded coverage discriminant into a coverage value.
+    ///
+    /// Panics when `value` is not one of the discriminants defined by
+    /// [`PageTableCoverage`].
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Lower,
+            1 => Self::Upper,
+            2 => Self::Symmetric,
+            _ => panic!("Invalid PageTableCoverage value"),
+        }
+    }
+}
+
+/// A marker trait for virtual-address types used by page tables.
+pub trait VirtAddr: MemoryAddr + Add<usize, Output = Self> + LowerHex {}
+
+impl<T> VirtAddr for T where T: MemoryAddr + Add<usize, Output = T> + LowerHex {}
+
 /// Returns the first virtual-address bit handled by a page-table level.
 ///
 /// Level numbering starts at zero for the lowest page-table level. The returned
@@ -46,7 +79,7 @@ pub trait PageTableMeta: Send + Sync {
     ///
     /// It must support address arithmetic and hexadecimal formatting in addition
     /// to the common [`MemoryAddr`] operations.
-    type VirtAddr: MemoryAddr + Add<usize, Output = Self::VirtAddr> + LowerHex;
+    type VirtAddr: VirtAddr;
 
     /// Flushes entries from the local translation lookaside buffer.
     ///
@@ -72,6 +105,8 @@ pub trait PageTableMeta: Send + Sync {
     /// x86 PAE page tables have `[9, 9, 2]`, and RISC-V Sv39x4 page tables have
     /// `[9, 9, 11]`.
     const LEVEL_BITS: [usize; Self::LEVELS] where [(); Self::LEVELS]: Sized;
+    /// The portion of the virtual address space covered by the page table.
+    const COVERAGE: PageTableCoverage;
 
     // Required constants with default values:
     /// The maximum level of the page table whose entries can be a page.

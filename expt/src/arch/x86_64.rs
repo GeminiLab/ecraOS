@@ -5,7 +5,7 @@
 
 use memory_addr::VirtAddr;
 
-use crate::PageTableMeta;
+use crate::{PageTableCoverage, PageTableMeta};
 
 /// Flushes one mapping or the entire local x86-64 TLB.
 ///
@@ -38,6 +38,9 @@ impl PageTableMeta for X86Level4PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each paging level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
+    /// x86-64 four-level paging covers both the lower and upper portions of the
+    /// virtual address space symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
 
     /// The highest level that supports an x86-64 leaf mapping.
     ///
@@ -68,6 +71,9 @@ impl PageTableMeta for X86Level5PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each paging level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
+    /// x86-64 five-level paging covers both the lower and upper portions of the
+    /// virtual address space symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
 
     /// The highest level that supports an x86-64 leaf mapping.
     ///

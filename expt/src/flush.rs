@@ -11,7 +11,7 @@ use crate::PageTableMeta;
 ///
 /// Recording one more page than this capacity promotes the pending operation to
 /// a full local TLB flush.
-const SMALL_FLUSH_THRESHOLD: usize = 32;
+pub(crate) const SMALL_FLUSH_THRESHOLD: usize = 32;
 
 /// A TLB invalidation requested by one page-table mutation.
 ///

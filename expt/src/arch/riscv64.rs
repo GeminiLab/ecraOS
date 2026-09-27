@@ -5,7 +5,7 @@
 
 use memory_addr::VirtAddr;
 
-use crate::PageTableMeta;
+use crate::{PageTableCoverage, PageTableMeta};
 
 /// Flushes one mapping or the entire local RISC-V TLB.
 ///
@@ -42,6 +42,8 @@ impl PageTableMeta for Sv39PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv39 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9];
+    /// Sv39 covers both the lower and upper portions of the virtual address space symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
 
     /// The highest level that supports an Sv39 leaf mapping.
     ///
@@ -71,6 +73,8 @@ impl PageTableMeta for Sv48PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv48 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
+    /// Sv48 covers both the lower and upper portions of the virtual address space symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
 
     /// The highest level that supports an Sv48 leaf mapping.
     ///
@@ -100,6 +104,8 @@ impl PageTableMeta for Sv57PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv57 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
+    /// Sv57 covers both the lower and upper portions of the virtual address space symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
 
     /// The highest level that supports an Sv57 leaf mapping.
     ///

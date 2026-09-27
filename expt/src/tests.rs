@@ -8,6 +8,8 @@ use std::{
 use memory_addr::{PhysAddr, VirtAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
+use crate::opaque::{OpaquePageTableType, PageTableAction};
+
 use super::*;
 
 /// The tag for an unused test entry.
@@ -179,6 +181,8 @@ impl PageTableMeta for TestMeta {
     ///
     /// Every table therefore contains four entries.
     const LEVEL_BITS: [usize; Self::LEVELS] = [2, 2, 2];
+    /// The compact test format covers the lower virtual-address range.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Lower;
     /// The highest level permitted to contain a test leaf.
     ///
     /// Every level in the compact format supports page mappings.
@@ -191,6 +195,28 @@ impl PageTableMeta for TestMeta {
             log.borrow_mut().push(vaddr.map(|vaddr| vaddr.as_usize()));
         });
     }
+}
+
+/// Metadata for testing symmetric canonical-address validation.
+///
+/// The compact geometry keeps the canonical-boundary tests independent from a
+/// target architecture's page-table implementation.
+struct SymmetricTestMeta;
+
+impl PageTableMeta for SymmetricTestMeta {
+    /// The virtual-address type used by the symmetric validation tests.
+    type VirtAddr = VirtAddr;
+    /// The three levels used by the validation tests.
+    const LEVELS: usize = 3;
+    /// The twelve-bit offset of a 4 KiB base page.
+    const PAGE_OFFSET_BITS: usize = 12;
+    /// The two virtual-address bits handled at each test level.
+    const LEVEL_BITS: [usize; Self::LEVELS] = [2, 2, 2];
+    /// The format covers canonical lower and upper ranges symmetrically.
+    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
+
+    /// The validation tests do not issue TLB invalidations.
+    fn flush_tlb(_vaddr: Option<Self::VirtAddr>) {}
 }
 
 /// The resolved mapping observed by the test page-table walker.
@@ -684,6 +710,81 @@ fn page_level_selection_rejects_wrapping_end_addresses() {
     );
 }
 
+/// Verifies canonical validation for symmetric virtual-address coverage.
+#[test]
+fn symmetric_vaddr_validation_rejects_canonical_hole() {
+    type Table = PageTable<SymmetricTestMeta, TestPte>;
+    let low_end = 1usize << (SymmetricTestMeta::VA_BITS - 1);
+    let upper_start = usize::MAX - low_end + 1;
+
+    assert!(matches!(
+        Table::validate_and_truncate_vaddr_range(AddrRange::new(
+            VirtAddr::from_usize(0),
+            VirtAddr::from_usize(low_end),
+        )),
+        Ok((0, end)) if end == low_end
+    ));
+    assert!(matches!(
+        Table::validate_and_truncate_vaddr_range(AddrRange::new(
+            VirtAddr::from_usize(upper_start),
+            VirtAddr::from_usize(upper_start + TestMeta::PAGE_SIZE),
+        )),
+        Ok((start, end)) if start == low_end && end == low_end + TestMeta::PAGE_SIZE
+    ));
+    assert!(matches!(
+        Table::validate_and_truncate_vaddr_range(AddrRange::new(
+            VirtAddr::from_usize(low_end - TestMeta::PAGE_SIZE),
+            VirtAddr::from_usize(upper_start + TestMeta::PAGE_SIZE),
+        )),
+        Err(PagingError::NonCanonical { .. })
+    ));
+}
+
+/// Verifies that opaque action batches share one concrete cursor.
+#[test]
+fn opaque_page_table_applies_action_batch() {
+    reset_test_state();
+    let page_table_type = OpaquePageTableType::<VirtAddr>::new::<TestMeta, TestPte>();
+    let mut opaque_page_table = page_table_type
+        .new_pagetable_alloc::<TestPagingHandler>()
+        .unwrap();
+
+    opaque_page_table
+        .apply_actions::<TestPagingHandler, _>([
+            PageTableAction::Map {
+                vaddr: VirtAddr::from_usize(0x3000),
+                paddr: PhysAddr::from_usize(0xa000),
+                size: TestMeta::PAGE_SIZE,
+                flags: MappingFlags::READ,
+            },
+            PageTableAction::Map {
+                vaddr: VirtAddr::from_usize(0x4000),
+                paddr: PhysAddr::from_usize(0xb000),
+                size: TestMeta::PAGE_SIZE,
+                flags: MappingFlags::READ | MappingFlags::WRITE,
+            },
+        ])
+        .unwrap();
+
+    let table = unsafe { PageTable::<TestMeta, TestPte>::new_at(opaque_page_table.root_paddr()) };
+    assert_mapping(
+        &table,
+        0x3000,
+        0xa000,
+        MappingFlags::READ,
+        TestMeta::PAGE_SIZE,
+    );
+    assert_mapping(
+        &table,
+        0x4000,
+        0xb000,
+        MappingFlags::READ | MappingFlags::WRITE,
+        TestMeta::PAGE_SIZE,
+    );
+    assert_eq!(flush_log(), std::vec![Some(0x3000), Some(0x4000)]);
+    reset_test_state();
+}
+
 /// Verifies replacement of an existing mapping at the same level.
 ///
 /// The later physical range and flags must completely replace the earlier huge
@@ -980,7 +1081,7 @@ fn cursor_flush_threshold_falls_back_to_full_flush() {
 
     {
         let mut cursor = table.cursor();
-        for page in 0..=SMALL_FLUSH_THRESHOLD {
+        for page in 0..=super::flush::SMALL_FLUSH_THRESHOLD {
             cursor
                 .map::<TestPagingHandler>(
                     VirtAddr::from_usize(page * TestMeta::PAGE_SIZE),

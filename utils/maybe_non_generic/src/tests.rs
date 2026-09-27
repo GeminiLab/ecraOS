@@ -616,8 +616,9 @@ fn rewrites_path_call_and_removes_replaced_turbofish_args() {
     );
 
     assert!(
-        output
-            .contains("Self :: alloc_table_dyn :: < { M :: LEVELS - 1 } > (handler . clone ()) ?"),
+        output.contains(
+            "Self :: alloc_table_dyn :: < { M :: LEVELS - 1 } > (Clone :: clone (& handler)) ?",
+        ),
         "{output}"
     );
 }
@@ -631,7 +632,7 @@ fn rewrites_bare_const_and_type_turbofish_args() {
         "copy, const(LEVEL => level: usize), type(H => handler: DynPagingHandler)",
     );
 
-    assert!(output.contains("table_of_mut (paddr , level , handler . clone ())"));
+    assert!(output.contains("table_of_mut (paddr , level , Clone :: clone (& handler))"));
     assert!(!output.contains(":: <"));
 }
 
@@ -646,7 +647,7 @@ fn rewrites_expt_like_path_call_and_removes_replaced_turbofish_args() {
 
     assert!(
         output.contains(
-            "PageTable :: < M , PTE > :: table_of_mut_non_const_dyn (entry . paddr () , level - 1 , handler . clone ())"
+            "PageTable :: < M , PTE > :: table_of_mut_non_const_dyn (entry . paddr () , level - 1 , Clone :: clone (& handler))"
         ),
         "{output}"
     );
@@ -687,13 +688,13 @@ fn transforms_clear_pte_like_loop_fragment() {
 
     assert!(
         output.contains(
-            "PageTable :: < M , PTE > :: table_of_mut_non_const_dyn (entry . paddr () , level - 1 , handler . clone ())"
+            "PageTable :: < M , PTE > :: table_of_mut_non_const_dyn (entry . paddr () , level - 1 , Clone :: clone (& handler))"
         ),
         "{output}"
     );
     assert!(
         output.contains(
-            "self . clear_pte_dyn (child , level - 1 , child_vaddr , handler . clone ()) ?"
+            "self . clear_pte_dyn (child , level - 1 , child_vaddr , Clone :: clone (& handler)) ?"
         ),
         "{output}"
     );
@@ -772,10 +773,23 @@ fn rewrites_method_call_only_with_explicit_mapping() {
 
     assert!(
         output.contains(
-            "self . clear_pte_dyn (child , level - 1 , child_vaddr , handler . clone ()) ?"
+            "self . clear_pte_dyn (child , level - 1 , child_vaddr , Clone :: clone (& handler)) ?"
         ),
         "{output}"
     );
+}
+
+#[test]
+fn clones_type_replacement_with_explicit_clone_trait_call() {
+    let output = transformed_block(
+        parse_quote!({
+            Self::alloc_table::<H>();
+        }),
+        "copy, type(H => handler: &DynPagingHandler), fn(Self::alloc_table => Self::alloc_table_dyn)",
+    );
+
+    assert!(output.contains("Self :: alloc_table_dyn (Clone :: clone (& handler))"));
+    assert!(!output.contains("handler . clone ()"));
 }
 
 #[test]
@@ -789,7 +803,7 @@ fn rewrites_get_page_entry_mut_method_call_with_retained_type_generic() {
 
     assert!(
         output.contains(
-            "self . get_page_entry_mut_dyn (start_vaddr , level , true , true , handler . clone ()) ?"
+            "self . get_page_entry_mut_dyn (start_vaddr , level , true , true , Clone :: clone (& handler)) ?"
         ),
         "{output}"
     );

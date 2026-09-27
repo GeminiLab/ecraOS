@@ -1,8 +1,10 @@
 //! Error and result types for page-table operations.
 
+use crate::meta::VirtAddr;
+
 /// An error produced by a page-table operation.
 #[derive(Debug, thiserror::Error)]
-pub enum PagingError {
+pub enum PagingError<A: VirtAddr> {
     /// The requested virtual page has no mapping.
     ///
     /// This occurs when an operation requires an existing leaf or intermediate
@@ -23,20 +25,30 @@ pub enum PagingError {
     MappedToHugePage,
     /// A page-table allocation failed.
     ///
-    /// The configured [`PageAllocator`] could not provide storage for a root or
+    /// The configured [`expalloc_trait::PageAllocator`] could not provide storage for a root or
     /// intermediate page table.
     #[error("Allocation failed")]
     AllocationFailed,
     /// The requested page-table level cannot contain leaf mappings.
     ///
-    /// Id est, `level` is greater than [`PageTableMeta::MAX_PAGE_LEVEL`].
+    /// Id est, `level` is greater than [`crate::PageTableMeta::MAX_PAGE_LEVEL`].
     #[error("The page cannot be a page at level {level}")]
     CannotBePage {
         /// The unsupported zero-indexed page-table level.
         ///
         /// Supported leaf levels range from zero through
-        /// [`PageTableMeta::MAX_PAGE_LEVEL`].
+        /// [`crate::PageTableMeta::MAX_PAGE_LEVEL`].
         level: usize,
+    },
+    /// The virtual address is not canonical.
+    ///
+    /// This may also occur if a virtual address range includes non-canonical
+    /// addresses. In such cases, the error will indicate the first
+    /// non-canonical address encountered.
+    #[error("The virtual address {vaddr:#x} is not canonical")]
+    NonCanonical {
+        /// The raw virtual address that is not canonical.
+        vaddr: A,
     },
 }
 
@@ -44,4 +56,4 @@ pub enum PagingError {
 ///
 /// The default success value is `()`, and failures are represented by
 /// [`PagingError`].
-pub type PagingResult<T = ()> = Result<T, PagingError>;
+pub type PagingResult<A, T = ()> = Result<T, PagingError<A>>;

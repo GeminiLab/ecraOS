@@ -31,11 +31,11 @@ use page_table_entry::{GenericPTE, MappingFlags};
 pub mod arch;
 mod meta;
 pub mod opaque;
-/// Page-table entry types and flags.
-///
-/// This module re-exports the entry abstractions supplied by the
-/// [`page_table_entry`] crate.
 pub mod pte {
+    //! Page-table entry types and flags.
+    //!
+    //! This module re-exports the entry abstractions supplied by the
+    //! [`page_table_entry`] crate.
     pub use page_table_entry::*;
 }
 pub mod error;
@@ -43,7 +43,7 @@ mod flush;
 
 pub use error::{PagingError, PagingResult};
 pub(crate) use flush::{PendingTlbFlushes, TlbFlush};
-pub use meta::PageTableMeta;
+pub use meta::{PageTableCoverage, PageTableMeta, VirtAddr};
 
 /// A hierarchical page table with architecture-defined geometry.
 ///
@@ -94,6 +94,88 @@ fn checked_page_end<A: MemoryAddr>(start: A, end: A, page_size: usize) -> Option
     }
 }
 
+/// Virtual address related constants and utility functions.
+impl<M: PageTableMeta, PTE: GenericPTE> PageTable<M, PTE>
+where
+    [(); M::LEVELS]: Sized,
+{
+    /// The shift that moves valid virtual-address bits to the most significant
+    /// positions.
+    const VA_SHIFT: usize = usize::BITS as usize - M::VA_BITS;
+    /// The mask to extract the valid virtual address bits.
+    const VA_VALID_MASK: usize = usize::MAX >> Self::VA_SHIFT;
+    /// The mask that extracts virtual-address bits outside the valid range.
+    const VA_HIGH_BITS_MASK: usize = !Self::VA_VALID_MASK;
+    /// The mask to extract the most significant bit of the valid virtual address range.
+    const VA_VALID_MSB_MASK: usize = 1usize << (M::VA_BITS - 1);
+
+    /// Validates whether a virtual address is within the supported range and truncates it to
+    /// extracts the valid portion according to the page table's coverage.
+    pub(crate) const fn validate_and_truncate_vaddr(vaddr_raw: usize) -> Result<usize, ()> {
+        let non_canonical = match M::COVERAGE {
+            PageTableCoverage::Lower => (vaddr_raw & Self::VA_HIGH_BITS_MASK) != 0,
+            PageTableCoverage::Upper => ((!vaddr_raw) & Self::VA_HIGH_BITS_MASK) != 0,
+            PageTableCoverage::Symmetric => {
+                let extended_vaddr =
+                    ((vaddr_raw << Self::VA_SHIFT) as isize >> Self::VA_SHIFT) as usize;
+                extended_vaddr != vaddr_raw
+            }
+        };
+
+        if non_canonical {
+            Err(())
+        } else {
+            Ok(vaddr_raw & Self::VA_VALID_MASK)
+        }
+    }
+
+    /// Validates and truncates a range of virtual addresses according to the page table's coverage.
+    pub(crate) fn validate_and_truncate_vaddr_range(
+        range: AddrRange<M::VirtAddr>,
+    ) -> PagingResult<M::VirtAddr, (usize, usize)> {
+        // Validate and truncate the start virtual address.
+        let start_truncated = Self::validate_and_truncate_vaddr(range.start.into())
+            .map_err(|_| PagingError::NonCanonical { vaddr: range.start })?;
+
+        // Validate and truncate the end virtual address. It's more complex as
+        // `vaddr_end` is exclusive, so we need to handle it carefully:
+        //
+        // If `vaddr_end` is zero, we simply set the end to zero, unless the
+        // coverage is not upper, where 0 is non-canonical and therefore the
+        // end is considered non-canonical.
+        //
+        // If `vaddr_end` is not zero, we validate and truncate `vaddr_end - 1`
+        // and then add 1 to get the exclusive end.
+        let end_raw = range.end.into();
+
+        if end_raw == 0 {
+            return if matches!(M::COVERAGE, PageTableCoverage::Upper) {
+                Err(PagingError::NonCanonical { vaddr: range.end })
+            } else {
+                Ok((start_truncated, 0))
+            };
+        }
+
+        let end_inc_truncated = Self::validate_and_truncate_vaddr(end_raw - 1)
+            .map_err(|_| PagingError::NonCanonical { vaddr: range.end })?;
+
+        // If both start and end are valid canonical addresses in symmetric coverage, we need to
+        // ensure they have the same sign extension. The exclusive end itself can be the first
+        // address in the opposite half, so classify the last address in the range instead.
+        if matches!(M::COVERAGE, PageTableCoverage::Symmetric)
+            && (start_truncated ^ end_inc_truncated) & Self::VA_VALID_MSB_MASK != 0
+        {
+            return Err(PagingError::NonCanonical {
+                // Self::VA_VALID_MSB_MASK equals to the first non-canonical address in the virtual
+                // address space.
+                vaddr: Self::VA_VALID_MSB_MASK.into(),
+            });
+        }
+
+        Ok((start_truncated, end_inc_truncated + 1))
+    }
+}
+
 impl<M: PageTableMeta, PTE: GenericPTE> PageTable<M, PTE>
 where
     [(); M::LEVELS]: Sized,
@@ -122,10 +204,10 @@ where
     /// zero-initialized before the handle is returned.
     #[maybe_non_generic(
         new_alloc_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(Self::alloc_table => Self::alloc_table_dyn)
     )]
-    pub fn new_alloc<H: PageAllocator>() -> PagingResult<Self>
+    pub fn new_alloc<H: PageAllocator>() -> PagingResult<M::VirtAddr, Self>
     where
         [(); M::LEVELS - 1]: Sized,
     {
@@ -161,19 +243,19 @@ where
     ///
     /// `LEVEL` selects the bit range described by
     /// [`PageTableMeta::LEVEL_BIT_RANGES`].
-    const fn index<const LEVEL: usize>(vaddr_raw: usize) -> usize {
+    const fn index<const LEVEL: usize>(vaddr_truncated: usize) -> usize {
         let (start, end) = M::LEVEL_BIT_RANGES[LEVEL];
 
-        (vaddr_raw >> start) & ((1 << (end - start)) - 1)
+        (vaddr_truncated >> start) & ((1 << (end - start)) - 1)
     }
 
     /// Gets a mutable table at `LEVEL` from its physical address.
     #[maybe_non_generic(table_of_mut_non_const, const(LEVEL => level: usize))]
-    #[maybe_non_generic(table_of_mut_dyn, type(H => handler: DynPageAllocator))]
+    #[maybe_non_generic(table_of_mut_dyn, type(H => handler: &DynPageAllocator))]
     #[maybe_non_generic(
         table_of_mut_non_const_dyn,
         const(LEVEL => level: usize),
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
     )]
     fn table_of_mut<'a, const LEVEL: usize, H: PageAllocator>(paddr: PhysAddr) -> &'a mut [PTE] {
         let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
@@ -185,8 +267,8 @@ where
     }
 
     /// Allocates and clears a page table at one level.
-    #[maybe_non_generic(alloc_table_dyn, type(H => handler: DynPageAllocator))]
-    fn alloc_table<const LEVEL: usize, H: PageAllocator>() -> PagingResult<PhysAddr> {
+    #[maybe_non_generic(alloc_table_dyn, type(H => handler: &DynPageAllocator))]
+    fn alloc_table<const LEVEL: usize, H: PageAllocator>() -> PagingResult<M::VirtAddr, PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
         if let Some(paddr) = H::alloc_frames_of_size(bytes_required) {
@@ -221,20 +303,19 @@ where
     /// index identifies the entry within its containing table.
     #[maybe_non_generic(
         get_page_entry_mut_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(self.clear_pte => self.clear_pte_dyn),
         fn(self.next_table_mut => self.next_table_mut_dyn),
         fn(PageTable::table_of_mut => PageTable::table_of_mut_dyn),
     )]
     fn get_page_entry_mut<H: PageAllocator>(
         &mut self,
+        vaddr_truncated: usize,
         vaddr: M::VirtAddr,
         level: usize,
         create_if_not_exists: bool,
         split_huge_page: bool,
-    ) -> PagingResult<(&mut PTE, usize)> {
-        let vaddr_usize: usize = vaddr.into();
-
+    ) -> PagingResult<M::VirtAddr, (&mut PTE, usize)> {
         if level > M::MAX_PAGE_LEVEL {
             return Err(PagingError::CannotBePage { level });
         }
@@ -246,7 +327,7 @@ where
                 let p2 = if M::LEVELS > 3 {
                     let p3 = if M::LEVELS > 4 {
                         let p4 = PageTable::<M, PTE>::table_of_mut::<4, H>(self.table.root);
-                        let index4 = PageTable::<M, PTE>::index::<4>(vaddr_usize);
+                        let index4 = PageTable::<M, PTE>::index::<4>(vaddr_truncated);
                         let p4e = &mut p4[index4];
 
                         if level == 4 {
@@ -258,7 +339,7 @@ where
                     } else {
                         PageTable::<M, PTE>::table_of_mut::<3, H>(self.table.root)
                     };
-                    let index3 = PageTable::<M, PTE>::index::<3>(vaddr_usize);
+                    let index3 = PageTable::<M, PTE>::index::<3>(vaddr_truncated);
                     let p3e = &mut p3[index3];
 
                     if level == 3 {
@@ -270,7 +351,7 @@ where
                 } else {
                     PageTable::<M, PTE>::table_of_mut::<2, H>(self.table.root)
                 };
-                let index2 = PageTable::<M, PTE>::index::<2>(vaddr_usize);
+                let index2 = PageTable::<M, PTE>::index::<2>(vaddr_truncated);
                 let p2e = &mut p2[index2];
 
                 if level == 2 {
@@ -282,7 +363,7 @@ where
             } else {
                 PageTable::<M, PTE>::table_of_mut::<1, H>(self.table.root)
             };
-            let index1 = PageTable::<M, PTE>::index::<1>(vaddr_usize);
+            let index1 = PageTable::<M, PTE>::index::<1>(vaddr_truncated);
             let p1e = &mut p1[index1];
 
             if level == 1 {
@@ -294,7 +375,7 @@ where
         } else {
             PageTable::<M, PTE>::table_of_mut::<0, H>(self.table.root)
         };
-        let index0 = PageTable::<M, PTE>::index::<0>(vaddr_usize);
+        let index0 = PageTable::<M, PTE>::index::<0>(vaddr_truncated);
         let p0e = &mut p0[index0];
 
         self.clear_pte::<H>(p0e, 0, vaddr)?;
@@ -308,7 +389,7 @@ where
     /// physical mapping and flags.
     #[maybe_non_generic(
         next_table_mut_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(PageTable::alloc_table => PageTable::alloc_table_dyn),
         fn(PageTable::table_of_mut => PageTable::table_of_mut_dyn),
     )]
@@ -317,7 +398,7 @@ where
         entry: &mut PTE,
         create_if_not_exists: bool,
         split_huge_page: bool,
-    ) -> PagingResult<&'a mut [PTE]> {
+    ) -> PagingResult<M::VirtAddr, &'a mut [PTE]> {
         if entry.is_unused() {
             if create_if_not_exists {
                 let table = PageTable::<M, PTE>::alloc_table::<LEVEL, H>()?;
@@ -360,7 +441,7 @@ where
     /// allocations.
     #[maybe_non_generic(
         clear_pte_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(self.clear_pte => self.clear_pte_dyn),
         fn(PageTable::table_of_mut_non_const => PageTable::table_of_mut_non_const_dyn),
     )]
@@ -369,7 +450,7 @@ where
         entry: &mut PTE,
         level: usize,
         vaddr: M::VirtAddr,
-    ) -> PagingResult {
+    ) -> PagingResult<M::VirtAddr> {
         if entry.is_unused() {
             Ok(())
         } else if level == 0 || entry.is_huge() {
@@ -408,36 +489,50 @@ where
     /// The range is aligned to the page size of the lowest level.
     #[maybe_non_generic(
         iter_pages_in_range_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(self.get_page_entry_mut => self.get_page_entry_mut_dyn),
     )]
     fn iter_pages_in_range<F, H: PageAllocator>(
         &mut self,
         range: AddrRange<M::VirtAddr>,
         mut f: F,
-    ) -> PagingResult
+    ) -> PagingResult<M::VirtAddr>
     where
-        F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult<TlbFlush<M>>,
+        F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult<M::VirtAddr, TlbFlush<M>>,
     {
-        let mut start_vaddr = range.start.align_down(M::LEVEL_PAGE_SIZE[0]);
-        let end_vaddr = range.end.align_up(M::LEVEL_PAGE_SIZE[0]);
+        let range_aligned = AddrRange {
+            start: range.start.align_down(M::LEVEL_PAGE_SIZE[0]),
+            end: range.end.align_up(M::LEVEL_PAGE_SIZE[0]),
+        };
+        let range_truncated =
+            PageTable::<M, PTE>::validate_and_truncate_vaddr_range(range_aligned)?;
 
-        while start_vaddr < end_vaddr {
+        let (mut start_truncated, end_truncated) = range_truncated;
+        let mut start_vaddr = range_aligned.start;
+
+        while start_truncated < end_truncated {
             for level in (0..=M::MAX_PAGE_LEVEL).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
-                if start_vaddr.is_aligned(page_size) {
-                    let Some(next_vaddr) = checked_page_end(start_vaddr, end_vaddr, page_size)
+                if start_truncated.is_aligned(page_size) {
+                    let Some(next_truncated) =
+                        checked_page_end(start_truncated, end_truncated, page_size)
                     else {
                         continue;
                     };
 
                     let flush = {
-                        let (entry, index) =
-                            self.get_page_entry_mut::<H>(start_vaddr, level, true, true)?;
+                        let (entry, index) = self.get_page_entry_mut::<H>(
+                            start_truncated,
+                            start_vaddr,
+                            level,
+                            true,
+                            true,
+                        )?;
                         f(level, index, start_vaddr, entry)?
                     };
                     self.pending_flushes += flush;
-                    start_vaddr = next_vaddr;
+                    start_vaddr = start_vaddr + (next_truncated - start_truncated);
+                    start_truncated = next_truncated;
                     break;
                 }
             }
@@ -453,7 +548,7 @@ where
     /// preserved across the mapped range.
     #[maybe_non_generic(
         map_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(self.iter_pages_in_range => self.iter_pages_in_range_dyn),
     )]
     pub fn map<H: PageAllocator>(
@@ -462,7 +557,7 @@ where
         paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
-    ) -> PagingResult {
+    ) -> PagingResult<M::VirtAddr> {
         let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
         self.iter_pages_in_range::<_, H>(
             AddrRange::new(vaddr, vaddr + size),
@@ -481,10 +576,14 @@ where
     /// for this cursor's next flush.
     #[maybe_non_generic(
         unmap_dyn,
-        type(H => handler: DynPageAllocator),
+        type(H => handler: &DynPageAllocator),
         fn(self.iter_pages_in_range => self.iter_pages_in_range_dyn),
     )]
-    pub fn unmap<H: PageAllocator>(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult {
+    pub fn unmap<H: PageAllocator>(
+        &mut self,
+        vaddr: M::VirtAddr,
+        size: usize,
+    ) -> PagingResult<M::VirtAddr> {
         self.iter_pages_in_range::<_, H>(
             AddrRange::new(vaddr, vaddr + size),
             |_level, _index, _page_vaddr, _entry| Ok(TlbFlush::None),

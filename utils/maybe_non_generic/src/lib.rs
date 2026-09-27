@@ -526,7 +526,7 @@ fn replacement_expr(replacement: &Replacement) -> Expr {
     let arg_name = &replacement.arg_name;
     match replacement.kind {
         ReplacementKind::Const => parse_quote!(#arg_name),
-        ReplacementKind::Type => parse_quote!(#arg_name.clone()),
+        ReplacementKind::Type => parse_quote!(Clone::clone(&#arg_name)),
     }
 }
 
