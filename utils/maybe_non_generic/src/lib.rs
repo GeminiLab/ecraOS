@@ -229,15 +229,13 @@ fn parse_fn_target(input: ParseStream<'_>) -> Result<FnTarget> {
         Ok((tokens, rest))
     })?;
 
-    if let Ok(expr) = syn::parse2::<Expr>(target.clone()) {
-        if let Expr::Field(field) = expr {
-            if let syn::Member::Named(method) = field.member {
-                return Ok(FnTarget::Method {
-                    receiver: *field.base,
-                    method,
-                });
-            }
-        }
+    if let Ok(Expr::Field(field)) = syn::parse2::<Expr>(target.clone())
+        && let syn::Member::Named(method) = field.member
+    {
+        return Ok(FnTarget::Method {
+            receiver: *field.base,
+            method,
+        });
     }
 
     syn::parse2::<Path>(target).map(FnTarget::Path)
