@@ -1,6 +1,6 @@
 //! Architecture-specific functions and types.
 //!
-//! Each target module supplies [`crate::PageTableMeta`] implementations and TLB
+//! Each target module supplies [`crate::meta::PageTableMeta`] implementations and TLB
 //! invalidation primitives for the page-table formats supported by that
 //! architecture.
 

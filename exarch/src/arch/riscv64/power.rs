@@ -1,7 +1,8 @@
 use core::ops::BitOr;
 
+use expt::opaque::OpaquePageTableRoot;
 use log::{error, info, warn};
-use memory_addr::{PhysAddr, VirtAddr, va};
+use memory_addr::{VirtAddr, va};
 
 use crate::power::{APEntry, CpuStartError, PhysicalCpuId, ShutdownReason};
 
@@ -10,10 +11,11 @@ core::arch::global_asm!(include_str!("mp.S"));
 /// Starts a RISC-V application hart.
 pub fn cpu_up(
     phys_id: PhysicalCpuId,
-    page_table_root: PhysAddr,
+    page_table_root: OpaquePageTableRoot,
     boot_stack_top: VirtAddr,
     entry: APEntry,
 ) -> Result<(), CpuStartError> {
+    let OpaquePageTableRoot::Single(page_table_root) = page_table_root;
     if sbi_rt::probe_extension(sbi_rt::Hsm).is_unavailable() {
         warn!("HSM SBI extension is not supported for current SEE.");
         return Err(CpuStartError::Unsupported);

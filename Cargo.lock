@@ -409,8 +409,7 @@ dependencies = [
 [[package]]
 name = "memory_addr"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f0625c50adb5f6aaf47f05cae3c4dbc13a74c659241b06c4576f3d7e1da940"
+source = "git+https://github.com/arceos-org/axmm_crates/?rev=968403b590b6f4d1bd2db8644149966f88b851e8#968403b590b6f4d1bd2db8644149966f88b851e8"
 
 [[package]]
 name = "memory_range_set"

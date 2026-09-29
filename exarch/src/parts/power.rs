@@ -1,7 +1,8 @@
 //! Power management.
 
+use expt::opaque::OpaquePageTableRoot;
 use look_at::look_at;
-use memory_addr::{PhysAddr, VirtAddr};
+use memory_addr::VirtAddr;
 
 /// The physical identifier assigned to a CPU by firmware.
 ///
@@ -53,7 +54,7 @@ look_at! {
     /// The return value reports whether the architecture accepted the startup request.
     pub fn cpu_up(
         phys_id: PhysicalCpuId,
-        page_table_root: PhysAddr,
+        page_table_root: OpaquePageTableRoot,
         boot_stack_top: VirtAddr,
         entry: APEntry,
     ) -> Result<(), CpuStartError>;

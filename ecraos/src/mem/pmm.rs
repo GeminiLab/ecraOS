@@ -8,7 +8,7 @@ use heapless::Vec as HeaplessVec;
 use lazyinit::LazyInit;
 #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
 use memory_addr::va;
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange};
 
 use crate::mem::sections;
 

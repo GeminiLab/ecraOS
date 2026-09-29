@@ -15,15 +15,17 @@ _start_ap:
 
     # Read the AP boot arguments from the physical address in x0.
     # x4 = physical CPU ID
-    # x5 = physical address of the shared translation-table root
-    # x6 = high-half virtual address of the AP stack top
-    # x7 = high-half virtual address of the Rust AP entry
+    # x5 = physical address of the lower translation-table root
+    # x6 = physical address of the upper translation-table root
+    # x7 = high-half virtual address of the AP stack top
+    # x8 = high-half virtual address of the Rust AP entry
     ldp     x4, x5, [x0, #0]
     ldp     x6, x7, [x0, #16]
+    ldr     x8, [x0, #32]
 
-    # Install the same root in both independent AArch64 translation regimes.
+    # Install the independent roots in the two AArch64 translation regimes.
     msr     TTBR0_EL1, x5
-    msr     TTBR1_EL1, x5
+    msr     TTBR1_EL1, x6
 
     # Match the bootstrap and kernel page-table attributes.
     # Attr0 is Device-nGnRE and Attr1 is inner-shareable normal write-back memory.
@@ -48,12 +50,12 @@ _start_ap:
     isb     sy
 
     # Set up the stack and pass the physical CPU ID to the Rust entry.
-    mov     sp, x6
+    mov     sp, x7
     mov     x0, x4
 
     # The Rust entry is a non-returning function. If it ever returns, stop the
     # AP instead of falling through into unrelated code.
-    br      x7
+    br      x8
 
 1:  wfe
     b       1b

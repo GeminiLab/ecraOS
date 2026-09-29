@@ -6,7 +6,7 @@
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
 use log::info;
-use memory_addr::{PhysAddr, VirtAddr, VirtAddrRange};
+use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
 use crate::kprintln;
@@ -179,7 +179,7 @@ pub fn init_ap() {
     allocs::malloc::init_malloc_current_cpu();
 }
 
-#[cfg(not(target_arch = "aarch64"))]
+/// Removes the temporary identity mappings created during early boot.
 pub fn remove_identical_mappings() {
     vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
 }

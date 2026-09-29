@@ -5,6 +5,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use expt::opaque::OpaquePageTableRoot;
 use memory_addr::{PhysAddr, VirtAddr, va};
 
 use crate::{
@@ -58,8 +59,10 @@ pub fn invoke_psci(function: u64, arg0: u64, arg1: u64, arg2: u64) -> i64 {
 struct ApBootArgs {
     /// The physical ID of the CPU being started.
     phys_id: PhysicalCpuId,
-    /// The physical address of the shared translation-table root.
-    page_table_root: PhysAddr,
+    /// The physical address of the lower translation-table root.
+    page_table_root_lower: PhysAddr,
+    /// The physical address of the upper translation-table root.
+    page_table_root_upper: PhysAddr,
     /// The high-half virtual address of the AP stack top.
     stack_top: VirtAddr,
     /// The high-half virtual address of the Rust AP entry.
@@ -73,10 +76,14 @@ unsafe extern "C" {
 /// Requests PSCI to start one application CPU.
 pub fn cpu_up(
     phys_id: PhysicalCpuId,
-    page_table_root: PhysAddr,
+    page_table_root: OpaquePageTableRoot,
     boot_stack_top: VirtAddr,
     entry: APEntry,
 ) -> Result<(), CpuStartError> {
+    let OpaquePageTableRoot::Dual(page_table_root) = page_table_root else {
+        panic!("AArch64 requires a dual page-table root");
+    };
+
     // Write the AP boot arguments to the top of the AP boot stack.
     let args_addr = VirtAddr::from_usize(
         boot_stack_top
@@ -92,7 +99,8 @@ pub fn cpu_up(
             args,
             ApBootArgs {
                 phys_id,
-                page_table_root,
+                page_table_root_lower: page_table_root.lower,
+                page_table_root_upper: page_table_root.upper,
                 stack_top: boot_stack_top,
                 entry: VirtAddr::from_ptr_of(entry as *const ()),
             },

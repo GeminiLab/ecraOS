@@ -4,7 +4,7 @@ use core::ops::{Add, AddAssign};
 
 use heapless::Vec as HeaplessVec;
 
-use crate::PageTableMeta;
+use crate::meta::PageTableMeta;
 
 /// The maximum number of individual page flush requests retained before a full
 /// TLB flush.
@@ -17,7 +17,7 @@ pub(crate) const SMALL_FLUSH_THRESHOLD: usize = 32;
 ///
 /// Requests can leave the TLB unchanged, invalidate one virtual mapping, or
 /// invalidate the entire local TLB.
-pub enum TlbFlush<M: PageTableMeta> {
+pub(crate) enum TlbFlush<M: PageTableMeta> {
     /// No TLB invalidation.
     ///
     /// This is used when the operation did not replace a live leaf mapping.
@@ -37,7 +37,7 @@ pub enum TlbFlush<M: PageTableMeta> {
 ///
 /// Individual pages are retained up to [`SMALL_FLUSH_THRESHOLD`], after which
 /// the state is promoted to a full flush.
-pub enum PendingTlbFlushes<M: PageTableMeta> {
+pub(crate) enum PendingTlbFlushes<M: PageTableMeta> {
     /// No pending invalidation.
     ///
     /// Flushing this state performs no architecture operation.

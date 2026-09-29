@@ -1,9 +1,9 @@
 use expt::{
     arch::x86_64::{X86Level4PageTableMeta, X86Level5PageTableMeta},
-    opaque::OpaquePageTableType,
+    opaque::{OpaquePageTableRoot, OpaquePageTableType},
     pte::x86_64::X64PTE,
 };
-use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
+use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddr};
 use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
 use raw_cpuid::CpuId;
 use x86_64::registers::control::{Cr4, Cr4Flags};
@@ -248,7 +248,8 @@ pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtA
 }
 
 /// Sets the x86-64 page-table root.
-pub fn set_page_table_root(root: PhysAddr) {
+pub fn set_page_table_root(root: OpaquePageTableRoot) {
+    let OpaquePageTableRoot::Single(root) = root;
     unsafe {
         core::arch::asm!(
             "mov cr3, rax",

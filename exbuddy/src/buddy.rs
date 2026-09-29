@@ -5,7 +5,7 @@
 
 use core::{hint::unlikely, ptr};
 
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, va};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, va};
 
 use crate::{
     error::{BuddyError, BuddyResult},

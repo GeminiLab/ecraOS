@@ -13,14 +13,14 @@ pub enum PagingError<A: VirtAddr> {
     NotMapped,
     /// The requested virtual page already has a mapping.
     ///
-    /// This variant is used for operations that reject replacement of an
+    /// This variant is available for operations that reject replacement of an
     /// existing mapping.
     #[error("The page is already mapped")]
     AlreadyMapped,
     /// The traversal encountered a huge-page mapping.
     ///
     /// This occurs when an operation needs to descend below a huge-page leaf
-    /// while not requested that the mapping be split.
+    /// without requesting that the mapping be split.
     #[error("The page is mapped to a huge page")]
     MappedToHugePage,
     /// A page-table allocation failed.
@@ -31,13 +31,14 @@ pub enum PagingError<A: VirtAddr> {
     AllocationFailed,
     /// The requested page-table level cannot contain leaf mappings.
     ///
-    /// Id est, `level` is greater than [`crate::PageTableMeta::MAX_PAGE_LEVEL`].
+    /// In other words, `level` is greater than
+    /// [`crate::meta::PageTableMeta::MAX_PAGE_LEVEL`].
     #[error("The page cannot be a page at level {level}")]
     CannotBePage {
         /// The unsupported zero-indexed page-table level.
         ///
         /// Supported leaf levels range from zero through
-        /// [`crate::PageTableMeta::MAX_PAGE_LEVEL`].
+        /// [`crate::meta::PageTableMeta::MAX_PAGE_LEVEL`].
         level: usize,
     },
     /// The virtual address is not canonical.

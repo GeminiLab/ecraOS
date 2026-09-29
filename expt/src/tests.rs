@@ -1,16 +1,19 @@
-use core::{alloc::Layout, cell::RefCell};
-
 use std::{
-    alloc::{alloc, dealloc},
+    alloc::{Layout, alloc, dealloc},
+    cell::RefCell,
     vec::Vec,
 };
 
-use memory_addr::{PhysAddr, VirtAddr};
+use expalloc_trait::PageAllocator;
+use memory_addr::{AddrRange, PhysAddr, VirtAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
-use crate::opaque::{OpaquePageTableType, PageTableAction};
-
-use super::*;
+use crate::{
+    error::PagingError,
+    meta::{LowerCoverage, PageTableCoverage, PageTableMeta, SymmetricCoverage, UpperCoverage},
+    opaque::{OpaquePageTableRoot, OpaquePageTableType, PageTableAction},
+    pt::{PageTable, PageTableCursorLike, single::checked_page_end},
+};
 
 /// The tag for an unused test entry.
 ///
@@ -182,7 +185,7 @@ impl PageTableMeta for TestMeta {
     /// Every table therefore contains four entries.
     const LEVEL_BITS: [usize; Self::LEVELS] = [2, 2, 2];
     /// The compact test format covers the lower virtual-address range.
-    const COVERAGE: PageTableCoverage = PageTableCoverage::Lower;
+    type Coverage = LowerCoverage<Self::VirtAddr>;
     /// The highest level permitted to contain a test leaf.
     ///
     /// Every level in the compact format supports page mappings.
@@ -190,6 +193,33 @@ impl PageTableMeta for TestMeta {
     /// Records a requested test TLB invalidation.
     ///
     /// Addresses are stored as integers and [`None`] represents a full flush.
+    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
+        FLUSH_LOG.with(|log| {
+            log.borrow_mut().push(vaddr.map(|vaddr| vaddr.as_usize()));
+        });
+    }
+}
+
+/// Metadata for the upper half of the dual-root opaque-table test.
+#[cfg(target_arch = "aarch64")]
+struct TestUpperMeta;
+
+#[cfg(target_arch = "aarch64")]
+impl PageTableMeta for TestUpperMeta {
+    /// The virtual-address type used by the test format.
+    type VirtAddr = VirtAddr;
+    /// The three levels used by the dual-root test format.
+    const LEVELS: usize = 3;
+    /// The twelve-bit offset of a 4 KiB base page.
+    const PAGE_OFFSET_BITS: usize = 12;
+    /// The two virtual-address bits handled at each test level.
+    const LEVEL_BITS: [usize; Self::LEVELS] = [2, 2, 2];
+    /// The compact test format covers the upper virtual-address range.
+    type Coverage = UpperCoverage<Self::VirtAddr>;
+    /// Every level in the compact format supports page mappings.
+    const MAX_PAGE_LEVEL: usize = 2;
+
+    /// Records a requested test TLB invalidation.
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
         FLUSH_LOG.with(|log| {
             log.borrow_mut().push(vaddr.map(|vaddr| vaddr.as_usize()));
@@ -213,7 +243,7 @@ impl PageTableMeta for SymmetricTestMeta {
     /// The two virtual-address bits handled at each test level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [2, 2, 2];
     /// The format covers canonical lower and upper ranges symmetrically.
-    const COVERAGE: PageTableCoverage = PageTableCoverage::Symmetric;
+    type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The validation tests do not issue TLB invalidations.
     fn flush_tlb(_vaddr: Option<Self::VirtAddr>) {}
@@ -740,6 +770,43 @@ fn symmetric_vaddr_validation_rejects_canonical_hole() {
     ));
 }
 
+/// Verifies the lower and upper type-level coverage policies.
+#[test]
+fn coverage_policies_validate_zero_and_sign_extensions() {
+    let va_bits = TestMeta::VA_BITS;
+    let valid_mask = (1usize << va_bits) - 1;
+    let upper_base = usize::MAX - valid_mask;
+
+    assert_eq!(
+        <LowerCoverage<VirtAddr> as PageTableCoverage>::validate_and_truncate_vaddr(
+            VirtAddr::from_usize(0x1234),
+            va_bits,
+        ),
+        Ok(0x1234)
+    );
+    assert!(
+        <LowerCoverage<VirtAddr> as PageTableCoverage>::validate_and_truncate_vaddr(
+            VirtAddr::from_usize(upper_base),
+            va_bits,
+        )
+        .is_err()
+    );
+    assert_eq!(
+        <UpperCoverage<VirtAddr> as PageTableCoverage>::validate_and_truncate_vaddr(
+            VirtAddr::from_usize(upper_base | 0x1234),
+            va_bits,
+        ),
+        Ok(0x1234)
+    );
+    assert!(
+        <UpperCoverage<VirtAddr> as PageTableCoverage>::validate_and_truncate_vaddr(
+            VirtAddr::from_usize(0x1234),
+            va_bits,
+        )
+        .is_err()
+    );
+}
+
 /// Verifies that opaque action batches share one concrete cursor.
 #[test]
 fn opaque_page_table_applies_action_batch() {
@@ -766,7 +833,13 @@ fn opaque_page_table_applies_action_batch() {
         ])
         .unwrap();
 
-    let table = unsafe { PageTable::<TestMeta, TestPte>::new_at(opaque_page_table.root_paddr()) };
+    #[cfg(target_arch = "aarch64")]
+    let OpaquePageTableRoot::Single(root) = opaque_page_table.root() else {
+        panic!("single-root opaque table returned a dual root");
+    };
+    #[cfg(not(target_arch = "aarch64"))]
+    let OpaquePageTableRoot::Single(root) = opaque_page_table.root();
+    let table = unsafe { PageTable::<TestMeta, TestPte>::new_at(root) };
     assert_mapping(
         &table,
         0x3000,
@@ -782,6 +855,43 @@ fn opaque_page_table_applies_action_batch() {
         TestMeta::PAGE_SIZE,
     );
     assert_eq!(flush_log(), std::vec![Some(0x3000), Some(0x4000)]);
+    reset_test_state();
+}
+
+/// Verifies that an opaque dual table dispatches actions to both roots.
+#[cfg(target_arch = "aarch64")]
+#[test]
+fn opaque_dual_page_table_applies_actions_to_both_roots() {
+    reset_test_state();
+    let page_table_type =
+        OpaquePageTableType::<VirtAddr>::new_dual::<TestMeta, TestPte, TestUpperMeta, TestPte>();
+    let mut opaque_page_table = page_table_type
+        .new_pagetable_alloc::<TestPagingHandler>()
+        .unwrap();
+    let upper_base = !((1usize << (TestUpperMeta::VA_BITS - 1)) - 1);
+
+    opaque_page_table
+        .apply_actions::<TestPagingHandler, _>([
+            PageTableAction::Map {
+                vaddr: VirtAddr::from_usize(0x3000),
+                paddr: PhysAddr::from_usize(0xa000),
+                size: TestMeta::PAGE_SIZE,
+                flags: MappingFlags::READ,
+            },
+            PageTableAction::Map {
+                vaddr: VirtAddr::from_usize(upper_base + 0x3000),
+                paddr: PhysAddr::from_usize(0xb000),
+                size: TestUpperMeta::PAGE_SIZE,
+                flags: MappingFlags::READ | MappingFlags::WRITE,
+            },
+        ])
+        .unwrap();
+
+    let OpaquePageTableRoot::Dual(root) = opaque_page_table.root() else {
+        panic!("dual-root opaque table returned a single root");
+    };
+    assert_ne!(root.lower, root.upper);
+    assert_eq!(flush_log(), vec![Some(0x3000), Some(upper_base + 0x3000)]);
     reset_test_state();
 }
 

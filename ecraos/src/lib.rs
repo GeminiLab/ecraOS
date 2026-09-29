@@ -149,8 +149,6 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
-    // TODO: add aarch64 dual pagetable support and re-enable identity mappings removal on aarch64
-    #[cfg(not(target_arch = "aarch64"))]
     mem::remove_identical_mappings();
 
     app_main_bsp();

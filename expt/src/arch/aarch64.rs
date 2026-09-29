@@ -1,22 +1,33 @@
 //! AArch64 page-table metadata and TLB operations.
 //!
-//! The module describes the standard 4 KiB granule with four translation levels
-//! and performs inner-shareable stage-one TLB invalidation.
+//! The module describes AArch64 translation-table geometries for the supported
+//! granules and performs inner-shareable stage-one TLB invalidation.
+
+use core::marker::PhantomData;
 
 use aarch64_cpu::asm::barrier::{ISH, SY, dsb, isb};
 use memory_addr::VirtAddr;
 
-use crate::{PageTableCoverage, PageTableMeta};
+use crate::meta::{LowerCoverage, PageTableCoverage, PageTableMeta, UpperCoverage};
+
+/// A coverage policy supported by an AArch64 translation-table root.
+///
+/// Individual AArch64 roots represent either the lower TTBR0 range or the
+/// upper TTBR1 range. A symmetric root is therefore not a valid AArch64 root.
+pub trait AArch64Coverage: PageTableCoverage<VirtAddr = VirtAddr> + Send + Sync {}
+
+impl AArch64Coverage for LowerCoverage<VirtAddr> {}
+impl AArch64Coverage for UpperCoverage<VirtAddr> {}
 
 /// Metadata for an AArch64 page table.
 ///
-/// `BITS` selects the virtual-address width and `COVERAGE` selects the lower,
-/// upper, or symmetric portion represented by the table.
+/// `BITS` selects the virtual-address width and `C` selects the type-level
+/// coverage policy represented by the table.
 pub struct AArch64PageTableMeta<
     const BITS: usize,
     const PAGE_OFFSET_BITS: usize,
-    const COVERAGE: u8,
->;
+    C: AArch64Coverage,
+>(PhantomData<C>);
 
 /// The minimal possible `T<n>SZ` value we support.
 ///
@@ -27,7 +38,8 @@ pub const TNSZ_MIN: usize = 12;
 ///
 /// When `FEAT_TTST` is supported, the maximal `T<n>SZ` value could actually
 /// be higher (48 for 4 KiB and 16 KiB granules and 47 for 64 KiB granules). But
-/// we limit it to 39 for practical purposes.
+/// we limit it to 39 for practical purposes, giving a 25-bit virtual address
+/// space.
 pub const TNSZ_MAX: usize = 39;
 /// The size of AArch64 virtual addresses in bits.
 pub const ADDR_BITS: usize = 64;
@@ -41,8 +53,10 @@ pub const PAGE_OFFSET_BITS_64KIB: usize = 16;
 /// The base-2 logarithm of the size of a page-table entry (3 for 8-byte entries).
 pub const PAGE_TABLE_ENTRY_SIZE_BITS: usize = 3;
 
-impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, const COVERAGE: u8>
-    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS, COVERAGE>
+impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, C>
+    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS, C>
+where
+    C: AArch64Coverage,
 {
     /// The number of virtual-address bits consumed by each level in the page
     /// table. This equals to the base-2 logarithm of the number of entries per
@@ -60,8 +74,10 @@ impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, const COVERAGE: u8>
     const PAGE_INDEX_BITS: usize = BITS.strict_sub(PAGE_OFFSET_BITS);
 }
 
-impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, const COVERAGE: u8> PageTableMeta
-    for AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS, COVERAGE>
+impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, C> PageTableMeta
+    for AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS, C>
+where
+    C: AArch64Coverage + const PageTableCoverage<VirtAddr = VirtAddr>,
 {
     type VirtAddr = VirtAddr;
 
@@ -99,14 +115,8 @@ impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, const COVERAGE: u8> PageT
         result
     } where [(); Self::LEVELS]: Sized;
 
-    const COVERAGE: PageTableCoverage = {
-        match PageTableCoverage::from_u8(COVERAGE) {
-            PageTableCoverage::Symmetric => {
-                panic!("Symmetric coverage is not supported for AArch64 4 KiB page tables")
-            }
-            c => c,
-        }
-    };
+    /// The type-level coverage policy for this translation-table root.
+    type Coverage = C;
 
     const MAX_PAGE_LEVEL: usize = {
         if Self::LEVELS < 3 {
@@ -133,69 +143,37 @@ impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, const COVERAGE: u8> PageT
     }
 }
 
-pub type AArch64PageTableMeta4KiB<const BITS: usize, const COVERAGE: u8> =
-    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_4KIB, COVERAGE>;
-pub type AArch64PageTableMeta16KiB<const BITS: usize, const COVERAGE: u8> =
-    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_16KIB, COVERAGE>;
-pub type AArch64PageTableMeta64KiB<const BITS: usize, const COVERAGE: u8> =
-    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_64KIB, COVERAGE>;
+/// AArch64 page-table metadata with a 4 KiB granule.
+pub type AArch64PageTableMeta4KiB<const BITS: usize, C> =
+    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_4KIB, C>;
+/// AArch64 page-table metadata with a 16 KiB granule.
+pub type AArch64PageTableMeta16KiB<const BITS: usize, C> =
+    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_16KIB, C>;
+/// AArch64 page-table metadata with a 64 KiB granule.
+pub type AArch64PageTableMeta64KiB<const BITS: usize, C> =
+    AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_64KIB, C>;
 
+/// AArch64 4 KiB lower-half page-table metadata.
 pub type AArch64PageTableMeta4KiBLower<const BITS: usize> =
-    AArch64PageTableMeta4KiB<BITS, { PageTableCoverage::Lower as u8 }>;
+    AArch64PageTableMeta4KiB<BITS, LowerCoverage<VirtAddr>>;
+/// AArch64 4 KiB upper-half page-table metadata.
 pub type AArch64PageTableMeta4KiBUpper<const BITS: usize> =
-    AArch64PageTableMeta4KiB<BITS, { PageTableCoverage::Upper as u8 }>;
+    AArch64PageTableMeta4KiB<BITS, UpperCoverage<VirtAddr>>;
+/// AArch64 16 KiB lower-half page-table metadata.
 pub type AArch64PageTableMeta16KiBLower<const BITS: usize> =
-    AArch64PageTableMeta16KiB<BITS, { PageTableCoverage::Lower as u8 }>;
+    AArch64PageTableMeta16KiB<BITS, LowerCoverage<VirtAddr>>;
+/// AArch64 16 KiB upper-half page-table metadata.
 pub type AArch64PageTableMeta16KiBUpper<const BITS: usize> =
-    AArch64PageTableMeta16KiB<BITS, { PageTableCoverage::Upper as u8 }>;
+    AArch64PageTableMeta16KiB<BITS, UpperCoverage<VirtAddr>>;
+/// AArch64 64 KiB lower-half page-table metadata.
 pub type AArch64PageTableMeta64KiBLower<const BITS: usize> =
-    AArch64PageTableMeta64KiB<BITS, { PageTableCoverage::Lower as u8 }>;
+    AArch64PageTableMeta64KiB<BITS, LowerCoverage<VirtAddr>>;
+/// AArch64 64 KiB upper-half page-table metadata.
 pub type AArch64PageTableMeta64KiBUpper<const BITS: usize> =
-    AArch64PageTableMeta64KiB<BITS, { PageTableCoverage::Upper as u8 }>;
+    AArch64PageTableMeta64KiB<BITS, UpperCoverage<VirtAddr>>;
 
 /// Metadata for AArch64 4 KiB, four-level, 48-bit translation tables.
 ///
 /// Levels zero through two may contain leaf mappings, providing 4 KiB, 2 MiB,
 /// and 1 GiB mapping sizes.
-pub struct Aarch64PageTableMeta;
-
-impl PageTableMeta for Aarch64PageTableMeta {
-    /// The standard virtual-address type used by AArch64 page tables.
-    type VirtAddr = VirtAddr;
-
-    /// The four translation levels in the 48-bit format.
-    const LEVELS: usize = 4;
-    /// The twelve offset bits in a 4 KiB page.
-    const PAGE_OFFSET_BITS: usize = 12;
-    /// The nine virtual-address bits consumed by each level.
-    const LEVEL_BITS: [usize; Self::LEVELS] = [9; Self::LEVELS];
-    /// AArch64 four-level paging covers only the lower portion of the virtual address space.
-    ///
-    /// This is not correct and only a placeholder for now.
-    const COVERAGE: PageTableCoverage = PageTableCoverage::Lower;
-
-    /// The highest level that supports a block mapping.
-    ///
-    /// Level two maps 1 GiB blocks, while level three remains table-only.
-    const MAX_PAGE_LEVEL: usize = 2;
-
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// The operation uses inner-shareable stage-one invalidation followed by the
-    /// required data and instruction synchronization barriers.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        unsafe {
-            match vaddr {
-                Some(vaddr) => core::arch::asm!(
-                    "tlbi vaae1is, {address}",
-                    address = in(reg) vaddr.as_usize() >> 12,
-                    options(nostack)
-                ),
-                None => core::arch::asm!("tlbi vmalle1is", options(nostack)),
-            }
-
-            dsb(ISH);
-            isb(SY);
-        }
-    }
-}
+pub type Aarch64PageTableMeta = AArch64PageTableMeta4KiBLower<48>;

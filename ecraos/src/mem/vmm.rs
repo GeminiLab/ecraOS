@@ -2,11 +2,11 @@
 
 use exarch::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
-use expt::opaque::{OpaquePageTable, OpaquePageTableType};
+use expt::opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType};
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::info;
-use memory_addr::{PhysAddr, VirtAddr, VirtAddrRange, va};
+use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
 use crate::{
@@ -108,10 +108,10 @@ where
     f(&mut pt)
 }
 
-/// Returns the root page table address.
+/// Returns the active page-table root.
 #[inline]
-pub fn page_table_root() -> PhysAddr {
-    with_page_table(|pt| pt.root_paddr())
+pub fn page_table_root() -> OpaquePageTableRoot {
+    with_page_table(|pt| pt.root())
 }
 
 /// Initializes the virtual address space.
@@ -261,7 +261,7 @@ pub(super) fn init_vmm_mapping_early<H: PageAllocator>(phys_mem_regions: &Memory
     *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
 }
 
-#[cfg(not(target_arch = "aarch64"))]
+/// Removes temporary low-half identity mappings from the active page table.
 pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &MemoryRegions) {
     info!("Removing identical mappings...");
 
@@ -270,7 +270,7 @@ pub(super) fn remove_identical_mapping<H: PageAllocator>(phys_mem_regions: &Memo
     *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
 
     let mut page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
-    let mut pt = unsafe { page_table_type.new_pagetable_at(page_table_guard.root_paddr()) };
+    let mut pt = unsafe { page_table_type.new_pagetable_at(page_table_guard.root()) };
 
     for region in phys_mem_regions {
         let paddr = region.range.start;

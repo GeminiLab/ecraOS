@@ -1,10 +1,10 @@
 use core::{fmt, num::NonZeroU8};
 
 use ecraldr_base::PlatformBootArg;
-use expt::opaque::OpaquePageTableType;
+use expt::opaque::{OpaquePageTableRoot, OpaquePageTableType};
 use heapless::Vec as HeaplessVec;
 use look_at::look_at;
-use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
+use memory_addr::{PhysAddrRange, VirtAddr};
 
 bitflags::bitflags! {
     /// The flags for a memory region.
@@ -321,8 +321,7 @@ look_at! {
 
     /// Sets the page table root for the current virtual address space mode.
     ///
-    /// For [`VirtAddrSpaceMode::Independent`], the same root may be installed
-    /// in both translation registers when the architecture uses one shared
-    /// table allocation for the lower and upper halves.
-    pub fn set_page_table_root(root: PhysAddr);
+    /// The root variant must match the selected architecture and address-space
+    /// mode. A dual root carries independent lower and upper translation roots.
+    pub fn set_page_table_root(root: OpaquePageTableRoot);
 }

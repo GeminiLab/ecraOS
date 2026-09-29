@@ -1,5 +1,7 @@
 //! Infomations about the sections of the kernel binary.
 
+use memory_addr::AddrRangeBounds;
+
 macro_rules! sections {
     ($(
         $name:ident ($name_aligned:ident) => $start_symbol:ident .. $end_symbol:ident .. $aligned_end_symbol:ident, $flag_fn:ident: $flag0:ident $(| $flags:ident)*

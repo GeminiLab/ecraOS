@@ -2,17 +2,19 @@
 
 use core::time::Duration;
 
-use memory_addr::{PhysAddr, VirtAddr};
+use expt::opaque::OpaquePageTableRoot;
+use memory_addr::VirtAddr;
 
 use crate::power::{APEntry, CpuStartError, PhysicalCpuId, ShutdownReason};
 
 /// Starts an x86-64 application processor.
 pub fn cpu_up(
     cpu_id: PhysicalCpuId,
-    page_table_root: PhysAddr,
+    page_table_root: OpaquePageTableRoot,
     boot_stack_top: VirtAddr,
     entry: APEntry,
 ) -> Result<(), CpuStartError> {
+    let OpaquePageTableRoot::Single(page_table_root) = page_table_root;
     let apic_id = u32::try_from(cpu_id).map_err(|_| CpuStartError::InvalidCpu)?;
     super::imp::ap::setup_ap_start_page(
         cpu_id,

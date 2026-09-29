@@ -61,10 +61,10 @@ struct Elf64Rela {
 /// The value of R_<current_arch>_RELATIVE relocation type.
 const RELATIVE_TYPE: u32 = {
     cfg_select! {
-        target_arch = "x86_64" => 8,        // R_X86_64_RELATIVE
-        target_arch = "aarch64" => 1027,    // R_AARCH64_RELATIVE
-        target_arch = "riscv64" => 3,       // R_RISCV_RELATIVE
-        target_arch = "loongarch64" => 3,   // R_LARCH_RELATIVE
+        target_arch = "x86_64" => 8, // R_X86_64_RELATIVE
+        target_arch = "aarch64" => 1027, // R_AARCH64_RELATIVE
+        target_arch = "riscv64" => 3, // R_RISCV_RELATIVE
+        target_arch = "loongarch64" => 3, // R_LARCH_RELATIVE
         _ => panic!("Unsupported target architecture"),
     }
 };

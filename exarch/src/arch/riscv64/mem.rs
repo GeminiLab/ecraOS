@@ -1,14 +1,14 @@
 use ecraldr_base::PlatformBootArg;
 use expt::{
     arch::riscv64::{Sv39PageTableMeta, Sv48PageTableMeta, Sv57PageTableMeta},
-    opaque::OpaquePageTableType,
+    opaque::{OpaquePageTableRoot, OpaquePageTableType},
     pte::riscv::Rv64PTE,
 };
 use fdt_rs::{
     base::DevTree,
     prelude::{FallibleIterator, PropReader},
 };
-use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr, pa};
+use memory_addr::{PhysAddrRange, VirtAddr, pa};
 
 use crate::mem::{
     DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
@@ -190,7 +190,8 @@ pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtA
 }
 
 /// Sets the RISC-V page-table root.
-pub fn set_page_table_root(root: PhysAddr) {
+pub fn set_page_table_root(root: OpaquePageTableRoot) {
+    let OpaquePageTableRoot::Single(root) = root;
     let root = root.as_usize();
 
     unsafe {

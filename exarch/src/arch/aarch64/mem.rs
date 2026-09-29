@@ -8,13 +8,15 @@ use aarch64_cpu::{
 };
 use ecraldr_base::PlatformBootArg;
 use expt::{
-    arch::aarch64::Aarch64PageTableMeta, opaque::OpaquePageTableType, pte::aarch64::A64PTE,
+    arch::aarch64::{AArch64PageTableMeta4KiBLower, AArch64PageTableMeta4KiBUpper},
+    opaque::{OpaquePageTableRoot, OpaquePageTableType},
+    pte::aarch64::A64PTE,
 };
 use fdt_rs::{
     base::DevTree,
     prelude::{FallibleIterator, PropReader},
 };
-use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr, pa};
+use memory_addr::{PhysAddrRange, VirtAddr, pa};
 
 use crate::mem::{
     DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
@@ -177,13 +179,23 @@ pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtA
             }
         }
     ));
-    OpaquePageTableType::new::<Aarch64PageTableMeta, A64PTE>()
+    OpaquePageTableType::new_dual::<
+        AArch64PageTableMeta4KiBLower<48>,
+        A64PTE,
+        AArch64PageTableMeta4KiBUpper<48>,
+        A64PTE,
+    >()
 }
 
-/// Installs a translation-table root in TTBR0 and synchronizes the MMU pipeline.
-pub fn set_page_table_root(root: PhysAddr) {
-    TTBR0_EL1.set_baddr(root.as_usize() as u64);
-    TTBR1_EL1.set_baddr(root.as_usize() as u64);
+/// Installs the lower and upper translation-table roots in TTBR0 and TTBR1.
+///
+/// The MMU pipeline is synchronized before returning.
+pub fn set_page_table_root(root: OpaquePageTableRoot) {
+    let OpaquePageTableRoot::Dual(root) = root else {
+        panic!("AArch64 requires a dual page-table root");
+    };
+    TTBR0_EL1.set_baddr(root.lower.as_usize() as u64);
+    TTBR1_EL1.set_baddr(root.upper.as_usize() as u64);
     aarch64_cpu::asm::barrier::dsb(aarch64_cpu::asm::barrier::ISH);
     // `aarch64-cpu` exposes architectural barriers and system registers, but
     // does not expose the EL1 TLB invalidation instruction.

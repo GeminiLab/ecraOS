@@ -4,7 +4,7 @@ use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
 use kspin::SpinNoIrq;
 use log::{debug, info};
-use memory_addr::PhysAddr;
+use memory_addr::{AddrRangeBounds, PhysAddr};
 use size_disp::SizeDisplay;
 
 use crate::{

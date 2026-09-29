@@ -1,6 +1,6 @@
 use core::{mem, ptr, slice};
 
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, align_up, pa};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, align_up, pa};
 
 use crate::{
     MAX_ORDER,

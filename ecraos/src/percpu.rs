@@ -2,7 +2,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use expt::pte::MappingFlags;
 use lazyinit::LazyInit;
-use memory_addr::VirtAddr;
+use memory_addr::{AddrRangeBounds, VirtAddr};
 
 use crate::{mem, mp::LogicalCpuId};
 

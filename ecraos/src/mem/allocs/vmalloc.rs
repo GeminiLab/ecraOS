@@ -12,7 +12,7 @@ use expt::pte::MappingFlags;
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{error, info, warn};
-use memory_addr::{MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange, pa};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange, pa};
 use memory_range_set::{RangeSet, TryInsertError};
 
 use crate::mem::{self, allocs::palloc};

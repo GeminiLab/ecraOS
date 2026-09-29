@@ -19,7 +19,7 @@ use core::{
     ops::{Bound, Deref, DerefMut},
 };
 
-use memory_addr::{AddrRange, MemoryAddr};
+use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr};
 
 /// Tests for range set behavior.
 ///
