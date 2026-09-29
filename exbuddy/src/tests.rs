@@ -1,7 +1,6 @@
-use core::mem;
 use std::{
     alloc::{Layout, alloc_zeroed, dealloc},
-    env, eprintln,
+    env, eprintln, mem,
     panic::AssertUnwindSafe,
     ptr::NonNull,
     time::{SystemTime, UNIX_EPOCH},
@@ -9,7 +8,7 @@ use std::{
     vec::Vec,
 };
 
-use memory_addr::{MemoryAddr, PhysAddrRange, pa};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddrRange, pa};
 
 use crate::{BuddyAllocator, BuddyError, BuddySection, MAX_ORDER, page_count_to_order_floor};
 
