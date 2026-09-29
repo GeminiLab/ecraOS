@@ -6,9 +6,8 @@ SECTIONS
         _percpu_end = .;
     }
 
-    .pes : ALIGN(64) {
+    .percpu_early_slot : ALIGN(64) {
         _percpu_early_slot_start = .;
-        KEEP(*(.pes .pes.*))
         . = MAX(., _percpu_early_slot_start + (_percpu_end - _percpu_start));
         _percpu_early_slot_end = .;
     }

@@ -101,6 +101,10 @@ pub unsafe fn init(base: VirtAddr) {
 
 /// Initializes the current CPU's per-CPU data area using the early slot.
 ///
+/// Early slot is a reserved area in the binary for initializing the per-CPU data area without
+/// relying on dynamic memory allocation. Early slot is bounded by the symbols
+/// `_percpu_early_slot_start` and `_percpu_early_slot_end`.
+///
 /// # Panics
 ///
 /// Panics at runtime if the linker-provided early slot is smaller than the per-CPU initial image.

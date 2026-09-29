@@ -6,7 +6,7 @@ edition = "2024"
 [features]
 default = []
 host-test = ["expercpu_macros/host-test"]
-early-slot = ["expercpu_macros/early-slot"]
+early-slot = []
 remote-access = ["dep:crate_interface", "expercpu_macros/remote-access"]
 preempt = ["expercpu_macros/preempt", "dep:kernel_guard"]
 arm-el2 = ["expercpu_macros/arm-el2"]
