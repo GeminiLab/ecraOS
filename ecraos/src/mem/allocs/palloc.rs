@@ -4,7 +4,7 @@ use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
 use kspin::SpinNoIrq;
 use log::{debug, info};
-use memory_addr::{AddrRangeBounds, PhysAddr};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange};
 use size_disp::SizeDisplay;
 
 use crate::{
@@ -42,25 +42,32 @@ pub fn init_palloc() {
             continue;
         }
 
-        if early_alloc_range.overlaps(region.range) {
-            if buddy
-                .check_metadata_overlap(region.range, early_alloc_range)
+        let range = PhysAddrRange::new(
+            region.range.start.align_up(page_size),
+            region.range.end.align_down(page_size),
+        );
+        if range.is_empty() {
+            continue;
+        }
+
+        if early_alloc_range.overlaps(range)
+            && buddy
+                .check_metadata_overlap(range, early_alloc_range)
                 .unwrap()
-            {
-                panic!(
-                    "Buddy metadata overlaps early allocator for region {:x} ({})",
-                    region.range, region.desc
-                );
-            }
+        {
+            panic!(
+                "Buddy metadata overlaps early allocator for region {:x} ({})",
+                range, region.desc
+            );
         }
 
         debug!(
             "Adding region {:x} ({}) to buddy allocator",
-            region.range, region.desc
+            range, region.desc
         );
         // SAFETY: we trust exarch to provide a valid physical memory map for
         // the active architecture.
-        unsafe { buddy.add_section(region.range) }
+        unsafe { buddy.add_section(range) }
             .expect("failed to add the previous region to buddy allocator");
     }
 

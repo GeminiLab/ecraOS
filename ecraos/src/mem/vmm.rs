@@ -146,6 +146,11 @@ pub(super) fn init_vmm_layout() {
     });
 }
 
+/// Selects the virtual address space mode to use.
+///
+/// Currently, we require the virtual address space mode to cover both halves
+/// symmetrically, and we prefer those with the largest upper virtual address
+/// bits, and among which we prefer those with the largest page size.
 fn select_va_mode(va_modes: VirtAddrSpaceModes) -> VirtAddrSpaceMode {
     kprintln!("  Platform virtual address space modes:");
     for mode in &va_modes.modes {
@@ -165,9 +170,17 @@ fn select_va_mode(va_modes: VirtAddrSpaceModes) -> VirtAddrSpaceMode {
         if matches!(
             mode,
             VirtAddrSpaceMode::Unified(..) | VirtAddrSpaceMode::Independent { .. }
-        ) && chosen_index
-            .map(|index| va_modes.modes[index].upper_va_bits() < mode.upper_va_bits())
-            .unwrap_or(true)
+        ) && mode.upper_va_bits() == mode.lower_va_bits()
+            && mode.upper_page_shift() == mode.lower_page_shift()
+            && chosen_index
+                .map(|index| {
+                    let old_mode = va_modes.modes[index];
+
+                    old_mode.upper_va_bits() < mode.upper_va_bits()
+                        || (old_mode.upper_va_bits() == mode.upper_va_bits()
+                            && old_mode.upper_page_shift() < mode.upper_page_shift())
+                })
+                .unwrap_or(true)
         {
             chosen_index = Some(index);
         }

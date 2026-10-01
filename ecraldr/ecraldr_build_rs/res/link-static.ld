@@ -6,17 +6,17 @@ SECTIONS {
     _sloader = .;
 
     /* Text sections */
-    .text : ALIGN(4K) {
+    .text : ALIGN(64K) {
         _stext = .;
         *(.text.boot)
         *(.text .text.*)
-        . = ALIGN(4K);
+        . = ALIGN(64K);
         _etext = .;
     }
 
     /* Read-only data sections */
     _srodata = .;
-    .rodata : ALIGN(4K) {
+    .rodata : ALIGN(64K) {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
         *(.sdata2 .sdata2.*)
@@ -28,38 +28,38 @@ SECTIONS {
         __init_array_end = .;
     }
 
-    . = ALIGN(4K);
+    . = ALIGN(64K);
     _erodata = .;
 
     /* Data sections */
-    .data : ALIGN(4K) {
+    .data : ALIGN(64K) {
         _sdata = .;
         *(.data .data.*)
-        . = ALIGN(4K);
+        . = ALIGN(64K);
 
         /* Boot stack section */
         _sbootstack = .;
         *(.boot_stack)
         _ebootstack = .;
 
-        . = ALIGN(4K);
+        . = ALIGN(64K);
         _edata = .;
     }
 
     /* Kernel payload section */
-    .kernel : ALIGN(4K) {
+    .kernel : ALIGN(64K) {
         _skernel = .;
         __ecraos_kernel_entry = .;
         *(.kernel)
-        . = ALIGN(4K);
+        . = ALIGN(64K);
         _ekernel = .;
     }
 
     /* BSS sections */
-    .bss : ALIGN(4K) {
+    .bss : ALIGN(64K) {
         _sbss = .;
         *(.bss .bss.*)
-        . = ALIGN(4K);
+        . = ALIGN(64K);
         _ebss = .;
     }
 

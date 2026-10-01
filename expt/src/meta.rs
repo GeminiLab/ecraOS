@@ -313,7 +313,7 @@ pub trait PageTableMeta: Send + Sync {
         sizes[0] = 1 << Self::PAGE_OFFSET_BITS;
         let mut index = 1;
         while index < Self::LEVELS {
-            sizes[index] = sizes[index - 1] << Self::LEVEL_BITS[index];
+            sizes[index] = sizes[index - 1] << Self::LEVEL_BITS[index - 1];
             index += 1;
         }
         sizes

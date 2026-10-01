@@ -199,6 +199,20 @@ impl VirtAddrSpaceMode {
         }
     }
 
+    /// Returns the number of valid bits in the lower virtual address half.
+    ///
+    /// Returns `None` when the lower half is disabled.
+    pub const fn lower_va_bits(self) -> Option<NonZeroU8> {
+        type P = VirtAddrSpaceProps;
+        match self {
+            VirtAddrSpaceMode::LowerOnly(P { va_bits, .. }) => NonZeroU8::new(va_bits),
+            VirtAddrSpaceMode::UpperOnly(P { .. }) => None,
+            VirtAddrSpaceMode::Independent { lower, .. } => NonZeroU8::new(lower.va_bits),
+            VirtAddrSpaceMode::Unified(P { va_bits, .. }) => NonZeroU8::new(va_bits - 1),
+        }
+    }
+
+    /// Returns the number of valid bits in the upper virtual address half.
     pub const fn upper_va_bits(self) -> Option<NonZeroU8> {
         type P = VirtAddrSpaceProps;
         match self {
@@ -209,6 +223,20 @@ impl VirtAddrSpaceMode {
         }
     }
 
+    /// Returns the page-size shift used by the lower virtual address half.
+    ///
+    /// Returns `None` when the lower half is disabled.
+    pub const fn lower_page_shift(self) -> Option<NonZeroU8> {
+        type P = VirtAddrSpaceProps;
+        match self {
+            VirtAddrSpaceMode::LowerOnly(P { page_shift, .. }) => NonZeroU8::new(page_shift),
+            VirtAddrSpaceMode::UpperOnly(P { .. }) => None,
+            VirtAddrSpaceMode::Independent { lower, .. } => NonZeroU8::new(lower.page_shift),
+            VirtAddrSpaceMode::Unified(P { page_shift, .. }) => NonZeroU8::new(page_shift),
+        }
+    }
+
+    /// Returns the page-size shift used by the upper virtual address half.
     pub const fn upper_page_shift(self) -> Option<NonZeroU8> {
         type P = VirtAddrSpaceProps;
         match self {

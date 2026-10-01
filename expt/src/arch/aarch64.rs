@@ -172,6 +172,23 @@ pub type AArch64PageTableMeta64KiBLower<const BITS: usize> =
 pub type AArch64PageTableMeta64KiBUpper<const BITS: usize> =
     AArch64PageTableMeta64KiB<BITS, UpperCoverage<VirtAddr>>;
 
+#[cfg(test)]
+mod tests {
+    use super::AArch64PageTableMeta64KiBLower;
+    use crate::meta::PageTableMeta;
+
+    /// Checks block sizes for a non-uniform 64 KiB page-table hierarchy.
+    #[test]
+    fn computes_64k_level_page_sizes() {
+        type Meta = AArch64PageTableMeta64KiBLower<48>;
+
+        assert_eq!(
+            <Meta as PageTableMeta>::LEVEL_PAGE_SIZE,
+            [1 << 16, 1 << 29, 1 << 42]
+        );
+    }
+}
+
 /// Metadata for AArch64 4 KiB, four-level, 48-bit translation tables.
 ///
 /// Levels zero through two may contain leaf mappings, providing 4 KiB, 2 MiB,
