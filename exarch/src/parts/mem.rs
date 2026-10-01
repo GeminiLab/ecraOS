@@ -169,6 +169,36 @@ impl VirtAddrSpaceMode {
         1usize.wrapping_shl(page_shift as _)
     }
 
+    /// Combines lower and upper virtual address space properties into a mode.
+    ///
+    /// A pair of properties produces an independent mode, while a single
+    /// property produces the corresponding one-sided mode.
+    pub const fn from_dual_props(
+        lower: Option<VirtAddrSpaceProps>,
+        upper: Option<VirtAddrSpaceProps>,
+    ) -> Option<VirtAddrSpaceMode> {
+        match (lower, upper) {
+            (Some(lower), Some(upper)) => Some(VirtAddrSpaceMode::Independent { lower, upper }),
+            (Some(lower), None) => Some(VirtAddrSpaceMode::LowerOnly(lower)),
+            (None, Some(upper)) => Some(VirtAddrSpaceMode::UpperOnly(upper)),
+            (None, None) => None,
+        }
+    }
+
+    /// Splits a mode into its lower and upper virtual address space properties.
+    ///
+    /// Unified modes return `None`.
+    pub const fn into_dual_props(
+        self,
+    ) -> Option<(Option<VirtAddrSpaceProps>, Option<VirtAddrSpaceProps>)> {
+        match self {
+            VirtAddrSpaceMode::LowerOnly(lower) => Some((Some(lower), None)),
+            VirtAddrSpaceMode::UpperOnly(upper) => Some((None, Some(upper))),
+            VirtAddrSpaceMode::Independent { lower, upper } => Some((Some(lower), Some(upper))),
+            VirtAddrSpaceMode::Unified(_) => None,
+        }
+    }
+
     pub const fn upper_va_bits(self) -> Option<NonZeroU8> {
         type P = VirtAddrSpaceProps;
         match self {

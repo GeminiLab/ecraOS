@@ -53,25 +53,23 @@ el1_entry:
     // common VMM replaces these tables once memory discovery is complete.
     ldr     x0, =boot_l0
     msr     TTBR0_EL1, x0
-    // TTBR1 covers the canonical upper half. The bootstrap table is shared so
-    // both halves translate the same low identity mappings until the common
-    // VMM installs its final mappings.
-    msr     TTBR1_EL1, x0
     // Attr0 is Device-nGnRE for MMIO and Attr1 is Normal WB for RAM.
     ldr     x0, =0x000000000000ff04
     msr     MAIR_EL1, x0
-    // 48-bit VA, 48-bit PA, 4 KiB granule, inner-shareable WB memory.
-    // T0SZ/T1SZ are both 16 and TG0/TG1 select 4 KiB granules.
-    ldr     x0, =0x00000005b5103510
+    // 48-bit lower VA, 48-bit PA, 4 KiB granule, inner-shareable WB memory.
+    // T0SZ is 16 and TG0 selects 4 KiB. EPD1 prevents TTBR1 walks until the
+    // final high-half root is installed by the common VMM.
+    // Disable TTBR1 walks until the final high-half root is installed.  All
+    // loader and kernel-entry accesses are in the lower identity mapping.
+    ldr     x0, =0x00000005b5903510
     msr     TCR_EL1, x0
     dsb     sy
     isb
     mrs     x0, SCTLR_EL1
     orr     x0, x0, #1
     orr     x0, x0, #4
-    // Keep the early identity map uncached until the kernel installs final
-    // page-table attributes.  This avoids relying on cache maintenance while
-    // the loader and kernel image share the bootstrap mapping.
+    // Enable the data cache while the loader and kernel image share the
+    // bootstrap mapping.
     orr     x0, x0, #4096
     msr     SCTLR_EL1, x0
     dsb     sy

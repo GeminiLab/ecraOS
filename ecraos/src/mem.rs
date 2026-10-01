@@ -118,6 +118,7 @@ pub fn init_and_enable_vmm(
 
     // Load the early page table.
     exarch::mem::set_page_table_root(vmm::page_table_root());
+    vmm::mark_page_table_active();
 
     // Call the relocation hook.
     exarch::reloc_hook::before_reloc();

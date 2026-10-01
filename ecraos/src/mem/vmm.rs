@@ -1,5 +1,7 @@
 //! Virtual memory management.
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use exarch::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
 use expt::opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType};
@@ -30,6 +32,9 @@ pub struct VirtualAddressSpace {
 }
 
 static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
+
+/// Indicates that the final page-table roots are active.
+static PAGE_TABLE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Returns whether the virtual address space has been initialized.
 pub fn is_initialized() -> bool {
@@ -88,6 +93,10 @@ pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
 }
 
 pub fn direct_mapping_phys_to_virt(addr: PhysAddr) -> Option<VirtAddr> {
+    if !PAGE_TABLE_ACTIVE.load(Ordering::Acquire) {
+        return None;
+    }
+
     let addr_space = VIRTUAL_ADDRESS_SPACE.get()?;
     let offset = addr.as_usize();
     let start = addr_space.layout.direct_mapping_range.start.as_usize();
@@ -106,6 +115,11 @@ where
 {
     let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
     f(&mut pt)
+}
+
+/// Marks the final page-table roots as active.
+pub(crate) fn mark_page_table_active() {
+    PAGE_TABLE_ACTIVE.store(true, Ordering::Release);
 }
 
 /// Returns the active page-table root.

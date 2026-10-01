@@ -5,6 +5,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use aarch64_cpu::registers::{Readable, TCR_EL1};
 use expt::opaque::OpaquePageTableRoot;
 use memory_addr::{PhysAddr, VirtAddr, va};
 
@@ -63,6 +64,8 @@ struct ApBootArgs {
     page_table_root_lower: PhysAddr,
     /// The physical address of the upper translation-table root.
     page_table_root_upper: PhysAddr,
+    /// The TCR value selected by the bootstrap processor.
+    tcr_el1: u64,
     /// The high-half virtual address of the AP stack top.
     stack_top: VirtAddr,
     /// The high-half virtual address of the Rust AP entry.
@@ -101,6 +104,7 @@ pub fn cpu_up(
                 phys_id,
                 page_table_root_lower: page_table_root.lower,
                 page_table_root_upper: page_table_root.upper,
+                tcr_el1: TCR_EL1.get(),
                 stack_top: boot_stack_top,
                 entry: VirtAddr::from_ptr_of(entry as *const ()),
             },

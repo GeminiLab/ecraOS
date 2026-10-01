@@ -226,6 +226,7 @@ dependencies = [
  "memory_addr",
  "multiboot",
  "page_table_entry",
+ "product",
  "raw-cpuid 11.6.0",
  "riscv",
  "sbi-rt",
@@ -495,6 +496,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "product"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

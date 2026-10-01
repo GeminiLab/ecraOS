@@ -22,7 +22,7 @@ members = [
     "utils/look_at",
     "utils/maybe_non_generic",
     "utils/memory_range_set",
-    "utils/size_disp",
+    "utils/size_disp", "utils/product",
 ]
 exclude = [
     "ecraldr/ecraldr_build_rs",

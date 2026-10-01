@@ -16,6 +16,7 @@ log.workspace = true
 look_at = { path = "../utils/look_at" }
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
+product = { path = "../utils/product" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 multiboot = "0.8"
