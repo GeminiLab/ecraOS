@@ -137,4 +137,4 @@ env KERNEL_BIN="$kernel_stripped" RUSTFLAGS='-C relocation-model=static' \
 printf 'Stripping loader\n' >&2
 rust-objcopy "$loader" --strip-all -O binary "$loader_stripped"
 
-printf '%s\n' "$loader"
+printf '%s\n' "$loader_stripped"
