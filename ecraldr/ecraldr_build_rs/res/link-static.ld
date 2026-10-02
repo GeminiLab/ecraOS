@@ -6,17 +6,17 @@ SECTIONS {
     _sloader = .;
 
     /* Text sections */
-    .text : ALIGN(64K) {
+    .text : ALIGN(%SECTION_ALIGN%) {
         _stext = .;
         *(.text.boot)
         *(.text .text.*)
-        . = ALIGN(64K);
+        . = ALIGN(%SECTION_ALIGN%);
         _etext = .;
     }
 
     /* Read-only data sections */
     _srodata = .;
-    .rodata : ALIGN(64K) {
+    .rodata : ALIGN(%SECTION_ALIGN%) {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
         *(.sdata2 .sdata2.*)
@@ -28,38 +28,38 @@ SECTIONS {
         __init_array_end = .;
     }
 
-    . = ALIGN(64K);
+    . = ALIGN(%SECTION_ALIGN%);
     _erodata = .;
 
     /* Data sections */
-    .data : ALIGN(64K) {
+    .data : ALIGN(%SECTION_ALIGN%) {
         _sdata = .;
         *(.data .data.*)
-        . = ALIGN(64K);
+        . = ALIGN(%SECTION_ALIGN%);
 
         /* Boot stack section */
         _sbootstack = .;
         *(.boot_stack)
         _ebootstack = .;
 
-        . = ALIGN(64K);
+        . = ALIGN(%SECTION_ALIGN%);
         _edata = .;
     }
 
     /* Kernel payload section */
-    .kernel : ALIGN(64K) {
+    .kernel : ALIGN(%SECTION_ALIGN%) {
         _skernel = .;
         __ecraos_kernel_entry = .;
         *(.kernel)
-        . = ALIGN(64K);
+        . = ALIGN(%SECTION_ALIGN%);
         _ekernel = .;
     }
 
     /* BSS sections */
-    .bss : ALIGN(64K) {
+    .bss : ALIGN(%SECTION_ALIGN%) {
         _sbss = .;
         *(.bss .bss.*)
-        . = ALIGN(64K);
+        . = ALIGN(%SECTION_ALIGN%);
         _ebss = .;
     }
 
