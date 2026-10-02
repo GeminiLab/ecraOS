@@ -13,7 +13,7 @@ use fdt_rs::{
     prelude::{FallibleIterator, PropReader},
 };
 use heapless::Vec as HeaplessVec;
-use memory_addr::{PhysAddrRange, VirtAddr, pa};
+use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
 use tock_registers::LocalRegisterCopy;
 
 use crate::{
@@ -29,6 +29,17 @@ use crate::{
 /// This child module owns the short-lived roots used while changing AArch64
 /// translation geometry.
 mod temp_pt;
+
+/// The description attached to the device tree memory range.
+///
+/// Identifies the reserved device-tree blob rather than MMIO described by its nodes.
+const DEVICE_TREE_DESC: &str = "device tree";
+
+/// The alignment used for the device tree memory reservation.
+///
+/// Covers whole pages for all supported AArch64 granules, including 64 KiB, so RAM and
+/// device mappings never share a page at either boundary of the blob.
+const DEVICE_TREE_ALIGN: usize = 64 * 1024;
 
 /// The TCR bit selecting the 52-bit address-size format used by FEAT_LPA2.
 // `aarch64-cpu` 11.2.0 does not expose TCR_EL1.DS as a bitfield.
@@ -171,7 +182,10 @@ fn tcr_for_mode(mode: VirtAddrSpaceMode) -> LocalRegisterCopy<u64, TCR_EL1::Regi
     tcr
 }
 
-/// Collects the conservative RAM region used before full FDT reservation parsing.
+/// Collects RAM and device regions reported by the device tree.
+///
+/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
+/// reserved device memory, preserving usable RAM on both sides.
 pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let mut regions = RawMemoryRegions::new();
     if let PlatformBootArg::DeviceTree(dtb_addr) = arg {
@@ -179,6 +193,9 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
                 .expect("failed to parse device tree")
         };
+        let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dtb.totalsize())
+            .align_outwards(DEVICE_TREE_ALIGN)
+            .expect("device tree range alignment overflow");
         for node in dtb.nodes().iterator() {
             let node = node.expect("failed to inspect device tree node");
             let mut is_memory = false;
@@ -218,11 +235,21 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 let end = start
                     .checked_add(reg_values[1])
                     .expect("memory range overflow");
-                let _ = regions.push(MemoryRegion {
-                    range: PhysAddrRange::new(pa!(start as usize), pa!(end as usize)),
-                    flags: DEFAULT_RAM_FLAGS,
-                    desc: DEFAULT_RAM_DESC,
-                });
+                let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
+                let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
+                for range in [before_dtb, after_dtb]
+                    .into_iter()
+                    .flatten()
+                    .filter(|range| !range.is_empty())
+                {
+                    regions
+                        .push(MemoryRegion {
+                            range,
+                            flags: DEFAULT_RAM_FLAGS,
+                            desc: DEFAULT_RAM_DESC,
+                        })
+                        .expect("too many platform memory regions");
+                }
             }
 
             if is_supported && reg_count >= 2 {
@@ -252,6 +279,16 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 }
             }
         }
+
+        regions
+            .push(MemoryRegion {
+                range: dtb_range,
+                flags: MemoryRegionFlags::READ
+                    | MemoryRegionFlags::WRITE
+                    | MemoryRegionFlags::RESERVED,
+                desc: DEVICE_TREE_DESC,
+            })
+            .expect("too many platform memory regions");
     }
     regions
 }

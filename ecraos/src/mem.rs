@@ -86,7 +86,6 @@ pub fn init_and_enable_vmm(
     pmm::build_phys_mem_regions(
         &raw_mem_regions,
         unsafe { arg.as_ref_unchecked() }.loader_range,
-        unsafe { arg.as_ref_unchecked() }.plat_arg,
     );
     print_mem_regions("Final physical memory regions:", pmm::phys_mem_regions());
     // The final table is now the sole source of truth. boot_regions is never

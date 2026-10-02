@@ -410,7 +410,7 @@ dependencies = [
 [[package]]
 name = "memory_addr"
 version = "0.4.1"
-source = "git+https://github.com/arceos-org/axmm_crates/?rev=968403b590b6f4d1bd2db8644149966f88b851e8#968403b590b6f4d1bd2db8644149966f88b851e8"
+source = "git+https://github.com/arceos-org/axmm_crates/?rev=d4fc64141cb6544d41d43810e96008edb6560fff#d4fc64141cb6544d41d43810e96008edb6560fff"
 
 [[package]]
 name = "memory_range_set"

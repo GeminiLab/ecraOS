@@ -8,7 +8,7 @@ use fdt_rs::{
     base::DevTree,
     prelude::{FallibleIterator, PropReader},
 };
-use memory_addr::{PhysAddrRange, VirtAddr, pa};
+use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
 
 use crate::mem::{
     DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
@@ -22,7 +22,20 @@ core::arch::global_asm!(include_str!("mem.S"),);
 /// These ranges are reserved from allocation and mapped with device-memory attributes.
 const DEVICE_MMIO_DESC: &str = "device-tree MMIO";
 
+/// The description attached to the device tree memory range.
+///
+/// Identifies the reserved device-tree blob rather than MMIO described by its nodes.
+const DEVICE_TREE_DESC: &str = "device tree";
+
+/// The alignment used for the device tree memory reservation.
+///
+/// Covers whole base pages so the blob cannot share an allocatable page with RAM.
+const DEVICE_TREE_ALIGN: usize = 4096;
+
 /// Collects physical memory regions reported by the device tree.
+///
+/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
+/// reserved device memory, preserving usable RAM on both sides.
 pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let mut regions = RawMemoryRegions::new();
 
@@ -31,6 +44,9 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
                 .expect("failed to parse device tree")
         };
+        let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dev_tree.totalsize())
+            .align_outwards(DEVICE_TREE_ALIGN)
+            .expect("device tree range alignment overflow");
 
         let mems = dev_tree.nodes().filter(|node| {
             Ok(node
@@ -56,11 +72,21 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 size -= 0x20_0000;
             }
 
-            let _ = regions.push(MemoryRegion {
-                range: PhysAddrRange::from_start_size(pa!(start as _), size as _),
-                flags: DEFAULT_RAM_FLAGS,
-                desc: DEFAULT_RAM_DESC,
-            });
+            let memory_range = PhysAddrRange::from_start_size(pa!(start as _), size as _);
+            let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
+            for range in [before_dtb, after_dtb]
+                .into_iter()
+                .flatten()
+                .filter(|range| !range.is_empty())
+            {
+                regions
+                    .push(MemoryRegion {
+                        range,
+                        flags: DEFAULT_RAM_FLAGS,
+                        desc: DEFAULT_RAM_DESC,
+                    })
+                    .expect("too many platform memory regions");
+            }
         }
 
         // TODO: handle other devices
@@ -98,6 +124,16 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 })
                 .expect("too many platform memory regions");
         }
+
+        regions
+            .push(MemoryRegion {
+                range: dtb_range,
+                flags: MemoryRegionFlags::READ
+                    | MemoryRegionFlags::WRITE
+                    | MemoryRegionFlags::RESERVED,
+                desc: DEVICE_TREE_DESC,
+            })
+            .expect("too many platform memory regions");
     }
 
     regions

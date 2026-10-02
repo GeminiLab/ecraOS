@@ -1,14 +1,9 @@
 //! Physical memory management region table builder.
 
-use ecraldr_base::PlatformBootArg;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
-#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
-use fdt_rs::base::DevTree;
 use heapless::Vec as HeaplessVec;
 use lazyinit::LazyInit;
-#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
-use memory_addr::va;
-use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, VirtAddrRange};
+use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddrRange};
 
 use crate::mem::sections;
 
@@ -173,55 +168,16 @@ fn virt_range_to_id_phys_range(virt_range: VirtAddrRange) -> PhysAddrRange {
     )
 }
 
-/// The alignment used for platform boot-service reservations.
-///
-/// These reservations are later consumed by page-based allocators and page-table mappings, so each
-/// reserved region covers whole base pages.
-const PLATFORM_BOOT_RESERVED_ALIGN: usize = 4096;
-
-/// Pushes physical ranges that must survive after early boot.
-fn push_platform_boot_regions(target: &mut MemoryRegions, boot_arg: PlatformBootArg) {
-    #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
-    if let PlatformBootArg::DeviceTree(dtb_addr) = boot_arg {
-        let dev_tree = unsafe {
-            DevTree::from_raw_pointer(va!(dtb_addr.as_usize()).as_ptr())
-                .expect("failed to parse device tree")
-        };
-        let dtb_range = PhysAddrRange::new(
-            dtb_addr.align_down(PLATFORM_BOOT_RESERVED_ALIGN),
-            (dtb_addr + dev_tree.totalsize()).align_up(PLATFORM_BOOT_RESERVED_ALIGN),
-        );
-
-        push_phys_mem_region_skip_overlap(
-            target,
-            MemoryRegion {
-                range: dtb_range,
-                flags: MemoryRegionFlags::BOOT_SERVICE
-                    | MemoryRegionFlags::READ
-                    | MemoryRegionFlags::WRITE,
-                desc: "device tree",
-            },
-        );
-    }
-
-    #[cfg(not(target_arch = "riscv64"))]
-    let _ = boot_arg;
-}
-
 /// Builds the final physical memory region table.
 ///
 /// The final memory regions contains:
 /// - All kernel sections with the [`MemoryRegionFlags::KERNEL`] flag set.
 /// - The loader range with the [`MemoryRegionFlags::BOOT_SERVICE`] flag set.
-/// - Platform boot data ranges with the [`MemoryRegionFlags::BOOT_SERVICE`] flag set.
+/// - All boot-service regions reported by [`exarch::mem::raw_mem_regions`].
 /// - All reserved regions reported by [`exarch::mem::raw_mem_regions`].
 /// - All free regions reported by [`exarch::mem::raw_mem_regions`], with
 ///   portions overlapping with other regions dropped.
-pub fn build_phys_mem_regions(
-    raw_mem_regions: &RawMemoryRegions,
-    loader_range: PhysAddrRange,
-    boot_arg: PlatformBootArg,
-) {
+pub fn build_phys_mem_regions(raw_mem_regions: &RawMemoryRegions, loader_range: PhysAddrRange) {
     let mut final_mem_regions = MemoryRegions::new();
 
     for section in sections::all_sections() {
@@ -254,8 +210,6 @@ pub fn build_phys_mem_regions(
             push_phys_mem_region_no_overlap(&mut final_mem_regions, *raw_region)
         }
     }
-
-    push_platform_boot_regions(&mut final_mem_regions, boot_arg);
 
     for raw_region in raw_mem_regions {
         if raw_region.flags.contains(MemoryRegionFlags::FREE) {

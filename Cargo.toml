@@ -37,4 +37,4 @@ memory_addr = "0.4.1"
 thiserror = { version = "2.0", default-features = false }
 
 [patch.crates-io]
-memory_addr = { git = "https://github.com/arceos-org/axmm_crates/", rev = "968403b590b6f4d1bd2db8644149966f88b851e8" }
+memory_addr = { git = "https://github.com/arceos-org/axmm_crates/", rev = "d4fc64141cb6544d41d43810e96008edb6560fff" }
