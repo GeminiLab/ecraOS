@@ -1,7 +1,7 @@
-//! Direct boot module for AArch64 QEMU `virt`.
+//! Linux arm64 Image boot module for AArch64 QEMU `virt`.
 //!
-//! The assembly entry normalizes EL2 into EL1 and leaves the firmware CPU
-//! identifier and device-tree pointer in the common loader contract.
+//! The assembly entry follows the Linux arm64 boot protocol and forwards the
+//! device-tree pointer with a CPU identifier read from `MPIDR_EL1`.
 
 #![no_main]
 #![no_std]
@@ -23,8 +23,8 @@ global_asm!(
 
 /// Enters the portable kernel path on the bootstrap processor.
 ///
-/// The firmware-provided CPU identifier and device-tree address are preserved
-/// by the assembly entry and forwarded as the standard [`BootArg`] value.
+/// The CPU identifier and device-tree address are forwarded as the standard
+/// [`BootArg`] value.
 #[unsafe(no_mangle)]
 extern "C" fn rust_entry64_bsp(cpu_id: u64, dtb: u64) -> ! {
     unsafe extern "C" {

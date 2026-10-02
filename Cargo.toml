@@ -3,7 +3,7 @@ resolver = "3"
 members = [
     "ecraldr/ecraldr",
     "ecraldr/ecraldr-riscv64-none",
-    "ecraldr/ecraldr-aarch64-none",
+    "ecraldr/ecraldr-aarch64-linux",
     "ecraldr/ecraldr-x86_64-multiboot",
     "ecraldr/ecraldr_base",
     "ecraldr/ecraldr_base_macros",

@@ -101,7 +101,7 @@ case "$target" in
         loader_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
         ;;
     aarch64-unknown-none-softfloat)
-        loader_crate="ecraldr-aarch64-none"
+        loader_crate="ecraldr-aarch64-linux"
         kernel_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
         loader_cargo_args=(-Z build-std=core,alloc,compiler_builtins)
         ;;
@@ -137,4 +137,4 @@ env KERNEL_BIN="$kernel_stripped" RUSTFLAGS='-C relocation-model=static' \
 printf 'Stripping loader\n' >&2
 rust-objcopy "$loader" --strip-all -O binary "$loader_stripped"
 
-printf '%s\n' "$loader_stripped"
+printf '%s\n' "$loader"

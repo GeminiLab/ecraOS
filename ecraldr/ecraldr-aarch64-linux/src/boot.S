@@ -2,30 +2,26 @@
 .global _start
 .type _start, %function
 
-// AArch64 QEMU virt enters with x0=boot CPU ID and x1=DTB address.
+// Linux arm64 Image header. QEMU enters the image with x0=DTB address.
 _start:
-    mov     x19, x0
-    mov     x20, x1
+    add     x13, x18, #0x16
+    b       image_entry
+    .quad   0
+    .quad   _ekernel - _start
+    .quad   0xA
+    .quad   0
+    .quad   0
+    .quad   0
+    .ascii  "ARM\x64"
+    .long   0
+
+image_entry:
+    mrs     x19, mpidr_el1
+    and     x19, x19, #0xffffff
+    mov     x20, x0
     msr     daifset, #0xf
     ldr     x0, ={boot_stack_top}
     mov     sp, x0
-    cbnz    x20, 0f
-    mov     x21, #0x40000000
-    mov     x22, #0x48000000
-    mov     w23, #0xfeed
-    movk    w23, #0xd00d, lsl #16
-1:
-    ldr     w0, [x21]
-    rev     w0, w0
-    cmp     w0, w23
-    b.eq    2f
-    add     x21, x21, #0x1000
-    cmp     x21, x22
-    b.lo    1b
-    b       unsupported_el
-2:
-    mov     x20, x21
-0:
 
     // Normalize EL2 into EL1h.  EL1 starts at the same path below.
     mrs     x21, CurrentEL

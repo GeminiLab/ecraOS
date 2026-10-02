@@ -1,5 +1,5 @@
 [package]
-name = "ecraldr-aarch64-none"
+name = "ecraldr-aarch64-linux"
 version = "0.1.0"
 edition = "2024"
 

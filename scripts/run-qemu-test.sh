@@ -100,20 +100,15 @@ fi
 
 printf 'Loader: %s\n' "$loader_path" | tee -a "$log_path"
 
-qemu_args=("${qemu[@]}" -smp "$cpus" -nographic -no-reboot -kernel "$loader_path")
+kernel_image="$loader_path"
 if [[ "$target" == "aarch64-unknown-none-softfloat" ]]; then
-    dtb_dir="$ROOT/target/qemu-dtb"
-    dtb_path="$dtb_dir/virt-${cpus}.dtb"
-    mkdir -p "$dtb_dir"
-    qemu-system-aarch64 \
-        -machine "virt,gic-version=3,dumpdtb=$dtb_path" \
-        -cpu cortex-a72 \
-        -smp "$cpus" \
-        -display none \
-        -monitor none \
-        >/dev/null 2>>"$log_path"
-    qemu_args+=( -device "loader,file=$dtb_path,addr=0x47f00000" )
+    kernel_image="${loader_path}.bin"
 fi
+if [[ ! -f "$kernel_image" ]]; then
+    printf 'error: kernel image not found: %s\n' "$kernel_image" >&2
+    exit 2
+fi
+qemu_args=("${qemu[@]}" -smp "$cpus" -nographic -no-reboot -kernel "$kernel_image")
 qemu_args+=("${qemu_extra_args[@]}")
 
 set +e
