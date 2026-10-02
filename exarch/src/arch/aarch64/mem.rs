@@ -215,12 +215,9 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
 
             if is_memory && reg_count >= 2 {
                 let start = reg_values[0];
-                let mut end = start
+                let end = start
                     .checked_add(reg_values[1])
                     .expect("memory range overflow");
-                if (start..end).contains(&(dtb_addr.as_usize() as u64)) {
-                    end = dtb_addr.as_usize() as u64;
-                }
                 let _ = regions.push(MemoryRegion {
                     range: PhysAddrRange::new(pa!(start as usize), pa!(end as usize)),
                     flags: DEFAULT_RAM_FLAGS,
