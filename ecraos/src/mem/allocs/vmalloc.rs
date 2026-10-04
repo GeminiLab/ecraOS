@@ -284,7 +284,7 @@ impl VMAllocRange {
             return None;
         }
 
-        let offset = addr.as_usize() - self.non_guard_range.start.as_usize();
+        let offset = addr.sub_addr(self.non_guard_range.start);
         let page_index = offset / page_size;
         if !self.pages.is_mapped(page_index) {
             return None;
@@ -304,7 +304,7 @@ impl VMAllocRange {
             return Err(VMAllocError::OutOfOuterRange);
         }
 
-        let start_offset = range.start.as_usize() - self.non_guard_range.start.as_usize();
+        let start_offset = range.start.sub_addr(self.non_guard_range.start);
         let page_count = range.size() / page_size;
         Ok(Range {
             start: start_offset / page_size,
@@ -646,11 +646,10 @@ impl VMAllocator {
             return Err(VMAllocError::RangeSizeMismatch);
         }
 
-        let page_count = physical_range.size() / page_size;
-        let mut phys_pages = Vec::with_capacity(page_count);
-        for index in 0..page_count {
-            phys_pages.push(physical_range.start + index * page_size);
-        }
+        let phys_pages = physical_range
+            .iter(page_size)
+            .expect("validated physical range must produce a page iterator")
+            .collect::<Vec<_>>();
 
         self.register_external_pages(
             full_range,

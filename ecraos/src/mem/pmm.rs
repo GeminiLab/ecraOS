@@ -49,6 +49,42 @@ fn push_phys_mem_region_no_overlap(target: &mut MemoryRegions, region: MemoryReg
     target.push(region).expect("too many memory regions");
 }
 
+const MAX_SPLIT_SUB_REGIONS: usize = 8;
+
+fn subtract_overlaps<I>(
+    range: PhysAddrRange,
+    occupied: I,
+) -> HeaplessVec<PhysAddrRange, MAX_SPLIT_SUB_REGIONS>
+where
+    I: Iterator<Item = PhysAddrRange>,
+{
+    let mut remaining = HeaplessVec::new();
+    if !range.is_empty() {
+        remaining
+            .push(range)
+            .expect("failed to initialize physical range subtraction");
+    }
+
+    for other in occupied {
+        let current = core::mem::replace(&mut remaining, HeaplessVec::new());
+        for candidate in current {
+            let (before, after) = candidate.subtract(other);
+            if let Some(before) = before.filter(|range| !range.is_empty()) {
+                remaining
+                    .push(before)
+                    .expect("splitting into too many memory regions");
+            }
+            if let Some(after) = after.filter(|range| !range.is_empty()) {
+                remaining
+                    .push(after)
+                    .expect("splitting into too many memory regions");
+            }
+        }
+    }
+
+    remaining
+}
+
 /// Pushes a physical memory region into a [`MemoryRegions`], splitting the
 /// region into multiple parts to skip overlapping parts if necessary.
 ///
@@ -57,86 +93,14 @@ fn push_phys_mem_region_no_overlap(target: &mut MemoryRegions, region: MemoryReg
 /// Panics if the region would be split into too many parts or the number of
 /// regions exceeds the maximum.
 fn push_phys_mem_region_skip_overlap(target: &mut MemoryRegions, region: MemoryRegion) {
-    const MAX_SPLIT_SUB_REGIONS: usize = 8;
-
-    let MemoryRegion {
-        range: mut region_range,
-        flags,
-        desc,
-    } = region;
-    let mut to_be_pushed: HeaplessVec<MemoryRegion, MAX_SPLIT_SUB_REGIONS> = HeaplessVec::new();
     sort_phys_mem_regions(target);
-
-    for other in &target[0..target.len()] {
-        if other.range.start <= region_range.start {
-            // Case 1, the start of the region may be included in the other
-            // region.
-            if other.range.end <= region_range.start {
-                // Case 1a, it's actually not! Go to the next region.
-                continue;
-            } else if other.range.end >= region_range.end {
-                // Case 1b, the region is completely included in the other
-                // region. Break the loop because the region is completely
-                // consumed.
-                break;
-            } else {
-                // Case 1c, the region is partially included in the other
-                // region. Remove the overlapping part.
-                region_range.start = other.range.end;
-                continue;
-            }
-        } else {
-            // Case 2, the start of the region is before the start of the other
-            // region.
-            if other.range.start >= region_range.end {
-                // Case 2a, the end of the region is before the start of the
-                // other region, i.e. the region is completely before the other
-                // region. Push the region and return.
-                to_be_pushed
-                    .push(MemoryRegion {
-                        range: region_range,
-                        flags,
-                        desc,
-                    })
-                    .expect("splitting into too many memory regions");
-                region_range.start = region_range.end;
-                break;
-            } else {
-                // Case 2b, the end of the region is after the start of the
-                // other region, i.e. the region partially overlaps with the
-                // other region. Pushes the non-overlapping part.
-                to_be_pushed
-                    .push(MemoryRegion {
-                        range: PhysAddrRange::new(region_range.start, other.range.start),
-                        flags,
-                        desc,
-                    })
-                    .expect("splitting into too many memory regions");
-
-                if other.range.end >= region_range.end {
-                    // Case 2b1, the end of the other region is after the end
-                    // of the region, i.e. the region is completely consumed.
-                    break;
-                } else {
-                    // Case 2b2, the end of the other region is before the end
-                    // of the region, i.e. the region is partially consumed.
-                    region_range.start = other.range.end;
-                }
-            }
-        }
-    }
-
-    if !region_range.is_empty() {
-        to_be_pushed
-            .push(MemoryRegion {
-                range: region_range,
-                flags,
-                desc,
-            })
-            .expect("splitting into too many memory regions");
-    }
-
-    target.extend(to_be_pushed);
+    let occupied = target.iter().map(|region| region.range);
+    let remaining = subtract_overlaps(region.range, occupied);
+    target.extend(remaining.into_iter().map(|range| MemoryRegion {
+        range,
+        flags: region.flags,
+        desc: region.desc,
+    }));
 }
 
 /// Sorts a [`MemoryRegions`] by address range start.
@@ -221,4 +185,55 @@ pub fn build_phys_mem_regions(raw_mem_regions: &RawMemoryRegions, loader_range: 
     check_phys_mem_regions(&final_mem_regions);
 
     PHYS_MEM_REGIONS.init_once(final_mem_regions);
+}
+
+#[cfg(test)]
+mod tests {
+    use memory_addr::{AddrRangeBounds, PhysAddrRange, pa};
+
+    use super::subtract_overlaps;
+
+    #[test]
+    fn subtract_overlaps_removes_multiple_occupied_segments() {
+        let target = PhysAddrRange::new(pa!(0x1000), pa!(0x9000));
+        let occupied = [
+            PhysAddrRange::new(pa!(0x2000), pa!(0x3000)),
+            PhysAddrRange::new(pa!(0x5000), pa!(0x6000)),
+        ];
+
+        let remaining = subtract_overlaps(target, occupied.iter().copied());
+
+        assert_eq!(
+            remaining.as_slice(),
+            &[
+                PhysAddrRange::new(pa!(0x1000), pa!(0x2000)),
+                PhysAddrRange::new(pa!(0x3000), pa!(0x5000)),
+                PhysAddrRange::new(pa!(0x6000), pa!(0x9000)),
+            ]
+        );
+    }
+
+    #[test]
+    fn subtract_overlaps_drops_fully_covered_and_keeps_adjacent_ranges() {
+        let target = PhysAddrRange::new(pa!(0x2000), pa!(0x6000));
+        let occupied = [
+            PhysAddrRange::new(pa!(0x1000), pa!(0x7000)),
+            PhysAddrRange::new(pa!(0x7000), pa!(0x8000)),
+        ];
+
+        let remaining = subtract_overlaps(target, occupied.iter().copied());
+
+        assert!(remaining.is_empty());
+
+        let target = PhysAddrRange::new(pa!(0x2000), pa!(0x6000));
+        let occupied = [
+            PhysAddrRange::new(pa!(0x1000), pa!(0x2000)),
+            PhysAddrRange::new(pa!(0x6000), pa!(0x7000)),
+        ];
+
+        let remaining = subtract_overlaps(target, occupied.iter().copied());
+
+        assert_eq!(remaining.as_slice(), &[target]);
+        assert!(remaining[0].is_valid());
+    }
 }

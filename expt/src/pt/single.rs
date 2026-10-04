@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 
 use expalloc_trait::{DynPageAllocator, PageAllocator};
 use maybe_non_generic::maybe_non_generic;
-use memory_addr::{AddrRange, MemoryAddr, PhysAddr};
+use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
 use crate::{
@@ -412,10 +412,9 @@ where
     where
         F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult<M::VirtAddr, TlbFlush<M>>,
     {
-        let range_aligned = AddrRange {
-            start: range.start.align_down(M::LEVEL_PAGE_SIZE[0]),
-            end: range.end.align_up(M::LEVEL_PAGE_SIZE[0]),
-        };
+        let range_aligned = range
+            .align_outwards(M::LEVEL_PAGE_SIZE[0])
+            .ok_or(PagingError::NonCanonical { vaddr: range.end })?;
         let range_truncated =
             PageTable::<M, PTE>::validate_and_truncate_vaddr_range(range_aligned)?;
 
@@ -471,8 +470,11 @@ where
         flags: MappingFlags,
     ) -> PagingResult<M::VirtAddr> {
         let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
+        let end = vaddr
+            .checked_add(size)
+            .ok_or(PagingError::NonCanonical { vaddr })?;
         self.iter_pages_in_range::<_, H>(
-            AddrRange::new(vaddr, vaddr + size),
+            AddrRange::new(vaddr, end),
             |level, _index, page_vaddr, entry| {
                 let page_paddr = PhysAddr::from_usize(page_vaddr.wrapping_sub(offset).into());
                 *entry = GenericPTE::new_page(page_paddr, flags, level != 0);
@@ -496,8 +498,11 @@ where
         vaddr: M::VirtAddr,
         size: usize,
     ) -> PagingResult<M::VirtAddr> {
+        let end = vaddr
+            .checked_add(size)
+            .ok_or(PagingError::NonCanonical { vaddr })?;
         self.iter_pages_in_range::<_, H>(
-            AddrRange::new(vaddr, vaddr + size),
+            AddrRange::new(vaddr, end),
             |_level, _index, _page_vaddr, _entry| Ok(TlbFlush::None),
         )
     }

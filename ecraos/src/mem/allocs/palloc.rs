@@ -4,7 +4,7 @@ use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
 use kspin::SpinNoIrq;
 use log::{debug, info};
-use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange};
+use memory_addr::{AddrRangeBounds, PhysAddr};
 use size_disp::SizeDisplay;
 
 use crate::{
@@ -42,13 +42,9 @@ pub fn init_palloc() {
             continue;
         }
 
-        let range = PhysAddrRange::new(
-            region.range.start.align_up(page_size),
-            region.range.end.align_down(page_size),
-        );
-        if range.is_empty() {
+        let Some(range) = region.range.align_inwards(page_size) else {
             continue;
-        }
+        };
 
         if early_alloc_range.overlaps(range)
             && buddy

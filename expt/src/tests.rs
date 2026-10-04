@@ -740,6 +740,26 @@ fn page_level_selection_rejects_wrapping_end_addresses() {
     );
 }
 
+/// Mapping ranges reject an exclusive end that cannot be represented.
+#[test]
+fn mapping_rejects_wrapping_range_end() {
+    reset_test_state();
+    let mut table = new_table();
+    let mut cursor = table.cursor();
+
+    assert!(matches!(
+        cursor.map::<TestPagingHandler>(
+            VirtAddr::from_usize(usize::MAX),
+            PhysAddr::from_usize(0),
+            1,
+            MappingFlags::READ,
+        ),
+        Err(PagingError::NonCanonical { .. })
+    ));
+
+    reset_test_state();
+}
+
 /// Verifies canonical validation for symmetric virtual-address coverage.
 #[test]
 fn symmetric_vaddr_validation_rejects_canonical_hole() {

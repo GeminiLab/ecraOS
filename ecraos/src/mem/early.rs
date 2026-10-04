@@ -6,7 +6,7 @@ use bitmaps::Bitmap;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expalloc_trait::PageAllocator;
 use lazyinit::LazyInit;
-use memory_addr::{MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
 use crate::{
@@ -71,18 +71,16 @@ fn find_early_page_allocator_range(regions: &[MemoryRegion]) -> Option<PhysAddrR
             continue;
         }
 
-        let start_aligned = region.range.start.align_up(page_size);
-        let end_aligned = region.range.end.align_down(page_size);
+        let Some(aligned_range) = region.range.align_inwards(page_size) else {
+            continue;
+        };
 
-        if end_aligned
-            .as_usize()
-            .saturating_sub(start_aligned.as_usize())
-            < total_size
-        {
+        if aligned_range.size() < total_size {
             continue;
         }
 
-        let current_range = PhysAddrRange::from_start_size(end_aligned - total_size, total_size);
+        let current_range =
+            PhysAddrRange::from_start_size(aligned_range.end - total_size, total_size);
         return Some(current_range);
     }
 
