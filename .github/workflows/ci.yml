@@ -37,14 +37,13 @@ jobs:
         run: cargo xtask test-host
 
   qemu-tests:
-    name: QEMU (${{ matrix.smoke }}, ${{ matrix.machine.arch }}, ${{ matrix.profile }}, ${{ matrix.machine.cpus }} CPUs)
+    name: QEMU (${{ matrix.smoke }}, ${{ matrix.machine.arch }}, ${{ matrix.machine.cpus }} CPUs)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         smoke: [default, sync-preemption, sleep-join]
-        profile: [debug, release]
         machine:
           - { arch: x86_64, target: x86_64-unknown-none, cpus: 1 }
           - { arch: x86_64, target: x86_64-unknown-none, cpus: 4 }
@@ -86,7 +85,7 @@ jobs:
           cargo xtask qemu
           --crate smoke-apps/${{ matrix.smoke }}
           --target ${{ matrix.machine.target }}
-          --profile ${{ matrix.profile }}
+          --profile debug,release
           --cpus ${{ matrix.machine.cpus }}
           --timeout 20
 
@@ -94,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-logs-${{ matrix.smoke }}-${{ matrix.machine.arch }}-${{ matrix.profile }}-${{ matrix.machine.cpus }}
+          name: qemu-logs-${{ matrix.smoke }}-${{ matrix.machine.arch }}-${{ matrix.machine.cpus }}
           path: target/qemu-logs/*.log
           if-no-files-found: warn
           retention-days: 7
