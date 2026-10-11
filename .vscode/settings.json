@@ -4,7 +4,14 @@
     // "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
     "rust-analyzer.cargo.target": "aarch64-unknown-none-softfloat",
     "rust-analyzer.check.allTargets": false,
-    "rust-analyzer.linkedProjects": ["Cargo.toml"],
+    "rust-analyzer.linkedProjects": [
+        "ecraos/Cargo.toml",
+        "ecraldr/Cargo.toml",
+        // "ecraldr/ecraldr_build_rs/Cargo.toml",
+        "smoke-apps/default/Cargo.toml",
+        "smoke-apps/sleep-join/Cargo.toml",
+        "smoke-apps/sync-preemption/Cargo.toml"
+    ],
     "rust-analyzer.cargo.allTargets": true,
     "rust-analyzer.cargo.buildScripts.enable": true,
     "rust-analyzer.procMacro.enable": true,

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-crate_path="${CRATE:-smokes/default}"
+crate_path="${CRATE:-smoke-apps/default}"
 target=""
 profile=""
 clean=0
@@ -72,7 +72,10 @@ if [[ -z "$kernel_name" ]]; then
     exit 2
 fi
 
-target_dir="$(jq -r '.target_directory' <<<"$metadata")"
+kernel_target_dir="$(jq -r '.target_directory' <<<"$metadata")"
+loader_manifest="$ROOT/ecraldr/Cargo.toml"
+loader_metadata="$(cargo metadata --no-deps --format-version 1 --manifest-path "$loader_manifest")"
+loader_target_dir="$(jq -r '.target_directory' <<<"$loader_metadata")"
 
 case "$profile" in
     debug)
@@ -113,18 +116,20 @@ esac
 
 if ((clean)); then
     printf 'Cleaning Cargo artifacts\n' >&2
-    cargo clean
+    cargo clean --manifest-path "$crate_manifest"
+    cargo clean --manifest-path "$loader_manifest"
 fi
 
-artifact_dir="$target_dir/$target/$artifact_profile"
-kernel="$artifact_dir/$kernel_name"
-kernel_stripped="$artifact_dir/$kernel_name.bin"
-loader="$artifact_dir/$loader_crate"
-loader_stripped="$artifact_dir/$loader_crate.bin"
+kernel_artifact_dir="$kernel_target_dir/$target/$artifact_profile"
+loader_artifact_dir="$loader_target_dir/$target/$artifact_profile"
+kernel="$kernel_artifact_dir/$kernel_name"
+kernel_stripped="$kernel_artifact_dir/$kernel_name.bin"
+loader="$loader_artifact_dir/$loader_crate"
+loader_stripped="$loader_artifact_dir/$loader_crate.bin"
 
 printf 'Building kernel crate %s for %s (%s)\n' "$crate_path" "$target" "$profile" >&2
-env RUSTFLAGS='-C relocation-model=pie -C link-arg=-Tecraos/link.ld -C link-arg=-pie' \
-    cargo build "${kernel_cargo_args[@]}" --manifest-path "$crate_manifest" \
+env RUSTFLAGS="-C relocation-model=pie -C link-arg=-T$ROOT/ecraos/ecraos/link.ld -C link-arg=-pie" \
+    cargo build --locked "${kernel_cargo_args[@]}" --manifest-path "$crate_manifest" \
     --target "$target" "${profile_args[@]}"
 
 printf 'Stripping kernel\n' >&2
@@ -132,7 +137,8 @@ rust-objcopy "$kernel" --strip-all -O binary "$kernel_stripped"
 
 printf 'Building loader %s\n' "$loader_crate" >&2
 env KERNEL_BIN="$kernel_stripped" RUSTFLAGS='-C relocation-model=static' \
-    cargo build -p "$loader_crate" --target "$target" "${loader_cargo_args[@]}" "${profile_args[@]}"
+    cargo build --locked --manifest-path "$loader_manifest" -p "$loader_crate" \
+    --target "$target" "${loader_cargo_args[@]}" "${profile_args[@]}"
 
 printf 'Stripping loader\n' >&2
 rust-objcopy "$loader" --strip-all -O binary "$loader_stripped"

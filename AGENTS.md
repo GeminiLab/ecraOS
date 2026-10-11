@@ -2,26 +2,32 @@
 
 ecraOS is an experimental and educational operating-system kernel written in
 Rust. It aims to stay flexible across architectures, while the current working
-target is x86-64 and RISC-V 64.
+targets are x86-64, RISC-V 64, and AArch64.
 
 ## Structure
 
-The main crates are:
+The repository has two Cargo workspaces and independent smoke applications.
+There is no root Cargo manifest.
 
-- `ecraos/` - The PIE-enabled kernel.
-- `exarch/` - Architecture-specific support code and architecture-kernel
-  interfaces. The current implementation is x86-64.
-- `ecraldr/` - Loader-side crates.
+- `ecraos/` - The kernel workspace.
+  - `ecraos/ecraos` - The PIE-enabled kernel library.
+  - `ecraos/exarch` - Architecture-specific support code and architecture-kernel
+    interfaces for x86-64, RISC-V 64, and AArch64.
+- `ecraldr/` - The loader workspace.
   - `ecraldr/ecraldr` - Shared loader code that embeds the stripped kernel.
   - `ecraldr/ecraldr_base` - Boot argument definitions and kernel-entry glue.
   - `ecraldr/ecraldr_base_macros` - Procedural macros for kernel-entry glue.
   - `ecraldr/ecraldr-x86_64-multiboot` - The current Multiboot 1 loader for x86-64.
   - `ecraldr/ecraldr-riscv64-none` - The current RISC-V 64 loader.
+  - `ecraldr/ecraldr-aarch64-linux` - The current AArch64 Linux-image loader.
+  - `ecraldr/ecraldr_build_rs` - An excluded standalone loader build helper.
+- `smoke-apps/` - Independent kernel binaries: `default`, `sync-preemption`,
+  and `sleep-join`. Each application has its own manifest and lockfile.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
 allocation, `expalloc_trait` for page allocation traits, and small utility
 crates such as `size_disp` and `memory_range_set`. There may be more crates in
-the repository.
+the repository. These supporting crates live under `ecraos/`.
 
 ## Build & Run Commands
 
@@ -33,19 +39,27 @@ so the kernel and architecture support code are compiled in one Cargo graph.
 
 The current build procedure is:
 
-1. Build the kernel with PIE relocation and the kernel linker script.
+1. Build a smoke application with PIE relocation and `ecraos/ecraos/link.ld`.
 2. Strip the kernel to a flat binary.
 3. Build the target-specific `ecraldr-*` loader with static relocation, the loader
    linker script, and `KERNEL_BIN=<path-to-stripped-kernel>`.
 4. Strip the loader and run it in QEMU.
+
+The application and loader have separate Cargo artifact directories. Build
+scripts obtain each directory from `cargo metadata`, including when
+`CARGO_TARGET_DIR` overrides the default locations. QEMU logs are collected in
+the repository's `target/qemu-logs/` directory.
 
 ### Build Script
 
 A bash script named `test.sh` builds and runs the kernel in QEMU.
 
 ```bash
-# Build and run in QEMU (with 8s timeout)
+# Build and run the default application in QEMU (with 15s timeout)
 ./test.sh
+
+# Build and run another independent application
+CRATE=smoke-apps/sleep-join ./test.sh
 
 # Clean build then run
 CLEAN=1 ./test.sh
@@ -57,16 +71,40 @@ PROFILE=release ./test.sh
 QEMU_EXTRA_ARGS='-d guest_errors' ./test.sh
 
 # Longer timeout
-TIMEOUT_SEC=15 ./test.sh
+TIMEOUT_SEC=30 ./test.sh
 ```
 
-There are no automated end-to-end tests beyond the QEMU boot smoke test.
+Run `scripts/test-host.sh` for the host tests in both workspaces. Run
+`scripts/test-matrix.sh` for all three smoke applications across the three
+architectures, debug/release profiles, and single/multiple CPUs. Set `CRATE` to
+run this matrix for one application.
 
 ### Fmt and Clippy
 
-Run `cargo fmt` to format the code. Run
-`cargo clippy --workspace --target x86_64-unknown-none` to check for lint
-errors.
+Run Cargo commands with an explicit manifest path from the repository root:
+
+```bash
+cargo fmt --manifest-path ecraos/Cargo.toml --all
+cargo fmt --manifest-path ecraldr/Cargo.toml --all
+cargo fmt --manifest-path ecraldr/ecraldr_build_rs/Cargo.toml
+for app in smoke-apps/*; do
+    cargo fmt --manifest-path "$app/Cargo.toml"
+done
+
+cargo clippy --manifest-path ecraos/Cargo.toml --workspace --target x86_64-unknown-none
+cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr -p ecraldr_base \
+    -p ecraldr_base_macros -p ecraldr-x86_64-multiboot --target x86_64-unknown-none
+cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr-riscv64-none \
+    --target riscv64gc-unknown-none-elf
+cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr-aarch64-linux \
+    --target aarch64-unknown-none-softfloat
+```
+
+Each loader binary must be checked for its own architecture. A loader workspace
+check with `--workspace` and one target also selects incompatible loader binaries.
+
+The smoke applications must repeat the workspace's `memory_addr` patch because
+Cargo only applies patches from the root manifest of the current build.
 
 ## Code Format
 

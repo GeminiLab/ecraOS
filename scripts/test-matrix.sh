@@ -8,9 +8,9 @@ if [[ -n "${CRATE:-}" ]]; then
     smoke_crates=("$CRATE")
 else
     smoke_crates=(
-        smokes/default
-        smokes/sync-preemption
-        smokes/sleep-join
+        smoke-apps/default
+        smoke-apps/sync-preemption
+        smoke-apps/sleep-join
     )
 fi
 

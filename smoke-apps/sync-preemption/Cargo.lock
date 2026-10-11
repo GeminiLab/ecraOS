@@ -97,54 +97,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
-name = "default"
-version = "0.1.0"
-dependencies = [
- "ecraos",
-]
-
-[[package]]
 name = "dyn_static_traits"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "ecraldr"
-version = "0.1.0"
-dependencies = [
- "ecraldr_base",
-]
-
-[[package]]
-name = "ecraldr-aarch64-linux"
-version = "0.1.0"
-dependencies = [
- "ecraldr",
- "ecraldr_base",
- "ecraldr_build_rs",
-]
-
-[[package]]
-name = "ecraldr-riscv64-none"
-version = "0.1.0"
-dependencies = [
- "ecraldr",
- "ecraldr_base",
- "ecraldr_build_rs",
-]
-
-[[package]]
-name = "ecraldr-x86_64-multiboot"
-version = "0.1.0"
-dependencies = [
- "ecraldr",
- "ecraldr_base",
- "ecraldr_build_rs",
- "x86_64",
 ]
 
 [[package]]
@@ -163,10 +121,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
-
-[[package]]
-name = "ecraldr_build_rs"
-version = "0.1.0"
 
 [[package]]
 name = "ecraos"
@@ -260,7 +214,6 @@ dependencies = [
  "cfg-if",
  "crate_interface",
  "expercpu_macros",
- "kernel_guard",
  "memory_addr",
  "x86",
 ]
@@ -621,14 +574,6 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 [[package]]
 name = "size_disp"
 version = "0.1.0"
-
-[[package]]
-name = "sleep-join"
-version = "0.1.0"
-dependencies = [
- "ecraos",
- "log",
-]
 
 [[package]]
 name = "spinning_top"

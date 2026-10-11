@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-crate_path="${CRATE:-smokes/default}"
+crate_path="${CRATE:-smoke-apps/default}"
 target=""
 profile=""
 cpus=""

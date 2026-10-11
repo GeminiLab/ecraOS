@@ -1,0 +1,42 @@
+[package]
+name = "ecraos"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# ecraOS is being tested on a host machine.
+host-test = ["expercpu/host-test"]
+
+[dependencies]
+bitmaps = { version = "3.2.1", default-features = false }
+crate_interface = { version = "0.3", features = ["weak_default"] }
+ecraldr_base.workspace = true
+exbuddy = { path = "../exbuddy" }
+exarch = { path = "../exarch" }
+expalloc_trait = { path = "../expalloc_trait" }
+expercpu = { path = "../expercpu/expercpu", features = ["early-slot", "remote-access"] }
+expt = { path = "../expt" }
+exslab = { path = "../exslab" }
+heapless = "0.9"
+kspin = { version = "0.2", features = ["smp"] }
+kernel_guard = { version = "0.2", features = ["preempt"] }
+lazyinit.workspace = true
+log.workspace = true
+memory_addr.workspace = true
+memory_range_set = { path = "../utils/memory_range_set" }
+size_disp = { path = "../utils/size_disp" }
+target-triple = "1.0.1"
+thiserror.workspace = true
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+acpi = "6"
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+fdt-rs = { version = "0.4", default-features = false }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+fdt-rs = { version = "0.4", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
