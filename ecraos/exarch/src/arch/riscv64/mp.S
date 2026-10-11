@@ -9,6 +9,12 @@
 .section .text
 .global _start_ap
 _start_ap:
+    # HSM hart_start does not guarantee enabled floating-point state.
+    # Establish the riscv64gc execution environment before entering Rust on this hart.
+    li t0, (3 << 13)                 # sstatus.FS = Dirty
+    csrs sstatus, t0
+    csrw fcsr, zero
+
     ld t0, -8(a1)
     ld t1, -16(a1)
     ld t2, -24(a1)

@@ -98,3 +98,85 @@ jobs:
           path: target/qemu-logs/*.log
           if-no-files-found: warn
           retention-days: 7
+
+  rustsbi-tests:
+    name: QEMU with RustSBI (RISC-V64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libslirp0
+
+      - name: Install QEMU
+        uses: arceos-org/setup-qemu@v1
+        with:
+          version: '9.2.3'
+          arch_list: riscv64
+
+      - name: Report QEMU version
+        run: qemu-system-riscv64 --version
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-06-01
+          components: rust-src, llvm-tools
+          targets: riscv64gc-unknown-none-elf
+
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils --locked
+
+      - name: Build RustSBI firmware
+        shell: bash
+        run: |
+          mkdir -p target/rustsbi
+          bash scripts/build-rustsbi.sh 2>&1 | tee target/rustsbi/build.log
+
+      - name: Run RustSBI QEMU tests
+        run: >-
+          cargo xtask qemu
+          --crate smoke-apps/default,smoke-apps/sync-preemption,smoke-apps/sleep-join
+          --target riscv64gc-unknown-none-elf
+          --profile debug,release
+          --cpus 1,4
+          --timeout 30
+          --qemu-arg=-bios
+          --qemu-arg=target/rustsbi/rustsbi-prototyper-dynamic.bin
+
+      - name: Verify RustSBI guest output
+        shell: bash
+        run: |
+          for guest_log in target/qemu-logs/*.log; do
+            grep -Fq 'Hello RustSBI!' "$guest_log"
+            grep -Fq 'Hello, ecraOS!' "$guest_log"
+            case "$guest_log" in
+              *-default-*)
+                grep -Fq 'Hello, ecraOS App!' "$guest_log" ;;
+              *-sync-preemption-*)
+                grep -Fq 'Stage 2B preemption and synchronization smoke passed' "$guest_log" ;;
+              *-sleep-join-*)
+                grep -Fq 'Join task on CPU 0 joined all 4 sleep tasks' "$guest_log" ;;
+            esac
+            if [[ "$guest_log" == *-4.log ]]; then
+              for cpu in 1 2 3; do
+                grep -Fq "Kernel entry on AP $cpu(" "$guest_log"
+              done
+            fi
+          done
+
+      - name: Upload RustSBI test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustsbi-test-logs
+          path: |
+            target/qemu-logs/*.log
+            target/rustsbi/build.log
+          if-no-files-found: warn
+          retention-days: 7

@@ -58,7 +58,7 @@ pub enum Target {
     X86_64,
     /// The RISC-V 64 bare-metal target.
     ///
-    /// Boots on the QEMU virt machine through OpenSBI.
+    /// Boots on the QEMU virt machine through SBI firmware.
     #[value(name = "riscv64gc-unknown-none-elf")]
     Riscv64,
     /// The AArch64 soft-float bare-metal target.

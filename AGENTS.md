@@ -79,6 +79,11 @@ cargo xtask qemu --timeout 30
 # Build and print the loader ELF path without starting QEMU
 cargo xtask build --target riscv64gc-unknown-none-elf
 
+# Build RustSBI and use it as the RISC-V QEMU firmware
+bash scripts/build-rustsbi.sh
+cargo xtask qemu --target riscv64gc-unknown-none-elf --cpus 1,4 \
+    --qemu-arg=-bios --qemu-arg=target/rustsbi/rustsbi-prototyper-dynamic.bin
+
 # Run both profiles and CPU counts for multiple applications
 cargo xtask qemu --crate smoke-apps/default,smoke-apps/sleep-join \
     --profile debug,release --cpus 1,4
@@ -97,6 +102,12 @@ run exits with 1 if any cell fails.
 The `CRATE`, `TARGET`, `PROFILE`, `CPUS`, `TIMEOUT_SEC`, and `CLEAN=1` environment
 settings are supported by applicable tasks. Explicit flags take precedence.
 Extra QEMU options use repeated `--qemu-arg` flags.
+
+The RustSBI build helper pins the upstream revision and uses this repository's
+`nightly-2026-06-01` toolchain with `rust-src`, LLVM tools, and `rust-objcopy`.
+Its checkout and firmware artifacts stay under `target/rustsbi/`.
+See `docs/analysis/2026-10-11-rustsbi-boot.md` for the startup requirements and validation.
+
 Cleaning is scoped to the selected guest target so shared directories retain
 QEMU logs and host-side xtask artifacts. It removes that target's subdirectory
 in each Cargo artifact root, while retaining host build-script and proc-macro caches.
@@ -105,7 +116,11 @@ Run `scripts/test-matrix.sh` for all three smoke applications across the three
 architectures, debug/release profiles, and single/multiple CPUs. The short
 wrapper uses qemu vectors and accepts `CRATE` and `MATRIX_TIMEOUT_SEC` overrides.
 CI expresses the same 36 combinations in a GitHub Actions matrix and invokes
-qemu once per job. There is no test-matrix xtask command.
+qemu once per job. A separate `rustsbi-tests` CI job builds the pinned RustSBI
+firmware once and uses xtask's QEMU vectors to run all three applications with
+debug/release profiles and 1/4 CPUs, covering 12 additional RISC-V combinations.
+It uploads firmware build and QEMU logs even when a step fails.
+There is no test-matrix xtask command.
 
 ### Fmt and Clippy
 

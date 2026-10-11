@@ -6,6 +6,12 @@ _start:
     mv      s0, a0
     mv      s1, a1
 
+    # Rust's riscv64gc ABI and early size formatting use floating-point instructions.
+    # SBI does not guarantee FS is enabled, so initialize it before entering Rust.
+    li      t0, (3 << 13)            # sstatus.FS = Dirty
+    csrs    sstatus, t0
+    csrw    fcsr, zero
+
     # Set stack pointer
     la      sp, {boot_stack_top}
 
