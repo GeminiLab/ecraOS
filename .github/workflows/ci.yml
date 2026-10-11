@@ -27,17 +27,31 @@ jobs:
           components: rust-src, clippy, rustfmt, llvm-tools
           targets: x86_64-unknown-none, riscv64gc-unknown-none-elf, aarch64-unknown-none-softfloat
 
+      - name: Check task runner
+        run: |
+          cargo fmt --manifest-path xtask/Cargo.toml -- --check
+          cargo clippy --manifest-path xtask/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path xtask/Cargo.toml --locked
+
       - name: Run host test suite
-        run: scripts/test-host.sh
+        run: cargo xtask test-host
 
   qemu-tests:
-    name: QEMU tests (${{ matrix.smoke }})
+    name: QEMU (${{ matrix.smoke }}, ${{ matrix.machine.arch }}, ${{ matrix.profile }}, ${{ matrix.machine.cpus }} CPUs)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         smoke: [default, sync-preemption, sleep-join]
+        profile: [debug, release]
+        machine:
+          - { arch: x86_64, target: x86_64-unknown-none, cpus: 1 }
+          - { arch: x86_64, target: x86_64-unknown-none, cpus: 4 }
+          - { arch: riscv64, target: riscv64gc-unknown-none-elf, cpus: 1 }
+          - { arch: riscv64, target: riscv64gc-unknown-none-elf, cpus: 2 }
+          - { arch: aarch64, target: aarch64-unknown-none-softfloat, cpus: 1 }
+          - { arch: aarch64, target: aarch64-unknown-none-softfloat, cpus: 2 }
 
     steps:
       - name: Check out repository
@@ -46,19 +60,16 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends jq ripgrep libslirp0
+          sudo apt-get install --yes --no-install-recommends libslirp0
 
       - name: Install QEMU
         uses: arceos-org/setup-qemu@v1
         with:
           version: '9.2.3'
-          arch_list: 'x86_64,riscv64,aarch64'
+          arch_list: ${{ matrix.machine.arch }}
 
-      - name: Report QEMU versions
-        run: |
-          qemu-system-x86_64 --version
-          qemu-system-riscv64 --version
-          qemu-system-aarch64 --version
+      - name: Report QEMU version
+        run: qemu-system-${{ matrix.machine.arch }} --version
 
       - name: Install repository Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -70,16 +81,20 @@ jobs:
       - name: Install cargo-binutils
         run: cargo install cargo-binutils --locked
 
-      - name: Run QEMU test matrix
-        env:
-          CRATE: smoke-apps/${{ matrix.smoke }}
-        run: scripts/test-matrix.sh
+      - name: Run QEMU test
+        run: >-
+          cargo xtask qemu
+          --crate smoke-apps/${{ matrix.smoke }}
+          --target ${{ matrix.machine.target }}
+          --profile ${{ matrix.profile }}
+          --cpus ${{ matrix.machine.cpus }}
+          --timeout 20
 
       - name: Upload QEMU logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-logs-${{ matrix.smoke }}
+          name: qemu-logs-${{ matrix.smoke }}-${{ matrix.machine.arch }}-${{ matrix.profile }}-${{ matrix.machine.cpus }}
           path: target/qemu-logs/*.log
           if-no-files-found: warn
           retention-days: 7

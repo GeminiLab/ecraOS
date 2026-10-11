@@ -23,6 +23,7 @@ There is no root Cargo manifest.
   - `ecraldr/ecraldr_build_rs` - An excluded standalone loader build helper.
 - `smoke-apps/` - Independent kernel binaries: `default`, `sync-preemption`,
   and `sleep-join`. Each application has its own manifest and lockfile.
+- `xtask/` - A standalone host-side Cargo task runner for building and testing.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
 allocation, `expalloc_trait` for page allocation traits, and small utility
@@ -46,38 +47,65 @@ The current build procedure is:
 4. Strip the loader and run it in QEMU.
 
 The application and loader have separate Cargo artifact directories. Build
-scripts obtain each directory from `cargo metadata`, including when
+tasks obtain each directory from `cargo metadata`, including when
 `CARGO_TARGET_DIR` overrides the default locations. QEMU logs are collected in
 the repository's `target/qemu-logs/` directory.
 
-### Build Script
+### Build and Test Tasks
 
-A bash script named `test.sh` builds and runs the kernel in QEMU.
+Use `cargo xtask` from the repository root. The standalone task runner requires
+Cargo, `rust-objcopy` from cargo-binutils, and the selected `qemu-system-*`
+executable. Output logging and guest timeouts are handled in Rust.
 
 ```bash
 # Build and run the default application in QEMU (with 15s timeout)
-./test.sh
+cargo xtask qemu
 
 # Build and run another independent application
-CRATE=smoke-apps/sleep-join ./test.sh
+cargo xtask qemu --crate smoke-apps/sleep-join
 
 # Clean build then run
-CLEAN=1 ./test.sh
+cargo xtask qemu --clean
 
 # Build and run with release profile
-PROFILE=release ./test.sh
+cargo xtask qemu --profile release
 
 # Run with extra QEMU flags
-QEMU_EXTRA_ARGS='-d guest_errors' ./test.sh
+cargo xtask qemu --qemu-arg=-d --qemu-arg=guest_errors
 
 # Longer timeout
-TIMEOUT_SEC=30 ./test.sh
+cargo xtask qemu --timeout 30
+
+# Build and print the loader ELF path without starting QEMU
+cargo xtask build --target riscv64gc-unknown-none-elf
+
+# Run both profiles and CPU counts for multiple applications
+cargo xtask qemu --crate smoke-apps/default,smoke-apps/sleep-join \
+    --profile debug,release --cpus 1,4
+
+# Run host tests from both workspaces
+cargo xtask test-host
 ```
 
-Run `scripts/test-host.sh` for the host tests in both workspaces. Run
-`scripts/test-matrix.sh` for all three smoke applications across the three
-architectures, debug/release profiles, and single/multiple CPUs. Set `CRATE` to
-run this matrix for one application.
+The qemu command accepts scalar or comma-separated values for `--crate`,
+`--target`, `--profile`, and `--cpus`, and executes their Cartesian product.
+Vectors have no brackets. All runs finish before a vector result table is
+printed, including when an earlier run fails. A single run exits with 0 for
+success, 1 for guest failure, 2 for build failure, or 124 for timeout. A vector
+run exits with 1 if any cell fails.
+
+The `CRATE`, `TARGET`, `PROFILE`, `CPUS`, `TIMEOUT_SEC`, and `CLEAN=1` environment
+settings are supported by applicable tasks. Explicit flags take precedence.
+Extra QEMU options use repeated `--qemu-arg` flags.
+Cleaning is scoped to the selected guest target so shared directories retain
+QEMU logs and host-side xtask artifacts. It removes that target's subdirectory
+in each Cargo artifact root, while retaining host build-script and proc-macro caches.
+
+Run `scripts/test-matrix.sh` for all three smoke applications across the three
+architectures, debug/release profiles, and single/multiple CPUs. The short
+wrapper uses qemu vectors and accepts `CRATE` and `MATRIX_TIMEOUT_SEC` overrides.
+CI expresses the same 36 combinations in a GitHub Actions matrix and invokes
+qemu once per job. There is no test-matrix xtask command.
 
 ### Fmt and Clippy
 
@@ -87,11 +115,14 @@ Run Cargo commands with an explicit manifest path from the repository root:
 cargo fmt --manifest-path ecraos/Cargo.toml --all
 cargo fmt --manifest-path ecraldr/Cargo.toml --all
 cargo fmt --manifest-path ecraldr/ecraldr_build_rs/Cargo.toml
+cargo fmt --manifest-path xtask/Cargo.toml
 for app in smoke-apps/*; do
     cargo fmt --manifest-path "$app/Cargo.toml"
 done
 
 cargo clippy --manifest-path ecraos/Cargo.toml --workspace --target x86_64-unknown-none
+cargo clippy --manifest-path xtask/Cargo.toml --all-targets
+cargo test --manifest-path xtask/Cargo.toml --locked
 cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr -p ecraldr_base \
     -p ecraldr_base_macros -p ecraldr-x86_64-multiboot --target x86_64-unknown-none
 cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr-riscv64-none \
