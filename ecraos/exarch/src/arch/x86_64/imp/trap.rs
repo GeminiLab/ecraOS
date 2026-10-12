@@ -41,6 +41,9 @@ fn handle_page_fault(tf: &mut TrapFrame) {
     }
 }
 
+/// Dispatches one saved x86 trap and completes hardware delivery before the common safe point.
+///
+/// Software and timer vectors remain separate from the controller-routed GSI namespace.
 #[unsafe(no_mangle)]
 fn x86_trap_handler(tf: &mut TrapFrame) {
     match tf.vector as u8 {
@@ -64,6 +67,12 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
                     Trap::Interrupt(Interrupt::Local(LocalInterrupt::Timer)),
                 );
                 super::apic::end_of_interrupt();
+            } else if vector == super::apic::vectors::APIC_IPI_VECTOR {
+                _ = crate::trap::handle(
+                    tf,
+                    Trap::Interrupt(Interrupt::Local(LocalInterrupt::Software)),
+                );
+                super::apic::end_of_interrupt();
             } else if let Some(irq) = crate::arch::x86_64::trap::gsi_for_vector(vector) {
                 let result = crate::trap::handle(tf, Trap::Interrupt(Interrupt::Global(irq)));
                 if matches!(result, TrapDisposition::Unhandled) {
@@ -76,6 +85,7 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
                 log::warn!("unknown x86 interrupt vector {vector:#x}");
                 super::apic::end_of_interrupt();
             }
+            crate::trap::on_interrupt_exit(tf);
         }
         _ => {
             let exception = match tf.vector as u8 {

@@ -10,13 +10,39 @@ use log::info;
 use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
 use x86_64::instructions::port::Port;
 
-use self::vectors::*;
-
-pub(super) mod vectors {
+/// Reserved local APIC interrupt vectors.
+///
+/// IOAPIC routing must never allocate any vector in this set.
+pub(crate) mod vectors {
+    /// The local timer vector.
+    ///
+    /// This is independent of controller-routed global interrupt sources.
     pub const APIC_TIMER_VECTOR: u8 = 0xf0;
+    /// The local spurious vector.
+    ///
+    /// Spurious delivery requires no end-of-interrupt write.
     pub const APIC_SPURIOUS_VECTOR: u8 = 0xf1;
+    /// The local APIC error vector.
+    ///
+    /// Errors remain in the LAPIC-local namespace.
     pub const APIC_ERROR_VECTOR: u8 = 0xf2;
+    /// The common software-notification vector.
+    ///
+    /// Mailbox reasons are decoded by the kernel after this vector arrives.
+    pub const APIC_IPI_VECTOR: u8 = 0xf3;
+
+    /// Returns whether a vector belongs to a reserved local source.
+    ///
+    /// The external allocator uses this predicate for every candidate.
+    pub(crate) const fn is_reserved(vector: u8) -> bool {
+        matches!(
+            vector,
+            APIC_TIMER_VECTOR | APIC_SPURIOUS_VECTOR | APIC_ERROR_VECTOR | APIC_IPI_VECTOR
+        )
+    }
 }
+
+use self::vectors::*;
 
 // const IO_APIC_BASE: PhysAddr = pa!(0xFEC0_0000);
 
@@ -30,7 +56,7 @@ static TSC_DEADLINE_SUPPORTED: core::sync::atomic::AtomicBool =
 static LAPIC_TIMER_FREQ_KHZ: AtomicU64 = AtomicU64::new(0);
 // static IO_APIC: LazyInit<SpinNoIrq<IoApic>> = LazyInit::new();
 
-/// Enables or disables the given IRQ.
+// Enables or disables the given IRQ.
 // pub fn set_enable(vector: usize, enabled: bool) {
 //     // should not affect LAPIC interrupts
 //     if vector < APIC_TIMER_VECTOR as _ {

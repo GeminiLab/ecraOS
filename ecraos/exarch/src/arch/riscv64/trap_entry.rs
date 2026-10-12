@@ -9,11 +9,11 @@ use memory_addr::va;
 use riscv::{
     interrupt::{
         Trap as RiscVTrap,
-        supervisor::{self, Exception as RiscVException, Interrupt as RiscVInterrupt},
+        supervisor::{Exception as RiscVException, Interrupt as RiscVInterrupt},
     },
     register::{
         scause::{self, Scause},
-        sstatus, stval, stvec,
+        sip, sstatus, stval, stvec,
     },
 };
 
@@ -98,6 +98,7 @@ fn handle_page_fault(tf: &mut TrapFrame, mut flags: PageFaultFlags) -> TrapDispo
 #[unsafe(no_mangle)]
 extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
     let scause = scause::read();
+    let is_interrupt = scause.is_interrupt();
 
     let result = match scause.cause().try_into() {
         Ok(scause_decoded) => valid_riscv_trap_handler(tf, scause_decoded, scause.bits()),
@@ -121,6 +122,10 @@ extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
             sepc = tf.sepc
         );
     }
+    if is_interrupt {
+        // SSIP is cleared, the timer has been rearmed, or all PLIC claims have completed.
+        crate::trap::on_interrupt_exit(tf);
+    }
 }
 
 /// Handles a RISC-V trap that is known to the kernel.
@@ -137,16 +142,17 @@ fn valid_riscv_trap_handler(
             super::trap::handle_external(tf)
         }
         RiscVTrap::Interrupt(RiscVInterrupt::SupervisorSoft) => {
-            let disposition = crate::trap::handle(
+            // SAFETY: Clear the local source before dispatch so a publication during the
+            // mailbox drain can set SSIP again and cannot be lost by a later clear.
+            unsafe {
+                sip::clear_ssoft();
+                // CSR acknowledgement precedes the common mailbox's memory accesses.
+                core::arch::asm!("fence io, rw", options(nostack));
+            }
+            crate::trap::handle(
                 tf,
                 Trap::Interrupt(Interrupt::Local(LocalInterrupt::Software)),
-            );
-
-            if disposition == TrapDisposition::Unhandled {
-                supervisor::disable_interrupt(RiscVInterrupt::SupervisorSoft);
-            }
-
-            disposition
+            )
         }
         RiscVTrap::Exception(RiscVException::InstructionPageFault) => {
             handle_page_fault(tf, PageFaultFlags::EXECUTE)

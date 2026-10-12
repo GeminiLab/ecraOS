@@ -146,7 +146,8 @@ const _: () = {
 
 /// The RISC-V integer register file saved during a trap.
 ///
-/// The zero slot keeps field offsets equal to architectural register numbers.
+/// The zero slot keeps field offsets equal to architectural register numbers. Kernel trap return
+/// retains the current CPU's `expercpu` base rather than restoring the diagnostic `gp` slot.
 #[allow(missing_docs)]
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -154,6 +155,10 @@ pub struct GeneralRegisters {
     pub zero: usize,
     pub ra: usize,
     pub sp: usize,
+    /// The interrupted CPU's diagnostic per-CPU base.
+    ///
+    /// Kernel continuations can migrate at interrupt exit, so return preserves the destination
+    /// CPU's live `gp`. Future user trap support must separately restore the user register value.
     pub gp: usize,
     pub tp: usize,
     pub t0: usize,

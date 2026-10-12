@@ -67,7 +67,7 @@ aarch64_vector_entry:
     ldp x26, x27, [sp, #208]
     ldp x28, x29, [sp, #224]
     ldr x30, [sp, #240]
+    // x16 is already restored from the frame. The trailing slot contains the vector index.
     add sp, sp, #288
-    ldr x16, [sp]
     add sp, sp, #16
     eret

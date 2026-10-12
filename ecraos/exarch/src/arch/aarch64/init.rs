@@ -44,12 +44,14 @@ pub fn probe_platform(arg: PlatformBootArg) {
             continue;
         };
         let gicd = reg.u64(0).expect("invalid GIC distributor base");
-        let size = reg.u64(1).unwrap_or(0x100000);
-        let gicr = reg.u64(2).unwrap_or(gicd + 0x10000);
+        let gicd_size = reg.u64(1).expect("invalid GIC distributor size");
+        let gicr = reg.u64(2).expect("invalid GIC redistributor base");
+        let gicr_size = reg.u64(3).expect("invalid GIC redistributor size");
         GIC_CONFIG.init_once(Aarch64ExternalIrqConfig {
-            gicd_base: memory_addr::PhysAddr::from_usize(gicd as usize),
-            gicr_base: memory_addr::PhysAddr::from_usize(gicr as usize),
-            size: size as usize,
+            gicd_base: memory_addr::pa!(gicd as usize),
+            gicd_size: gicd_size as usize,
+            gicr_base: memory_addr::pa!(gicr as usize),
+            gicr_size: gicr_size as usize,
             spi_count: 988,
         });
         break;

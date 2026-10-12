@@ -120,20 +120,28 @@ impl ExternalController {
         Ok(())
     }
 
+    /// Allocates an unused controller vector outside the LAPIC-local namespace.
+    ///
+    /// The bounded helper leaves every reserved local source available for per-CPU delivery.
     fn allocate_vector(&mut self) -> Option<u8> {
-        for _ in 0..(0xf0 - 0x30) {
-            let candidate = self.next_vector as u8;
-            self.next_vector = if self.next_vector + 1 >= 0xf0 {
-                0x30
-            } else {
-                self.next_vector + 1
-            };
-            if VECTOR_TO_GSI[candidate as usize].load(Ordering::Acquire) == 0 {
-                return Some(candidate);
-            }
-        }
-        None
+        allocate_external_vector(&mut self.next_vector, |candidate| {
+            VECTOR_TO_GSI[candidate as usize].load(Ordering::Acquire) != 0
+        })
     }
+}
+
+/// Selects an unused external vector while skipping every reserved LAPIC vector.
+///
+/// The bounded search wraps once through the external range and never reuses an occupied vector.
+fn allocate_external_vector(next: &mut u16, used: impl Fn(u8) -> bool) -> Option<u8> {
+    for _ in 0x30..0xff {
+        let candidate = *next as u8;
+        *next = if *next + 1 >= 0xff { 0x30 } else { *next + 1 };
+        if !crate::arch::x86_64::imp::apic::vectors::is_reserved(candidate) && !used(candidate) {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Initializes the x86 external controller from ACPI data.
@@ -204,4 +212,35 @@ pub fn set_irq_enabled(irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
         controller.ioapics.mask(irq.raw());
     }
     Ok(())
+}
+
+/// External-vector allocation tests.
+///
+/// Controller routes must never consume LAPIC-local vectors even when the external range fills.
+#[cfg(test)]
+mod tests {
+    use super::allocate_external_vector;
+
+    /// Skips every reserved LAPIC vector while retaining nearby usable vectors.
+    ///
+    /// This catches allocation of the software vector or its timer/error/spurious neighbors.
+    #[test]
+    fn skips_all_local_vectors() {
+        let mut next = 0xef;
+        assert_eq!(allocate_external_vector(&mut next, |_| false), Some(0xef));
+        assert_eq!(allocate_external_vector(&mut next, |_| false), Some(0xf4));
+        let mut next = 0xf0;
+        assert_eq!(allocate_external_vector(&mut next, |v| v != 0xf3), None);
+    }
+
+    /// Wraps the external vector search and rejects a fully occupied usable range.
+    ///
+    /// A failed route must not reuse an occupied vector or loop indefinitely.
+    #[test]
+    fn wraps_and_exhausts_without_reuse() {
+        let mut next = 0xfe;
+        assert_eq!(allocate_external_vector(&mut next, |_| false), Some(0xfe));
+        assert_eq!(allocate_external_vector(&mut next, |_| false), Some(0x30));
+        assert_eq!(allocate_external_vector(&mut next, |_| true), None);
+    }
 }

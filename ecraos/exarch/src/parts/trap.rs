@@ -77,6 +77,13 @@ pub trait KernelTrapIf {
         (_, _) = (frame, trap);
         TrapDisposition::Unhandled
     }
+
+    /// Reaches the common scheduling safe point after completing an interrupt source.
+    ///
+    /// Architecture code invokes this only after local-source clearing or controller EOI.
+    fn on_interrupt_exit(frame: &mut TrapFrame) {
+        _ = frame;
+    }
 }
 
 /// Semantic trap contract tests.

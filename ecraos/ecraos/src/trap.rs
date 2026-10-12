@@ -91,7 +91,9 @@ pub fn default_exception_handler(frame: &mut TrapFrame, exception: Exception) ->
     }
 }
 
-/// Converts the semantic local timer trap into the periodic timer callback.
+/// Dispatches local timer accounting and software reasons.
+///
+/// Timer traps retain the existing scheduler exit while software traps drain the IPI mailbox.
 fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> TrapDisposition {
     match interrupt {
         LocalInterrupt::Timer => {
@@ -100,7 +102,10 @@ fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> 
             crate::task::timer_interrupt_exit();
             TrapDisposition::Handled
         }
-        LocalInterrupt::Software => TrapDisposition::Unhandled,
+        LocalInterrupt::Software => {
+            crate::ipi::handle_ipi();
+            TrapDisposition::Handled
+        }
     }
 }
 

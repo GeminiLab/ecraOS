@@ -53,7 +53,9 @@ trap_vector_base:
     csrw sstatus, t1
 
     ld ra,   1 * 8(sp)
-    ld gp,   3 * 8(sp)
+    # Kernel gp belongs to the current CPU, not the interrupted task. A suspended
+    # interrupt-exit continuation can migrate through the existing idle pull.
+    # Keep the destination CPU base. The saved gp slot remains diagnostic only.
     ld tp,   4 * 8(sp)
     ld t2,   7 * 8(sp)
     ld s0,   8 * 8(sp)

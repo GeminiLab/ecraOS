@@ -7,6 +7,8 @@ edition = "2024"
 default = []
 # ecraOS is being tested on a host machine.
 host-test = ["expercpu/host-test"]
+# Deterministic hardware foundation tests without production fault injection.
+foundation-test = []
 
 [dependencies]
 bitmaps = { version = "3.2.1", default-features = false }

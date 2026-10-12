@@ -19,6 +19,9 @@ pub use expanic::{bug, kpanic};
 use log::info;
 
 mod device;
+#[cfg(feature = "foundation-test")]
+pub mod foundation_test;
+mod ipi;
 mod kernel_if;
 mod logging;
 mod mem;
@@ -192,10 +195,11 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     device::probe_devices(boot_arg.plat_arg);
 
     trap::init();
-
-    timer::init_bsp();
-
+    ipi::init();
+    exarch::ipi::init_percpu();
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
+    timer::init_bsp();
+    mp::mark_current_cpu_ipi_ready();
 
     kprintln!("\n\nHere we go!\n\n");
 
@@ -246,12 +250,12 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     // Perform later platform initialization for the AP.
     exarch::init::init_later_ap();
 
-    // Initialize the timer for the AP.
-    timer::init_ap();
-
+    // Enable the local source only after the BSP has installed common dispatch and mailboxes.
+    exarch::ipi::init_percpu();
     // Initialize the scheduler for the AP.
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
-
+    timer::init_ap();
+    mp::mark_current_cpu_ipi_ready();
     mp::mark_ap_up(cpu_id);
 
     app_main_ap();
