@@ -134,6 +134,25 @@ impl<T> PhysicalQueue<T> {
         Ok(self.entries.pop_back())
     }
 
+    /// Pulls the newest same-domain entry only after its context handoff is complete.
+    ///
+    /// The caller holds the source Queue lock while testing eligibility. An ineligible tail stays
+    /// in its original position, preserving existing placement and FIFO behavior.
+    pub fn steal_tail_if(
+        &mut self,
+        domain: DomainId,
+        eligible: impl FnOnce(&T) -> bool,
+    ) -> Result<Option<T>, QueueStateError> {
+        if self.state != QueueState::Active(domain) {
+            return Err(QueueStateError::WrongDomain);
+        }
+        if self.entries.back().is_some_and(eligible) {
+            Ok(self.entries.pop_back())
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Removes the first matching entry from the active queue of its domain.
     ///
     /// This narrow deterministic lookup supports the compatibility `yield_to` API. Normal
@@ -237,5 +256,20 @@ mod tests {
         assert_eq!(destination.pop(7), Ok(Some(1)));
         assert_eq!(destination.pop(7), Ok(Some(2)));
         assert_eq!(source.state(), QueueState::Inactive);
+    }
+
+    /// Leaves an outgoing current-stack task queued until its context has been saved.
+    ///
+    /// Remote idle pull must preserve FIFO storage and cannot claim an active handoff tail.
+    #[test]
+    fn remote_pull_rejects_current_handoff_tail() {
+        let mut queue = PhysicalQueue::new();
+        queue.activate(7).unwrap();
+        queue.push(7, 1).unwrap();
+        queue.push(7, 2).unwrap();
+        assert_eq!(queue.steal_tail_if(7, |_| false), Ok(None));
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.steal_tail_if(7, |&task| task == 2), Ok(Some(2)));
+        assert_eq!(queue.pop(7), Ok(Some(1)));
     }
 }

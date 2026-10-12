@@ -78,6 +78,8 @@ impl WaitQueue {
     }
 
     /// Wakes and removes the oldest waiter without switching contexts.
+    ///
+    /// Queue and timer bookkeeping finish before remote scheduler notification.
     pub fn wake_one(&self) -> Option<TaskRef> {
         let _guard = kernel_guard::NoPreemptIrqSave::new();
         loop {
@@ -99,15 +101,19 @@ impl WaitQueue {
                     super::scheduler::cancel_timed_wait(&task, generation, cpu_id);
                 }
             }
+            drop(_guard);
             super::scheduler::wake_waiter(task.clone());
             return Some(task);
         }
     }
 
     /// Wakes and removes every waiter in FIFO order without switching contexts.
+    ///
+    /// Selected ownership is retained while IRQ-saving bookkeeping ends before queue publication.
     pub fn wake_all(&self) -> alloc::vec::Vec<TaskRef> {
         let _guard = kernel_guard::NoPreemptIrqSave::new();
         let tasks = self.queue.lock().drain(..).collect::<alloc::vec::Vec<_>>();
+        let mut selected = alloc::vec::Vec::with_capacity(tasks.len());
         for task in &tasks {
             task.release_waiting();
             if matches!(
@@ -123,8 +129,12 @@ impl WaitQueue {
                         super::scheduler::cancel_timed_wait(task, generation, cpu_id);
                     }
                 }
-                super::scheduler::wake_waiter(task.clone());
+                selected.push(task.clone());
             }
+        }
+        drop(_guard);
+        for task in selected {
+            super::scheduler::wake_waiter(task);
         }
         tasks
     }
@@ -242,13 +252,20 @@ impl<T> Mutex<T> {
         self.waiters.len()
     }
 
+    /// Returns the value and reserves FIFO ownership before waking a waiter.
+    ///
+    /// Remote queue notification follows release of the IRQ-saving publication guard.
     fn unlock(&self, value: T) {
         let _guard = kernel_guard::NoPreemptIrqSave::new();
         *self.value.lock() = Some(value);
         self.owner.store(0, Ordering::Release);
-        if let Some(task) = self.waiters.take_one() {
+        let waiter = self.waiters.take_one();
+        if let Some(task) = &waiter {
             self.reserved.store(task.id() as usize, Ordering::Release);
             task.release_waiting();
+        }
+        drop(_guard);
+        if let Some(task) = waiter {
             super::scheduler::wake_waiter(task);
         }
     }

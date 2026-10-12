@@ -31,6 +31,10 @@ mod percpu;
 pub mod task;
 mod test_guard;
 mod timer;
+/// Semantic cross-CPU translation invalidation.
+///
+/// Mapping transactions reuse the common acknowledged IPI protocol.
+mod tlb;
 mod trap;
 
 #[doc(hidden)]
@@ -196,6 +200,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
 
     trap::init();
     ipi::init();
+    tlb::init();
     exarch::ipi::init_percpu();
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
     timer::init_bsp();
@@ -207,6 +212,7 @@ pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::Bo
     mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
     mem::remove_identical_mappings();
+    mp::publish_boot_mapping_completion();
 
     app_main_bsp();
 
@@ -257,6 +263,9 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     timer::init_ap();
     mp::mark_current_cpu_ipi_ready();
     mp::mark_ap_up(cpu_id);
+
+    // Online APs keep servicing IPIs here until boot has finished all mapping changes and joins.
+    mp::wait_boot_mapping_completion();
 
     app_main_ap();
 

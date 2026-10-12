@@ -1,5 +1,8 @@
 //! Virtual memory management.
+//!
+//! Owns the kernel page tables and coordinates acknowledged mapping changes across ready CPUs.
 
+use alloc::vec::Vec;
 use core::{
     mem,
     ops::DerefMut,
@@ -8,8 +11,11 @@ use core::{
 
 use exarch::mem::{LocalTlbFlusher, VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
-use expt::opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType};
-use kspin::SpinNoIrq;
+use expt::{
+    opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType, PageTableAction},
+    pt::cleanup::{PendingCleanup, TlbFlushes},
+};
+use kspin::{SpinNoIrq, SpinNoPreempt, SpinNoPreemptGuard};
 use lazyinit::LazyInit;
 use log::info;
 use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange, va};
@@ -18,7 +24,146 @@ use size_disp::SizeDisplay;
 use crate::{
     kprintln,
     mem::{MemoryRegionFlags, allocs, early, pmm::MemoryRegions, region_flags_to_mapping},
+    mp::{self, LogicalCpuId},
+    tlb::{self, TlbInvalidation, TlbShootdownError},
 };
+
+/// Deferred page-table cleanup and remote invalidation tests.
+///
+/// Recording local invalidations avoids privileged instructions on the host.
+#[cfg(test)]
+mod tests {
+    use core::cell::RefCell;
+
+    use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher};
+    use memory_addr::{VirtAddr, VirtAddrRange, va};
+
+    use crate::tlb::TlbInvalidation;
+
+    use super::finish_local_cleanup;
+
+    std::thread_local! {
+        /// The local invalidations completed by the calling test thread.
+        ///
+        /// Each test starts with an independent empty recording.
+        static FLUSHES: RefCell<Vec<Option<VirtAddr>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// A local invalidation recorder.
+    ///
+    /// It models the captured strategy without executing architecture instructions.
+    struct RecordingFlusher;
+
+    /// The host recording strategy implementation.
+    ///
+    /// Cleanup completes by storing observations in thread-local test state.
+    impl TlbFlusher<VirtAddr> for RecordingFlusher {
+        /// Records one completed local invalidation.
+        ///
+        /// The returned remote request must be inspected only after this record exists.
+        fn flush(address: Option<VirtAddr>) {
+            FLUSHES.with_borrow_mut(|flushes| flushes.push(address));
+        }
+    }
+
+    /// Completes local pages before returning the requested remote range.
+    ///
+    /// Batching must retain every pending address without widening a sufficient range.
+    #[test]
+    fn finishes_local_pages_before_remote_completion() {
+        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
+        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
+        cleanup.push_flush(TlbFlush::Page(va!(0x2000)));
+        let request = TlbInvalidation::Range(VirtAddrRange::new(va!(0x1000), va!(0x3000)));
+        let remote = finish_local_cleanup(cleanup, request);
+        FLUSHES.with_borrow(|flushes| {
+            assert_eq!(flushes.as_slice(), &[Some(va!(0x1000)), Some(va!(0x2000))]);
+        });
+        assert_eq!(remote, request);
+    }
+
+    /// Widens remote invalidation when a page-table mutation requires a full flush.
+    ///
+    /// Huge-leaf splits and accumulated flush overflow cannot be completed by one remote page.
+    #[test]
+    fn full_cleanup_requires_full_remote_invalidation() {
+        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
+        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
+        cleanup.push_flush(TlbFlush::Full);
+        let remote = finish_local_cleanup(cleanup, TlbInvalidation::Page(va!(0x1000)));
+        FLUSHES.with_borrow(|flushes| assert_eq!(flushes.as_slice(), &[None]));
+        assert_eq!(remote, TlbInvalidation::All);
+    }
+}
+
+/// The serialization lock for kernel mapping changes and delayed reuse.
+///
+/// The request payload has one writer throughout mutation, remote completion and finalization.
+static MAPPING_TRANSACTION: SpinNoPreempt<()> = SpinNoPreempt::new(());
+
+// Lock order:
+// Allocate the MP online/IPI-ready snapshot before acquiring the mapping transaction.
+// mapping transaction (preemption disabled, interrupts enabled)
+//   -> vmalloc metadata lock, only for prepare/finalize phases
+//   -> page-table SpinNoIrq lock, only for PTE mutation and error-path local cleanup
+//   -> release every IRQ-disabling and allocator lock
+//   -> finish pending local cleanup, then publish/send/wait for remote acknowledgements
+//   -> reacquire vmalloc metadata briefly to finalize or quarantine
+//   -> release physical frames outside vmalloc and page-table locks.
+// No scheduler queue lock crosses this boundary. The IPI handler takes none of these locks.
+// A future lock-free mapping/request structure may replace this serialized design after a complete
+// memory-ordering proof. Early not-ready CPUs may add fresh mappings locally, but cannot remove or
+// replace mappings without completing the normal remote protocol.
+
+/// An owned kernel mapping transaction and its stable remote target set.
+///
+/// Only this preemption guard survives the remote completion phase.
+pub(crate) struct MappingTransaction {
+    /// The MP-owned snapshot excluding the pinned caller.
+    ///
+    /// Allocation precedes acquisition of the serialization lock.
+    targets: Vec<LogicalCpuId>,
+    /// The serialization and CPU-pinning guard.
+    ///
+    /// It leaves interrupts enabled throughout remote completion.
+    _guard: SpinNoPreemptGuard<'static, ()>,
+}
+
+impl MappingTransaction {
+    /// Captures ready CPUs and serializes mutation without disabling interrupts.
+    ///
+    /// A ready CPU cannot spin on this lock with interrupts disabled while another owner awaits it.
+    pub(crate) fn begin() -> Result<Self, TlbShootdownError> {
+        let snapshot = mp::ipi_ready_cpu_ids();
+        let pin = kernel_guard::NoPreempt::new();
+        if mp::is_ipi_ready(mp::current_cpu_id()) && !exarch::trap::local_enabled() {
+            return Err(TlbShootdownError::Ipi(
+                crate::ipi::IpiError::InterruptsDisabled,
+            ));
+        }
+        let targets = tlb::remote_targets(snapshot, mp::current_cpu_id());
+        let guard = MAPPING_TRANSACTION.lock();
+        drop(pin);
+        Ok(Self {
+            targets,
+            _guard: guard,
+        })
+    }
+
+    /// Completes remote invalidation after the local page-table guard has been released.
+    ///
+    /// The same snapshot is used for every mutation in this transaction.
+    pub(crate) fn complete(&self, request: TlbInvalidation) -> Result<(), TlbShootdownError> {
+        tlb::shootdown(&self.targets, request)
+    }
+
+    /// Returns the captured remote logical destinations for diagnostics.
+    ///
+    /// The returned slice does not create a second CPU inventory.
+    pub(crate) fn targets(&self) -> &[LogicalCpuId] {
+        &self.targets
+    }
+}
 
 /// The layout of the virtual address space.
 pub struct VirtualAddressSpaceLayout {
@@ -165,6 +310,28 @@ where
 {
     let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
     f(&mut pt)
+}
+
+/// Completes local cleanup and preserves its required remote invalidation scope.
+///
+/// The caller releases the page-table lock before calling this helper and supplies a request
+/// covering every changed base page. A full cleanup request also widens remote invalidation,
+/// including changes to huge mappings or intermediate descriptors. The returned request must
+/// complete on all captured remote CPUs before mappings are published or data frames are reused.
+pub(crate) fn finish_local_cleanup(
+    cleanup: PendingCleanup<VirtAddr>,
+    request: TlbInvalidation,
+) -> TlbInvalidation {
+    // SAFETY: Process every request locally through its captured strategy, then return the
+    // required remote scope to the mapping transaction. No pending invalidation is discarded.
+    let (mut flushes, flusher) = unsafe { cleanup.into_inner() };
+    let request = if matches!(flushes, TlbFlushes::Full) {
+        TlbInvalidation::All
+    } else {
+        request
+    };
+    flushes.flush_with(&flusher);
+    request
 }
 
 /// Marks the final page-table roots as active.
@@ -350,9 +517,9 @@ pub(super) fn init_vmm_mapping_early(phys_mem_regions: &MemoryRegions) {
 
 /// Transfers the active page-table owner to the formal allocator.
 ///
-/// Refreshes relocated function pointers and transfers the early owner's roots to `AL` without
-/// freeing them or calling its old method pointers. Before this handoff, the formal allocator
-/// must have registered all early page-table allocations as allocated pages so it can release them.
+/// Refreshes relocated function pointers and transfers the early owner's roots to the formal
+/// allocator without freeing them or calling old method pointers. Before this handoff, the formal
+/// allocator must have registered all early page-table allocations so it can release them.
 pub(super) fn use_formal_page_table_allocator() {
     // Fix function addresses in the opaque page table type first.
     let page_table_type = exarch::mem::get_page_table_type::<FormalPageAllocator, LocalTlbFlusher>(
@@ -365,26 +532,44 @@ pub(super) fn use_formal_page_table_allocator() {
     let root = mem::replace(page_table_guard.deref_mut(), OpaquePageTable::dummy()).leak();
 
     // SAFETY: leak transfers the existing roots and all their table pages out of the only owner.
-    // The refreshed descriptor has the same geometry, and AL can access and release those pages.
+    // The refreshed descriptor has the same geometry and can access and release those pages.
     *page_table_guard = unsafe { page_table_type.new_pagetable_at(root) };
 }
 
-/// Removes temporary low-half identity mappings from the active page table.
+/// Removes temporary low-half identity mappings from every ready CPU's active view.
 ///
-/// Uses the formal allocator already captured by the active owner. The low mappings remain
-/// available until secondary processors have finished their early startup.
+/// Failure is fatal after local mutation and never restores an inconsistent local mapping.
 pub(super) fn remove_identical_mapping(phys_mem_regions: &MemoryRegions) {
     info!("Removing identical mappings...");
+    let transaction = MappingTransaction::begin().expect("identity mapping transaction rejected");
 
-    with_page_table(|pt| {
-        for region in phys_mem_regions {
-            let paddr = region.range.start;
-            let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
+    let cleanup = with_page_table(|pt| {
+        pt.apply_actions_with_cleanup(phys_mem_regions.iter().map(|region| {
+            let vaddr_low = va!(region.range.start.as_usize());
             let size = region.range.size();
-
-            pt.unmap(vaddr_low, size).unwrap();
-        }
+            info!(
+                "identity-map clearing range={:#x}",
+                VirtAddrRange::from_start_size(vaddr_low, size)
+            );
+            PageTableAction::Unmap {
+                vaddr: vaddr_low,
+                size,
+            }
+        }))
+        .expect("identity mapping mutation failed")
     });
+    // The page-table guard is released before cleanup and remote completion.
+    let request = finish_local_cleanup(cleanup, TlbInvalidation::All);
+    transaction.complete(request).unwrap_or_else(|error| {
+        panic!(
+            "identity-map completion failed ranges={phys_mem_regions:?} targets={:?}: {error:?}",
+            transaction.targets()
+        );
+    });
+    info!(
+        "identity-map completion targets={:?} operation=All",
+        transaction.targets()
+    );
 }
 
 /// The kernel's formal page allocator for page-table storage.

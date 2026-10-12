@@ -211,6 +211,9 @@ impl SchedulingDomain {
         }
         self.in_flight.fetch_add(1, Ordering::AcqRel);
         drop(lifecycle);
+        // The in-flight count now protects destruction. Release domain ownership and its
+        // IRQ-saving guard before queue publication can submit a remote reschedule IPI.
+        drop(_ownership);
         let result = super::scheduler::spawn_in_domain(self, body);
         self.in_flight.fetch_sub(1, Ordering::AcqRel);
         result

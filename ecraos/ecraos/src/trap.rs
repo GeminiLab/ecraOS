@@ -67,8 +67,18 @@ struct TrapHandlerImpl;
 
 #[crate_interface::impl_interface]
 impl exarch::trap::KernelTrapIf for TrapHandlerImpl {
+    /// Dispatches one architecture-decoded semantic trap.
+    ///
+    /// Controller acknowledgement remains in the architecture entry path.
     fn handle(frame: &mut TrapFrame, trap: Trap) -> TrapDisposition {
         crate::trap::handle(frame, trap)
+    }
+
+    /// Reaches the shared scheduling safe point after interrupt completion.
+    ///
+    /// The architecture has already cleared its source or issued controller EOI.
+    fn on_interrupt_exit(_frame: &mut TrapFrame) {
+        crate::task::interrupt_exit();
     }
 }
 
@@ -93,13 +103,12 @@ pub fn default_exception_handler(frame: &mut TrapFrame, exception: Exception) ->
 
 /// Dispatches local timer accounting and software reasons.
 ///
-/// Timer traps retain the existing scheduler exit while software traps drain the IPI mailbox.
+/// Reason handlers only publish scheduler intent, leaving switching to interrupt exit.
 fn handle_local_interrupt(_frame: &mut TrapFrame, interrupt: LocalInterrupt) -> TrapDisposition {
     match interrupt {
         LocalInterrupt::Timer => {
             crate::task::timer_tick();
             crate::timer::timer_tick();
-            crate::task::timer_interrupt_exit();
             TrapDisposition::Handled
         }
         LocalInterrupt::Software => {

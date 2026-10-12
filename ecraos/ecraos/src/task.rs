@@ -97,12 +97,12 @@ pub fn timer_tick() {
     preempt::timer_tick();
 }
 
-/// Handles the task scheduler portion of a local timer interrupt exit.
+/// Reaches the task scheduler safe point after any completed interrupt.
 ///
 /// Timer wake publication precedes this call. Preemptive domains consume a pending request here
 /// only when `kernel_guard` reports that the interrupted task was outside a critical section.
-pub fn timer_interrupt_exit() {
-    scheduler::timer_interrupt_exit();
+pub(crate) fn interrupt_exit() {
+    scheduler::interrupt_exit();
 }
 
 /// Cooperatively yields the current execution context.
@@ -110,6 +110,14 @@ pub fn timer_interrupt_exit() {
 /// No timer or interrupt-exit path invokes this function during Stage 2A.
 pub fn yield_now() {
     scheduler::yield_now()
+}
+
+/// Reclaims pending stack releases from a foundation task-context safe point.
+///
+/// The stack owner checks enabled interrupts and zero preemption depth before draining its batch.
+#[cfg(feature = "foundation-test")]
+pub(crate) fn reap_exited_stacks() {
+    stack::reap_released_stacks();
 }
 
 /// Yields cooperatively to one locally runnable task.

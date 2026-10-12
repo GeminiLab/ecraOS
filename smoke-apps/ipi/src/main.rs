@@ -1,4 +1,4 @@
-//! Hardware IPI completion smoke application.
+//! Hardware IPI completion and remote scheduling smoke application.
 //!
 //! Atomic handshakes and monotonic deadlines distinguish completion from elapsed delays.
 
@@ -10,12 +10,26 @@
 /// Allocation happens only in the BSP test driver, never in an IPI handler.
 extern crate alloc;
 
-use core::time::Duration;
+use core::{
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    time::Duration,
+};
 
 use ecraos::{
     app_main_ap, app_main_bsp, foundation_test as test, kprintln, mp,
     reexport::{self, exarch},
+    task,
 };
+
+/// The preemptive domain published by each application CPU.
+///
+/// Test topology has four CPUs, and each remote domain contains only its owning CPU.
+static DOMAINS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+/// The remote worker's deterministic progress indication.
+///
+/// Release publication proves that the remote task actually executed its body.
+static PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Waits for an atomic condition until one absolute monotonic deadline.
 ///
@@ -38,11 +52,18 @@ fn wait_until(
     }
 }
 
-/// Keeps each remote CPU available for hardware IPI delivery.
+/// Runs each remote root without yielding in a preemptive domain.
 ///
-/// The root spins with local interrupts enabled by the kernel timer initialization.
+/// Its five-second time slice exceeds the worker deadline, making prompt IPI scheduling observable.
 #[app_main_ap]
 fn remote_main() {
+    let cpu = mp::current_cpu_id();
+    let domain = task::create_domain(task::DomainPolicy::Preemptive {
+        time_slice: Duration::from_secs(5),
+    })
+    .expect("remote domain creation failed");
+    task::switch_current_to(&domain).expect("remote domain installation failed");
+    DOMAINS[cpu].store(domain.id(), Ordering::Release);
     loop {
         core::hint::spin_loop();
     }
@@ -55,7 +76,7 @@ fn remote_main() {
 fn main() {
     let cpus = test::ready_cpus();
     let current = mp::current_cpu_id();
-    assert!(cpus.len() >= 2);
+    assert!(cpus.len() >= 2 && cpus.len() <= DOMAINS.len());
     for &target in cpus.iter().filter(|&&cpu| cpu != current) {
         let before = cpus
             .iter()
@@ -88,6 +109,26 @@ fn main() {
     });
     assert_eq!(test::counters(target).0, before.0 + 1);
     kprintln!("IPI combined Test+Reschedule logical={target} generation={generation}");
+
+    wait_until("remote domain ready", target, None, || {
+        DOMAINS[target].load(Ordering::Acquire) != 0
+    });
+    let domain = task::lookup_domain(DOMAINS[target].load(Ordering::Acquire)).unwrap();
+    let before = test::counters(target).1;
+    let worker = domain
+        .spawn(move || {
+            assert_eq!(mp::current_cpu_id(), target);
+            PROGRESS.store(true, Ordering::Release);
+        })
+        .expect("remote worker publication failed");
+    wait_until("remote preemptive progress", target, None, || {
+        PROGRESS.load(Ordering::Acquire)
+    });
+    assert!(test::counters(target).1 > before);
+    kprintln!(
+        "IPI remote-progress logical={target} task={} before 500ms with 5s slice",
+        worker.id()
+    );
 
     test::suppress_test_ack(target);
     let before = test::counters(target).0;

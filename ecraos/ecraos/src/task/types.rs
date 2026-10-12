@@ -277,6 +277,10 @@ pub struct Task {
     completion: Arc<Completion>,
     /// Whether execution is still using this task's stack.
     current: AtomicBool,
+    /// A wakeup awaiting current-stack handoff before runnable publication.
+    ///
+    /// The lifecycle lock serializes this flag with the current marker and wake routing.
+    handoff_wakeup: AtomicBool,
     /// Whether this task is registered on a synchronization wait queue.
     waiting: AtomicBool,
     /// Raw pointer to the one synchronization wait queue owning this registration.
@@ -309,7 +313,46 @@ unsafe impl Send for Task {}
 // CPUs from running the task, and current-stack reclamation prevents access after stack release.
 unsafe impl Sync for Task {}
 
+/// Routes one committed wakeup around the current-stack handoff window.
+///
+/// The caller holds the lifecycle lock. A current Runnable task retains its publication token
+/// until the incoming stack clears the marker, while an already resumed task needs no publication.
+fn route_handoff_wakeup(state: TaskState, current: bool) -> (bool, bool) {
+    if state != TaskState::Runnable {
+        return (false, false);
+    }
+    if current {
+        (false, true)
+    } else {
+        (true, false)
+    }
+}
+
+/// Claims the deferred wake token on an incoming stack.
+///
+/// The lifecycle lock excludes routing and an in-place resume while the current marker is cleared.
+fn finish_handoff_wakeup(state: TaskState, pending: bool) -> bool {
+    pending && state == TaskState::Runnable
+}
+
 impl Task {
+    /// Routes a wakeup while its lifecycle transition remains locked.
+    ///
+    /// The caller retains the lifecycle guard from transition through this publication decision.
+    fn route_locked_wakeup(&self, state: TaskState) -> bool {
+        let (publish, pending) = route_handoff_wakeup(state, self.current.load(Ordering::Acquire));
+        self.handoff_wakeup.store(pending, Ordering::Relaxed);
+        publish
+    }
+
+    /// Returns the task's usable stack start for foundation diagnostics.
+    ///
+    /// Ownership and current-stack reclamation remain private to the scheduler.
+    #[cfg(feature = "foundation-test")]
+    pub(crate) fn stack_start(&self) -> memory_addr::VirtAddr {
+        self.stack.mapped_start()
+    }
+
     /// Creates a detached task whose architecture context is not yet bootstrapped.
     ///
     /// All fallible stack allocation completes before the task exists. A task dropped before
@@ -337,6 +380,7 @@ impl Task {
             body: UnsafeCell::new(Some(Box::new(body))),
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(false),
+            handoff_wakeup: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
             wait_queue: AtomicU64::new(0),
             wait_result: AtomicU8::new(0),
@@ -364,6 +408,7 @@ impl Task {
             body: UnsafeCell::new(None),
             completion: Arc::new(Completion::new()),
             current: AtomicBool::new(true),
+            handoff_wakeup: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
             wait_queue: AtomicU64::new(0),
             wait_result: AtomicU8::new(0),
@@ -499,6 +544,7 @@ impl Task {
         );
         let mut state = self.state.lock();
         state.start_running(cpu_id)?;
+        self.handoff_wakeup.store(false, Ordering::Relaxed);
         self.current.store(true, Ordering::Release);
         Ok(())
     }
@@ -571,14 +617,20 @@ impl Task {
 
     /// Marks a blocked task runnable after one completion wakeup.
     ///
-    /// Exactly one waiter generation may wake this task.
-    pub(crate) fn wake_from_completion(&self) -> Result<(), TaskStateError> {
+    /// Exactly one waiter generation may wake this task. A true result grants queue publication
+    /// to the caller, while false transfers it to the incoming stack's handoff hook.
+    pub(crate) fn wake_from_completion(&self) -> Result<bool, TaskStateError> {
         let _guard = kernel_guard::NoPreempt::new();
-        self.state.lock().make_runnable()
+        let mut state = self.state.lock();
+        state.make_runnable()?;
+        Ok(self.route_locked_wakeup(*state))
     }
 
     /// Wakes one synchronization waiter and publishes the notification result.
-    pub(crate) fn wake_from_wait(&self) -> Result<(), TaskStateError> {
+    ///
+    /// Transition and queue-publication routing share one lifecycle lock acquisition. A true
+    /// result grants queue publication and false retains it until current-stack handoff.
+    pub(crate) fn wake_from_wait(&self) -> Result<bool, TaskStateError> {
         let _guard = kernel_guard::NoPreempt::new();
         let mut state = self.state.lock();
         match *state {
@@ -590,10 +642,13 @@ impl Task {
                 Ok(())
             }
             _ => Err(TaskStateError::InvalidTransition),
-        }
+        }?;
+        Ok(self.route_locked_wakeup(*state))
     }
 
     /// Times out one synchronization waiter if its generation is still current.
+    ///
+    /// A true result grants queue publication. A current task retains its wake token until handoff.
     pub(crate) fn timeout_wait(&self, generation: u64) -> bool {
         if self.sleep_generation.load(Ordering::Acquire) != generation {
             return false;
@@ -606,7 +661,7 @@ impl Task {
         *state = TaskState::Runnable;
         self.wait_result.store(2, Ordering::Release);
         self.timer_cpu.store(usize::MAX, Ordering::Release);
-        true
+        self.route_locked_wakeup(*state)
     }
 
     /// Rolls back a timed wait that could not acquire timer ownership.
@@ -702,9 +757,12 @@ impl Task {
 
     /// Marks the stack non-current after execution has moved elsewhere.
     ///
-    /// Deferred reaping must call this only from another active stack.
-    pub(crate) fn mark_not_current(&self) {
+    /// Deferred reaping calls this only from another active stack. A true result transfers a wake
+    /// publication retained during the switch window, with the lifecycle lock already released.
+    pub(crate) fn mark_not_current(&self) -> bool {
+        let state = self.state.lock();
         self.current.store(false, Ordering::Release);
+        finish_handoff_wakeup(*state, self.handoff_wakeup.swap(false, Ordering::Relaxed))
     }
 
     /// Claims this task's single wait-queue registration slot.
@@ -840,5 +898,48 @@ impl JoinHandle {
     /// Returns the completed task outcome without consuming the join handle.
     pub fn status(&self) -> Option<TaskExitStatus> {
         self.completion.status()
+    }
+}
+
+/// Current-stack wakeup routing tests.
+///
+/// The pure transitions run under the same lifecycle lock in the production Task methods.
+#[cfg(test)]
+mod handoff_wakeup_tests {
+    use super::{TaskState, finish_handoff_wakeup, route_handoff_wakeup};
+
+    /// Retains exactly one publication when a wake wins before the stack handoff.
+    ///
+    /// Marker clearance transfers that publication to the incoming scheduler context.
+    #[test]
+    fn wake_before_handoff_is_not_lost() {
+        let (publish, pending) = route_handoff_wakeup(TaskState::Runnable, true);
+        assert!(!publish);
+        assert!(finish_handoff_wakeup(TaskState::Runnable, pending));
+        assert!(!finish_handoff_wakeup(TaskState::Runnable, false));
+        assert_eq!(
+            route_handoff_wakeup(TaskState::Runnable, false),
+            (true, false)
+        );
+    }
+
+    /// Clears pending publication when an already-awakened task resumes without switching.
+    ///
+    /// A late waker cannot publish an active Running task a second time.
+    #[test]
+    fn resumed_task_does_not_publish_again() {
+        assert_eq!(
+            route_handoff_wakeup(TaskState::Running { cpu_id: 1 }, true),
+            (false, false)
+        );
+        let (_, pending) = route_handoff_wakeup(TaskState::Runnable, true);
+        assert!(pending);
+        // Resuming current clears its old token under the same lock before another block.
+        let (_, pending) = route_handoff_wakeup(TaskState::Running { cpu_id: 1 }, true);
+        assert!(!finish_handoff_wakeup(TaskState::Runnable, pending));
+        // The new wake occurs after handoff, so it owns exactly one direct publication.
+        let (publish, pending) = route_handoff_wakeup(TaskState::Runnable, false);
+        assert!(publish);
+        assert!(!finish_handoff_wakeup(TaskState::Runnable, pending));
     }
 }

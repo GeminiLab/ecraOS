@@ -53,6 +53,40 @@ static CPU_STATE: LazyInit<Box<[AtomicU8]>> = LazyInit::new();
 /// A Release store publishes mailbox, trap, local-source and scheduler initialization.
 static CPU_IPI_READY: LazyInit<Box<[AtomicBool]>> = LazyInit::new();
 
+/// The boot barrier separating CPU startup from application mapping mutations.
+///
+/// All discovered CPUs are Online and IPI-ready and low identity removal has completed before
+/// application code can remove mappings. Runtime has no CPU joins, so ready snapshots stay stable.
+static BOOT_MAPPING_COMPLETE: AtomicBool = AtomicBool::new(false);
+
+/// Publishes the completed boot mapping barrier to every AP.
+///
+/// The BSP calls this only after acknowledged low identity removal on all discovered CPUs.
+pub(crate) fn publish_boot_mapping_completion() {
+    assert!(
+        (0..cpu_count()).all(|cpu| cpu_state(cpu) == Some(CpuState::Online) && is_ipi_ready(cpu))
+    );
+    BOOT_MAPPING_COMPLETE.store(true, Ordering::Release);
+}
+
+/// Waits for stable runtime membership with interrupts available for boot shootdowns.
+///
+/// AP application code cannot mutate mappings while later CPUs are still joining the target set.
+pub(crate) fn wait_boot_mapping_completion() {
+    let deadline =
+        exarch::time::monotonic_time().saturating_add(Duration::from_secs(cpu_count() as u64 + 5));
+    while !BOOT_MAPPING_COMPLETE.load(Ordering::Acquire) {
+        let observation = exarch::time::monotonic_time();
+        assert!(
+            observation < deadline,
+            "boot mapping barrier logical={} physical={:?} generation=None operation=identity-map deadline={deadline:?} observation={observation:?}",
+            current_cpu_id(),
+            logical_to_physical(current_cpu_id())
+        );
+        core::hint::spin_loop();
+    }
+}
+
 /// The immutable logical-to-physical CPU translation.
 ///
 /// Architecture transports receive only the physical result of this lookup.

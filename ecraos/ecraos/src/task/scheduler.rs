@@ -15,7 +15,7 @@ use memory_addr::VirtAddrRange;
 
 use super::{
     DomainError, DomainPolicy, DomainRef, JoinHandle, PhysicalQueue, QueueState, Task, TaskId,
-    TaskRef, create_domain,
+    TaskRef, TaskState, create_domain,
     domain::MAX_CPU_NUM,
     stack::KernelStack,
     timer_queue::TimerQueue,
@@ -186,44 +186,47 @@ fn placement_cpu(task: &Task, preferred_cpu: usize) -> usize {
 }
 
 /// Enqueues one task on its placement-selected queue.
+///
+/// Notification follows complete queue publication and release of the local lock scope.
 fn enqueue_task(task: Arc<Task>, preferred_cpu: usize) {
-    // Queue publication follows NoPreemptIrqSave -> domain metadata -> Queue locks. This guard is
-    // intentionally short-lived and is dropped before any context switch. A future lock-free
-    // queue could replace this lock after its memory-ordering proof.
-    let _guard = kernel_guard::NoPreemptIrqSave::new();
-    let Some(domain) = task.domain() else {
-        return;
-    };
-    let domain_id = domain.id();
-    let members = domain.cpu_snapshot().snapshot();
-    if members.is_empty() {
-        domain.suspend(task);
-        return;
-    }
-    let cpu_id = placement_cpu(&task, preferred_cpu);
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
-    // lifecycle. The membership snapshot above is deliberately released before this queue lock;
-    // a future lock-free queue and membership structure may replace the current locks after a
+    // lifecycle. All queue/domain locks and IRQ-saving guards are released before IPI delivery.
+    // A future lock-free queue/membership implementation may replace these structures after a
     // complete memory-ordering proof.
-    let mut queue = run_queue(cpu_id).lock();
-    if queue.state() == QueueState::Active(domain_id) {
+    let selected_cpu = {
+        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let Some(domain) = task.domain() else {
+            return;
+        };
+        let domain_id = domain.id();
+        let members = domain.cpu_snapshot().snapshot();
+        if members.is_empty() {
+            domain.suspend(task);
+            return;
+        }
+        let cpu_id = placement_cpu(&task, preferred_cpu);
+        let mut queue = run_queue(cpu_id).lock();
+        if queue.state() != QueueState::Active(domain_id) {
+            drop(queue);
+            domain.suspend(task);
+            return;
+        }
         let task_id = task.id();
         queue
             .push(domain_id, task)
             .expect("validated active queue rejected task publication");
-        // This producer is running on the current CPU, which owns the corresponding trace ring.
-        // A future lock-free trace transport may replace the current local ring after a complete
-        // memory-ordering proof.
-        // SAFETY: enqueue_task executes in the current CPU context with local preemption held.
+        // SAFETY: This producer owns the local trace ring while preemption is disabled.
         unsafe {
             TRACE
                 .current_ref_mut_raw()
                 .push(TraceEventKind::Enqueue, task_id, domain_id);
         }
-        super::preempt::request_reschedule();
-    } else {
-        drop(queue);
-        domain.suspend(task);
+        cpu_id
+    };
+    if let Err(error) = super::preempt::request_reschedule_on(selected_cpu) {
+        // Queue ownership is already committed. The periodic timer remains a fallback, and
+        // common delivery clears a rejected coalescing bit so another enqueue can retry.
+        log::warn!("queued task notification failed: {error:?}");
     }
 }
 
@@ -300,6 +303,7 @@ pub(super) fn current_task_id() -> Option<TaskId> {
     let id = unsafe { current_task().id() };
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
     Some(id)
 }
@@ -368,8 +372,11 @@ fn idle_pull(domain: &DomainRef, cpu_id: usize) -> Option<TaskRef> {
         if source.state() != QueueState::Active(domain.id()) {
             continue;
         }
+        // The outgoing CPU publishes Runnable before saving its context. Acquire observation of
+        // current=false occurs only after the incoming stack has completed that save and handoff.
+        // Keeping a current tail queued prevents a remote CPU from restoring an unsaved context.
         if let Some(task) = source
-            .steal_tail(domain.id())
+            .steal_tail_if(domain.id(), |task| !task.is_current())
             .expect("validated idle-pull source detached from its domain")
         {
             return Some(task);
@@ -432,7 +439,11 @@ fn finish_switch() {
     // SAFETY: install_handoff placed one unmatched Arc::into_raw token in this per-CPU slot. The
     // incoming stack owns the slot and consumes the token exactly once.
     let outgoing = unsafe { Arc::from_raw(outgoing as *const Task) };
-    outgoing.mark_not_current();
+    if outgoing.mark_not_current() {
+        // A remote wake may have committed Runnable while the outgoing stack was still current.
+        // Its publication token transfers here under the lifecycle lock, closing the handoff gap.
+        enqueue_task(Arc::clone(&outgoing), crate::mp::current_cpu_id());
+    }
     drop(outgoing);
 }
 
@@ -495,6 +506,7 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
         Err(error) => {
             if irq_enabled {
                 exarch::trap::enable_local();
+                super::stack::reap_released_stacks();
             }
             return Err(error);
         }
@@ -508,7 +520,7 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
         enqueue_task(Arc::clone(&current), cpu_id);
     }
     let previous_context = current.context_ptr();
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: The target is Running, the current task is Runnable, all locks are released, and
     // interrupts remain disabled across the architecture handoff.
@@ -516,6 +528,7 @@ pub(super) fn yield_to(target: Arc<Task>) -> Result<(), TargetError> {
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
     Ok(())
 }
@@ -536,7 +549,7 @@ pub(super) fn exit_and_yield_to(target: Arc<Task>) -> ! {
     wake_tasks(waiters);
     let previous_context = current.context_ptr();
     drop(current);
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, outgoing) = install_handoff(next);
     assert_ne!(outgoing, 0, "exiting task has no current ownership token");
     // SAFETY: The current raw token keeps the exited task and stack live until the incoming stack
@@ -629,6 +642,7 @@ pub(super) fn spawn(body: impl FnOnce() + Send + 'static) -> JoinHandle {
 /// Switches the running task and its CPU to another active scheduling domain.
 pub(super) fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
     assert_scheduler_initialized();
+    let _migration = kernel_guard::NoPreempt::new();
     // Lock order is NoPreemptIrqSave -> domain metadata by DomainId -> Queue locks by CpuId ->
     // task lifecycle. This transaction drops every queue lock before changing task metadata and
     // never crosses exarch::context::switch. A future lock-free queue and membership structure
@@ -776,7 +790,6 @@ pub(super) fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
 
     // Queue attachment and both membership changes have committed. The source's Draining lifecycle
     // still permits this removal, which lets explicit destruction make progress after Busy.
-    drain_suspended(domain, cpu_id);
     source.retire_task();
     domain.account_task();
     current.set_domain(domain);
@@ -785,6 +798,15 @@ pub(super) fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
     STEAL_CURSOR.write_current(0);
     // SAFETY: `previous` is the strong Arc token held by the old current-domain slot.
     unsafe { drop(Arc::from_raw(previous as *const super::SchedulingDomain)) };
+    drop(_guard);
+    drain_suspended(domain, cpu_id);
+    // FIFO transfers above may have published into remote source queues. Every domain/queue
+    // lock and IRQ-saving guard has ended before the notification phase.
+    for destination in destinations {
+        if let Err(error) = super::preempt::request_reschedule_on(destination) {
+            log::warn!("domain transfer notification failed: {error:?}");
+        }
+    }
     Ok(())
 }
 
@@ -846,9 +868,10 @@ pub(super) fn drain_suspended(domain: &super::SchedulingDomain, cpu_id: usize) {
 /// The completion wait-queue lock is already released when this function is called.
 pub(super) fn wake_tasks(tasks: alloc::vec::Vec<Arc<Task>>) {
     for task in tasks {
-        task.wake_from_completion()
-            .expect("completion waiter was not Blocked");
-        if !task.is_current() {
+        if task
+            .wake_from_completion()
+            .expect("completion waiter was not Blocked")
+        {
             enqueue_task(task, crate::mp::current_cpu_id());
         }
     }
@@ -903,16 +926,12 @@ pub(super) fn cancel_timed_wait(task: &Task, generation: u64, cpu_id: usize) {
 
 /// Makes one generic synchronization waiter runnable in its current scheduling domain.
 ///
-/// Wake paths never context-switch directly. Queue publication completes before the local pending
-/// bit is set by [`enqueue_task`], leaving a remote CPU to observe it at its next timer interrupt
-/// until Stage 4 adds IPIs.
+/// Wake paths never context-switch directly. Wait and timer ownership locks must be released
+/// before queue publication requests scheduling on the selected CPU.
 pub(super) fn wake_waiter(task: TaskRef) {
-    if task.wake_from_wait().is_err() {
-        return;
-    }
-    // A remote notifier can win after registration but before the blocked task switches away.
-    // Its current-stack marker prevents a duplicate queue publication in that window.
-    if !task.is_current() {
+    // Wake transition and publication routing share the lifecycle lock, preventing an old waker
+    // from claiming a newer wait. The incoming stack publishes deferred current-task wakeups.
+    if matches!(task.wake_from_wait(), Ok(true)) {
         enqueue_task(task, crate::mp::current_cpu_id());
     }
 }
@@ -938,12 +957,14 @@ pub(super) fn block_current_on_wait_queue(
     if current.id() == idle.id() {
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Err(super::TaskError::NotTaskContext);
     }
     if let Err(error) = waiters.prepare_block(Arc::clone(&current), cpu_id) {
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Err(error);
     }
@@ -957,13 +978,14 @@ pub(super) fn block_current_on_wait_queue(
     let previous_context = current.context_ptr();
     // SAFETY: The current task is Blocked and no wait-queue lock remains held across selection.
     let next = unsafe { select_next(&domain, cpu_id) };
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: Both contexts remain owned and all scheduler, task, and wait queue locks are gone.
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
     Ok(())
 }
@@ -984,8 +1006,14 @@ pub(super) fn block_current_registered() -> Result<(), super::TaskError> {
         current.state(),
         super::TaskState::Blocked | super::TaskState::TimedWaiting
     ) {
+        if current.state() == TaskState::Runnable {
+            current
+                .start_running(cpu_id)
+                .expect("awakened current task could not resume");
+        }
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Ok(());
     }
@@ -1001,35 +1029,62 @@ pub(super) fn block_current_registered() -> Result<(), super::TaskError> {
             .expect("blocked task selected itself without a wake transition");
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Ok(());
     }
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: No scheduler, task, or wait-queue lock remains held across the switch.
     unsafe { exarch::context::switch(previous_context, next_context) };
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
     Ok(())
 }
 
-/// Publishes timer wakeups and then reaches the interrupt-exit scheduling safe point.
+/// Tests whether the interrupted task may consume a deferred request.
 ///
-/// Per-CPU timer ownership is drained directly from the delivering timer interrupt so a CPU-bound
-/// preemptive task cannot defer a due wake until it next yields.
-pub(super) fn timer_interrupt_exit() {
-    schedule_from_timer_interrupt();
+/// Cooperative policy, a critical section, or an exit handoff leaves the pending bit intact.
+fn interrupt_exit_permitted(
+    policy: DomainPolicy,
+    state: TaskState,
+    cpu: usize,
+    allowed: bool,
+) -> bool {
+    allowed
+        && matches!(policy, DomainPolicy::Preemptive { .. })
+        && state == TaskState::Running { cpu_id: cpu }
 }
 
-/// Consumes a local timer-interrupt scheduling request at the interrupt-exit safe point.
+/// Selects IRQ state for a newly entered ordinary task.
 ///
-/// A preemptive task moves to the local queue tail only when another task is available. The
-/// outgoing timer-handler frame is saved in its task context and resumes through normal trap
-/// return when that task is selected again.
-pub(super) fn schedule_from_timer_interrupt() {
-    if !super::preempt::can_preempt_from_interrupt() || !super::preempt::take_reschedule_request() {
+/// Acknowledged interrupt-exit handoffs allow a fresh task to receive interrupts. Existing saved
+/// continuations ignore this flag and return through their original scheduling or trap epilogue.
+fn initial_entry_irq_enabled(from_interrupt: bool, outgoing_irq_enabled: bool) -> bool {
+    from_interrupt || outgoing_irq_enabled
+}
+
+/// Consumes a deferred request at the shared interrupt-exit safe point.
+///
+/// Source acknowledgement precedes this callback. The saved interrupt frame resumes through
+/// normal trap return when its preempted task is selected again.
+pub(super) fn interrupt_exit() {
+    if !super::preempt::can_preempt_from_interrupt() || !SCHEDULER_ACTIVE.read_current() {
+        return;
+    }
+    let cpu_id = crate::mp::current_cpu_id();
+    let current = unsafe { current_task() };
+    let domain = unsafe { current_domain() };
+    let permitted = interrupt_exit_permitted(domain.policy(), current.state(), cpu_id, true);
+    if !permitted {
+        if !matches!(domain.policy(), DomainPolicy::Preemptive { .. }) {
+            super::preempt::request_reschedule();
+        }
+    }
+    if !super::preempt::take_reschedule_request_if(permitted) {
         return;
     }
 
@@ -1038,16 +1093,6 @@ pub(super) fn schedule_from_timer_interrupt() {
     // scheduler queue may replace these locks after a complete memory-ordering proof.
     let _guard = kernel_guard::NoPreemptIrqSave::new();
     finish_switch();
-    let cpu_id = crate::mp::current_cpu_id();
-    let current = unsafe { current_task() };
-    let domain = unsafe { current_domain() };
-    if !matches!(domain.policy(), DomainPolicy::Preemptive { .. }) {
-        // A cooperative domain observes the same request at yield, block, exit, or idle instead
-        // of permitting a clock interrupt to force a switch.
-        super::preempt::request_reschedule();
-        return;
-    }
-
     let mut queue = run_queue(cpu_id).lock();
     if queue.state() != QueueState::Active(domain.id()) || queue.is_empty() {
         current.reset_slice();
@@ -1055,14 +1100,14 @@ pub(super) fn schedule_from_timer_interrupt() {
     }
     current
         .yield_runnable(cpu_id)
-        .expect("timer preemption could not return current task to Runnable");
+        .expect("interrupt preemption could not return current task to Runnable");
     current.reset_slice();
     record_trace(TraceEventKind::ReschedulePending, &current);
     let idle = unsafe { idle_task() };
     if current.id() != idle.id() {
         queue
             .push(domain.id(), Arc::clone(&current))
-            .expect("timer preemption detached the local queue");
+            .expect("interrupt preemption detached the local queue");
     }
     drop(queue);
     // SAFETY: The active queue owns all candidates and the current task is already Runnable.
@@ -1071,7 +1116,7 @@ pub(super) fn schedule_from_timer_interrupt() {
         return;
     }
     let previous_context = current.context_ptr();
-    FIRST_ENTRY_IRQ_ENABLED.write_current(false);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(true, false));
     let (next_context, _) = install_handoff(next);
     drop(_guard);
     // SAFETY: Interrupts remain disabled, all scheduler locks were released, and saving this
@@ -1168,6 +1213,7 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) -> Result<(), super
     if let Err(error) = registration {
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Err(error);
     }
@@ -1175,6 +1221,7 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) -> Result<(), super
         cancel_timed_wait(&current, generation, cpu_id);
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return Err(super::TaskError::CannotBlock);
     }
@@ -1194,7 +1241,7 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) -> Result<(), super
     let domain = unsafe { current_domain() };
     // SAFETY: The current task is Blocked, and selection releases every Queue lock before switch.
     let next = unsafe { select_next(&domain, cpu_id) };
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: Both contexts and ownership tokens remain live, interrupts are disabled, and all
     // scheduler locks were released before switching.
@@ -1202,6 +1249,7 @@ pub(super) fn sleep_until(deadline: exarch::time::TimeValue) -> Result<(), super
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
     Ok(())
 }
@@ -1225,6 +1273,7 @@ pub(super) fn block_current_on(completion: &Completion) {
         drop(current);
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return;
     }
@@ -1240,9 +1289,13 @@ pub(super) fn block_current_on(completion: &Completion) {
         current
             .wake_from_completion()
             .expect("woken task could not return to Runnable");
+        current
+            .start_running(cpu_id)
+            .expect("canceled completion block could not resume");
         drop(current);
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return;
     }
@@ -1251,7 +1304,7 @@ pub(super) fn block_current_on(completion: &Completion) {
     let domain = unsafe { current_domain() };
     // SAFETY: The current task is Blocked, and selection releases every Queue lock before switch.
     let next = unsafe { select_next(&domain, cpu_id) };
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: Both contexts and ownership tokens remain live, interrupts are disabled, and all
     // scheduler locks were released before switching.
@@ -1259,6 +1312,7 @@ pub(super) fn block_current_on(completion: &Completion) {
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
 }
 
@@ -1268,6 +1322,7 @@ pub(super) fn block_current_on(completion: &Completion) {
 /// queue without a meaningless self-switch.
 pub(super) fn yield_now() {
     assert_scheduler_initialized();
+    super::stack::reap_released_stacks();
 
     let irq_enabled = exarch::trap::local_enabled();
     exarch::trap::disable_local();
@@ -1284,6 +1339,7 @@ pub(super) fn yield_now() {
         drop(queue);
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return;
     }
@@ -1307,10 +1363,11 @@ pub(super) fn yield_now() {
     if next.id() == current.id() {
         if irq_enabled {
             exarch::trap::enable_local();
+            super::stack::reap_released_stacks();
         }
         return;
     }
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     let (next_context, _) = install_handoff(next);
     // SAFETY: Local interrupts are disabled, ownership tokens keep both contexts live, and the
     // scheduler lock was released before crossing the architecture switch boundary.
@@ -1318,6 +1375,7 @@ pub(super) fn yield_now() {
     finish_switch();
     if irq_enabled {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
 }
 
@@ -1328,6 +1386,7 @@ pub(super) fn finish_initial_switch() {
     finish_switch();
     if FIRST_ENTRY_IRQ_ENABLED.read_current() {
         exarch::trap::enable_local();
+        super::stack::reap_released_stacks();
     }
 }
 
@@ -1344,7 +1403,7 @@ pub(super) fn exit_current(task: Arc<Task>) -> ! {
     record_trace(TraceEventKind::Exit, &task);
     // SAFETY: The exiting task owns this CPU and selection releases every Queue lock before handoff.
     let next = unsafe { select_next(&domain, cpu_id) };
-    FIRST_ENTRY_IRQ_ENABLED.write_current(irq_enabled);
+    FIRST_ENTRY_IRQ_ENABLED.write_current(initial_entry_irq_enabled(false, irq_enabled));
     drop(task);
     let (next_context, outgoing) = install_handoff(next);
     assert_ne!(outgoing, 0, "exiting task has no current ownership token");
@@ -1367,5 +1426,64 @@ fn idle_body() {
     loop {
         yield_now();
         hint::spin_loop();
+    }
+}
+
+/// Interrupt-exit scheduling policy tests.
+///
+/// Pure policy evaluation covers lifecycle windows without executing a context switch on the host.
+#[cfg(test)]
+mod interrupt_exit_tests {
+    use core::time::Duration;
+
+    use crate::task::TaskState;
+
+    use super::{DomainPolicy, initial_entry_irq_enabled, interrupt_exit_permitted};
+
+    /// Enables IRQs for a fresh ordinary task selected after controller acknowledgement.
+    ///
+    /// Existing saved interrupt frames restore their own state independently of this entry flag.
+    #[test]
+    fn fresh_interrupt_selected_task_can_receive_reciprocal_ipi() {
+        assert!(initial_entry_irq_enabled(true, false));
+        assert!(initial_entry_irq_enabled(false, true));
+        assert!(!initial_entry_irq_enabled(false, false));
+    }
+
+    /// Retains cooperative requests and requests protected by a preemption guard.
+    ///
+    /// A software interrupt must preserve the same domain policy as a timer interrupt.
+    #[test]
+    fn respects_domain_policy_and_guard() {
+        let running = TaskState::Running { cpu_id: 1 };
+        let preemptive = DomainPolicy::Preemptive {
+            time_slice: Duration::from_millis(10),
+        };
+        assert!(!interrupt_exit_permitted(
+            DomainPolicy::Cooperative,
+            running,
+            1,
+            true
+        ));
+        assert!(!interrupt_exit_permitted(preemptive, running, 1, false));
+        assert!(interrupt_exit_permitted(preemptive, running, 1, true));
+    }
+
+    /// Defers requests during the completed-task exit window.
+    ///
+    /// Publishing Exited before the final handoff cannot permit a transition back to Runnable.
+    #[test]
+    fn rejects_non_running_current_tasks() {
+        let policy = DomainPolicy::Preemptive {
+            time_slice: Duration::from_millis(10),
+        };
+        for state in [
+            TaskState::Exited,
+            TaskState::Blocked,
+            TaskState::Runnable,
+            TaskState::Running { cpu_id: 2 },
+        ] {
+            assert!(!interrupt_exit_permitted(policy, state, 1, true));
+        }
     }
 }

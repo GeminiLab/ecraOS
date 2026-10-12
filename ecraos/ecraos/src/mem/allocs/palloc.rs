@@ -111,7 +111,6 @@ pub fn alloc_frames(frame_count: usize, align: usize) -> exbuddy::BuddyResult<Ph
 ///
 /// The same `addr` and `frame_count` must be passed back to
 /// [`dealloc_frames_at`].
-#[expect(unused)]
 pub fn alloc_frames_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult<PhysAddr> {
     with_allocator(|b| b.alloc_frames_at(addr, frame_count).map(|_| addr))
 }
@@ -133,13 +132,11 @@ pub fn dealloc_frames(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResul
 ///
 /// The `addr` and `frame_count` arguments must match the corresponding
 /// [`alloc_frames_at`] call exactly.
-#[expect(unused)]
 pub fn dealloc_frames_at(addr: PhysAddr, frame_count: usize) -> exbuddy::BuddyResult {
     with_allocator(|b| b.dealloc_frames_at(addr, frame_count))
 }
 
 /// Returns whether the page containing `addr` is allocated.
-#[expect(unused)]
 pub fn is_allocated(addr: PhysAddr) -> exbuddy::BuddyResult<bool> {
     with_allocator(|b| b.is_allocated(addr))
 }
