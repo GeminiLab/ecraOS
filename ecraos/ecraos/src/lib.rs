@@ -40,20 +40,71 @@ macro_rules! kprintln {
     };
 }
 
-/// Banner line printed at startup.
-const HELLO_ECRAOS: &str = "Hello, ecraOS!";
-/// Attribution line printed at startup.
-const DISCLAIMER: &str = "ecraOS is a derivative of the ArceOS project.";
-/// Horizontal line printed at startup.
-const HLINE: &str = "------------------------------------------------------------";
+/// The ASCII ecraOS wordmark.
+///
+/// Uses seven-row lowercase letters and ten-row uppercase letters on a shared baseline, centered
+/// in the 78-column interior of the banner table.
+///
+/// ASCII art by GPT-6.1-Sol, refined by the ecraOS author.
+const LOGO: &str = r"|                                                                              |
+|                                                .ooooooo.        .oooooo.     |
+|                                              .ooooooooooo.    .oooooooo.     |
+|                                             .ooo.     .ooo.   ooo.           |
+|      .ooooo     ooooo.  .oo oo.   .oooooo  .ooo        oooo   oooo           |
+|     ooo..ooo   ooo..o.  .ooooo   ooo..ooo  ooo.        oooo   .oooooo.       |
+|    ooo. .oo.  ooo       ooo.    ooo   ooo  ooo.        ooo.     .oooooo      |
+|    ooooooo.  .oo.       ooo    .oo.  .oo.  oooo       .ooo         .ooo      |
+|    ooo       .oo.       ooo    .oo.  ooo.  .ooo.     .ooo.   ..    .ooo      |
+|    oooo..oo   ooo..oo  .oo.    .ooo.oooo    .ooooooooooo.   .ooooooooo       |
+|     .ooooo.    ooooo.  .oo      oooo..oo      oooooooo.      .oooooo.        |
+|                                                                              |";
 
+/// The attribution line printed at startup.
+///
+/// Identifies the ArceOS project from which ecraOS is derived.
+const DISCLAIMER: &str = "ecraOS is a derivative of the ArceOS project.";
+
+/// The ArceOS organization URL.
+///
+/// Links to the upstream organization credited in the startup banner.
+const ARCEOS_REPO_LINK: &str = "https://github.com/arceos-org/";
+
+/// The ecraOS repository URL.
+///
+/// Links to the project's source code from the startup banner.
+const ECRAOS_REPO_LINK: &str = "https://github.com/GeminiLab/ecraOS/";
+
+/// The horizontal separator for startup messages.
+///
+/// Spans 80 columns.
+const HLINE: &str =
+    "--------------------------------------------------------------------------------";
+
+/// The horizontal border of the startup banner table.
+///
+/// Spans 80 columns, including the corner characters around the 78-column cell interior.
+const BANNER_BORDER: &str =
+    "+------------------------------------------------------------------------------+";
+
+/// Prints the startup banner.
+///
+/// Writes an 80-column table through the early console before logging is initialized. The first
+/// cell contains the centered wordmark and attribution. The second lists project links, and the
+/// third contains the target and host triples.
 fn print_hello_banner() {
-    kprintln!("\n\n{HLINE}\n{HELLO_ECRAOS}\n\n{DISCLAIMER}\n{HLINE}");
-    kprintln!(
-        "Target triple: {}\nHost triple  : {}\n{HLINE}\n",
-        target_triple::TARGET,
-        target_triple::HOST
-    );
+    kprintln!();
+    kprintln!("{BANNER_BORDER}");
+    kprintln!("{LOGO}");
+    kprintln!("| {:76} |", "");
+    kprintln!("| {DISCLAIMER:^76.76} |");
+    kprintln!("{BANNER_BORDER}");
+    kprintln!("| ArceOS org   : {:61.61} |", ARCEOS_REPO_LINK);
+    kprintln!("| ecraOS repo  : {:61.61} |", ECRAOS_REPO_LINK);
+    kprintln!("{BANNER_BORDER}");
+    kprintln!("| Target triple: {:61.61} |", target_triple::TARGET);
+    kprintln!("| Host triple  : {:61.61} |", target_triple::HOST);
+    kprintln!("{BANNER_BORDER}");
+    kprintln!();
 }
 
 /// Kernel entry called by specified boot modules through
@@ -92,7 +143,7 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) ->
     // Print the hello banner.
     print_hello_banner();
     kprintln!(
-        "Kernel entry on BSP(hart_id: {:#x}), arg: {:x?}\n",
+        "Kernel entry on BSP(hart_id: {:#x}), arg: {:#x?}\n",
         hart_id,
         arg_ref
     );
