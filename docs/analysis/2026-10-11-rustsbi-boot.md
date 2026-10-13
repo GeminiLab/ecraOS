@@ -104,10 +104,10 @@ cargo xtask qemu --target riscv64gc-unknown-none-elf \
 ```
 
 The dedicated `rustsbi-tests` CI job builds the firmware once and runs this
-matrix through xtask. It checks the firmware and kernel banners, application
-completion, and entry on all three APs in four-hart runs. A failed cell makes
-the job fail after xtask has run the remaining cells. Build and guest logs are
-retained for diagnosis.
+matrix through xtask. It checks the firmware banner, kernel entry on the BSP,
+application completion, and entry on all three APs in four-hart runs. A
+failed cell makes the job fail after xtask has run the remaining cells.
+Build and guest logs are retained for diagnosis.
 
 ## Validation
 

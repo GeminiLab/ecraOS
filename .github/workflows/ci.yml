@@ -150,7 +150,7 @@ jobs:
         run: |
           for guest_log in target/qemu-logs/*.log; do
             grep -Fq 'Hello RustSBI!' "$guest_log"
-            grep -Fq 'Hello, ecraOS!' "$guest_log"
+            grep -Fq 'Kernel entry on BSP(hart_id:' "$guest_log"
             case "$guest_log" in
               *-default-*)
                 grep -Fq 'Hello, ecraOS App!' "$guest_log" ;;
