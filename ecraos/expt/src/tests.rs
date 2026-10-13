@@ -607,16 +607,16 @@ fn cursor_maps_and_unmaps_single_base_page() {
     }
 
     assert_unmapped(&table, 0x3000);
-    assert_eq!(flush_log(), std::vec![Some(0x3000), Some(0x3000)]);
+    assert_eq!(flush_log(), std::vec![None, Some(0x3000)]);
     reset_test_state();
 }
 
-/// Verifies that unmapping an absent page records no TLB invalidation.
+/// Flushes newly created intermediate tables while unmapping an absent page.
 ///
-/// Intermediate tables created during traversal remain allocated but contain no
-/// leaf mappings.
+/// Traversal retains these tables without leaf mappings. Installing their non-leaf descriptors
+/// requires full local invalidation even though no leaf mapping was removed.
 #[test]
-fn cursor_unmaps_empty_range_without_flush_or_mapping() {
+fn cursor_unmaps_absent_range_with_full_flush_for_new_tables() {
     reset_test_state();
     let mut table = new_table();
     let root_index = index_for(TestMeta::LEVELS - 1, 0x4000);
@@ -636,7 +636,7 @@ fn cursor_unmaps_empty_range_without_flush_or_mapping() {
     );
     assert_subtree_has_no_leaf_mappings(&table, table.root_paddr(), TestMeta::LEVELS - 1);
     assert_unmapped(&table, 0x4000);
-    assert!(flush_log().is_empty());
+    assert_eq!(flush_log(), std::vec![None]);
     reset_test_state();
 }
 
@@ -874,7 +874,7 @@ fn opaque_page_table_applies_action_batch() {
         MappingFlags::READ | MappingFlags::WRITE,
         TestMeta::PAGE_SIZE,
     );
-    assert_eq!(flush_log(), std::vec![Some(0x3000), Some(0x4000)]);
+    assert_eq!(flush_log(), std::vec![None]);
     reset_test_state();
 }
 
@@ -911,7 +911,7 @@ fn opaque_dual_page_table_applies_actions_to_both_roots() {
         panic!("dual-root opaque table returned a single root");
     };
     assert_ne!(root.lower, root.upper);
-    assert_eq!(flush_log(), vec![Some(0x3000), Some(upper_base + 0x3000)]);
+    assert_eq!(flush_log(), vec![None, None]);
     reset_test_state();
 }
 
@@ -1138,6 +1138,54 @@ fn unmapping_base_page_inside_huge_page_splits_and_full_flushes() {
     reset_test_state();
 }
 
+/// Prepares existing leaf mappings for tests of leaf-only invalidation.
+///
+/// Table creation is flushed separately so it cannot make a leaf or threshold test pass via Full.
+fn prepare_existing_leaf_tables(table: &mut PageTable<TestMeta, TestPte>, addresses: &[usize]) {
+    {
+        let mut cursor = table.cursor();
+        for &address in addresses {
+            cursor
+                .map::<TestPagingHandler>(
+                    VirtAddr::from_usize(address),
+                    PhysAddr::from_usize(0x100000 + address),
+                    TestMeta::PAGE_SIZE,
+                    MappingFlags::READ,
+                )
+                .unwrap();
+        }
+    }
+    {
+        let mut cursor = table.cursor();
+        for &address in addresses {
+            cursor
+                .unmap::<TestPagingHandler>(VirtAddr::from_usize(address), TestMeta::PAGE_SIZE)
+                .unwrap();
+        }
+    }
+    clear_flush_log();
+}
+
+/// Flushes all local translations after installing a previously absent non-leaf table.
+///
+/// Address-specific RISC-V invalidation does not cover cached non-leaf translations.
+#[test]
+fn new_non_leaf_table_requires_full_invalidation() {
+    reset_test_state();
+    let mut table = new_table();
+    table
+        .cursor()
+        .map::<TestPagingHandler>(
+            VirtAddr::from_usize(0x1000),
+            PhysAddr::from_usize(0x8000),
+            TestMeta::PAGE_SIZE,
+            MappingFlags::READ,
+        )
+        .unwrap();
+    assert_eq!(flush_log(), std::vec![None]);
+    reset_test_state();
+}
+
 /// Verifies that dropping a cursor flushes one changed base page.
 ///
 /// No invalidation occurs before the drop, and the installed mapping remains
@@ -1146,6 +1194,7 @@ fn unmapping_base_page_inside_huge_page_splits_and_full_flushes() {
 fn cursor_drop_flushes_single_page() {
     reset_test_state();
     let mut table = new_table();
+    prepare_existing_leaf_tables(&mut table, &[0x1000]);
     let vaddr = VirtAddr::from_usize(0x1000);
     let paddr = PhysAddr::from_usize(0x8000);
 
@@ -1181,6 +1230,7 @@ fn cursor_drop_flushes_single_page() {
 fn cursor_manual_flush_is_idempotent_with_drop() {
     reset_test_state();
     let mut table = new_table();
+    prepare_existing_leaf_tables(&mut table, &[0x2000]);
 
     {
         let mut cursor = table.cursor();
@@ -1208,6 +1258,12 @@ fn cursor_manual_flush_is_idempotent_with_drop() {
 fn cursor_flush_threshold_falls_back_to_full_flush() {
     reset_test_state();
     let mut table = new_table();
+    prepare_existing_leaf_tables(
+        &mut table,
+        &(0..=super::flush::SMALL_FLUSH_THRESHOLD)
+            .map(|page| page * TestMeta::PAGE_SIZE)
+            .collect::<Vec<_>>(),
+    );
 
     {
         let mut cursor = table.cursor();

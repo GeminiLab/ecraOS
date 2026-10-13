@@ -315,6 +315,9 @@ where
             if create_if_not_exists {
                 let table = PageTable::<M, PTE>::alloc_table::<LEVEL, H>()?;
                 *entry = GenericPTE::new_table(table);
+                // A new non-leaf descriptor changes the walk topology. RISC-V address-specific
+                // SFENCE.VMA covers leaf translations only, so invalidate the complete local view.
+                self.pending_flushes += TlbFlush::Full;
                 Ok(PageTable::<M, PTE>::table_of_mut::<LEVEL, H>(table))
             } else {
                 Err(PagingError::NotMapped)

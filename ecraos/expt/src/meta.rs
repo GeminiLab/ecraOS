@@ -232,6 +232,10 @@ pub trait PageTableMeta: Send + Sync {
     ///
     /// `Some(vaddr)` flushes the entry for the mapping containing `vaddr`.
     /// `None` flushes the whole local TLB.
+    ///
+    /// This function only flushes the calling CPU's TLB. If other CPUs use the
+    /// modified mappings, the caller must arrange TLB invalidation on those CPUs
+    /// and wait for it to finish.
     fn flush_tlb(vaddr: Option<Self::VirtAddr>);
 
     // Required constants:

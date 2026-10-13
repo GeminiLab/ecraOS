@@ -1,11 +1,11 @@
 //! AArch64 page-table metadata and TLB operations.
 //!
 //! The module describes AArch64 translation-table geometries for the supported
-//! granules and performs inner-shareable stage-one TLB invalidation.
+//! granules and performs PE-local stage-one TLB invalidation.
 
 use core::marker::PhantomData;
 
-use aarch64_cpu::asm::barrier::{ISH, SY, dsb, isb};
+use aarch64_cpu::asm::barrier::{ISH, ISHST, SY, dsb, isb};
 use memory_addr::VirtAddr;
 
 use crate::meta::{LowerCoverage, PageTableCoverage, PageTableMeta, UpperCoverage};
@@ -126,20 +126,31 @@ where
         }
     };
 
+    /// Invalidates translations on the issuing PE only.
+    ///
+    /// Common acknowledged shootdown owns remote completion independently of the granule.
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        unsafe {
-            match vaddr {
-                Some(vaddr) => core::arch::asm!(
-                    "tlbi vaae1is, {address}",
-                    address = in(reg) vaddr.as_usize() >> 12,
-                    options(nostack)
-                ),
-                None => core::arch::asm!("tlbi vmalle1is", options(nostack)),
-            }
+        flush_local_tlb(vaddr);
+    }
+}
 
-            dsb(ISH);
-            isb(SY);
+/// Invalidates one address or all stage-one translations on the current PE.
+///
+/// DSB orders prior PTE stores before TLBI and completes invalidation before subsequent access.
+/// VAAE1 selects the VA's TTBR regime with VA bits 55:12 for every supported runtime granule.
+pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
+    unsafe {
+        dsb(ISHST);
+        match vaddr {
+            Some(vaddr) => core::arch::asm!(
+                "tlbi vaae1, {address}",
+                address = in(reg) (vaddr.as_usize() >> 12) & ((1usize << 44) - 1),
+                options(nostack)
+            ),
+            None => core::arch::asm!("tlbi vmalle1", options(nostack)),
         }
+        dsb(ISH);
+        isb(SY);
     }
 }
 

@@ -12,7 +12,7 @@ use crate::meta::{PageTableMeta, SymmetricCoverage};
 /// [`Some`] invalidates the entry containing the supplied virtual address, while
 /// [`None`] invalidates all local entries.
 #[inline]
-fn flush_x86_tlb(vaddr: Option<VirtAddr>) {
+pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
     unsafe {
         if let Some(vaddr) = vaddr {
             x86::tlb::flush(vaddr.into());
@@ -50,7 +50,7 @@ impl PageTableMeta for X86Level4PageTableMeta {
     ///
     /// This delegates to the module's common x86-64 invalidation helper.
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_x86_tlb(vaddr);
+        flush_local_tlb(vaddr);
     }
 }
 
@@ -82,6 +82,6 @@ impl PageTableMeta for X86Level5PageTableMeta {
     ///
     /// This delegates to the module's common x86-64 invalidation helper.
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_x86_tlb(vaddr);
+        flush_local_tlb(vaddr);
     }
 }
