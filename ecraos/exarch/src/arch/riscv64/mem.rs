@@ -1,4 +1,10 @@
+//! RISC-V memory discovery and page-table selection.
+//!
+//! Provides the architecture implementation of memory interfaces while leaving page allocation
+//! to the caller-selected allocator.
+
 use ecraldr_base::PlatformBootArg;
+use expalloc_trait::PageAllocator;
 use expt::{
     arch::riscv64::{Sv39PageTableMeta, Sv48PageTableMeta, Sv57PageTableMeta},
     opaque::{OpaquePageTableRoot, OpaquePageTableType},
@@ -204,19 +210,24 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     }
 }
 
-/// Returns the page-table implementation for a RISC-V address-space mode.
-pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+/// Returns the page-table descriptor for a RISC-V mode and allocator.
+///
+/// The selected Sv39, Sv48, or Sv57 format captures `AL` for all operations that access,
+/// allocate, or release page-table pages. Selecting a descriptor does not allocate memory.
+pub fn get_page_table_type<AL: PageAllocator>(
+    mode: VirtAddrSpaceMode,
+) -> OpaquePageTableType<VirtAddr> {
     if let VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
         page_shift: 12,
         va_bits,
     }) = mode
     {
         if va_bits == 57 {
-            OpaquePageTableType::new::<Sv57PageTableMeta, Rv64PTE>()
+            OpaquePageTableType::new::<Sv57PageTableMeta, Rv64PTE, AL>()
         } else if va_bits == 48 {
-            OpaquePageTableType::new::<Sv48PageTableMeta, Rv64PTE>()
+            OpaquePageTableType::new::<Sv48PageTableMeta, Rv64PTE, AL>()
         } else if va_bits == 39 {
-            OpaquePageTableType::new::<Sv39PageTableMeta, Rv64PTE>()
+            OpaquePageTableType::new::<Sv39PageTableMeta, Rv64PTE, AL>()
         } else {
             panic!("Unexpected virtual address space mode: {:?}", mode);
         }

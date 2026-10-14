@@ -1,6 +1,6 @@
-//! AArch64 page-table metadata and TLB operations.
+//! AArch64 page table hierarchy metadata and TLB operations.
 //!
-//! The module describes AArch64 translation-table geometries for the supported
+//! The module describes AArch64 page table hierarchy geometries for the supported
 //! granules and performs PE-local stage-one TLB invalidation.
 
 use core::marker::PhantomData;
@@ -10,7 +10,7 @@ use memory_addr::VirtAddr;
 
 use crate::meta::{LowerCoverage, PageTableCoverage, PageTableMeta, UpperCoverage};
 
-/// A coverage policy supported by an AArch64 translation-table root.
+/// A coverage policy supported by an AArch64 root page table.
 ///
 /// Individual AArch64 roots represent either the lower TTBR0 range or the
 /// upper TTBR1 range. A symmetric root is therefore not a valid AArch64 root.
@@ -19,10 +19,10 @@ pub trait AArch64Coverage: PageTableCoverage<VirtAddr = VirtAddr> + Send + Sync 
 impl AArch64Coverage for LowerCoverage<VirtAddr> {}
 impl AArch64Coverage for UpperCoverage<VirtAddr> {}
 
-/// Metadata for an AArch64 page table.
+/// Metadata for an AArch64 page table hierarchy.
 ///
 /// `BITS` selects the virtual-address width and `C` selects the type-level
-/// coverage policy represented by the table.
+/// coverage policy represented by the page table hierarchy.
 pub struct AArch64PageTableMeta<
     const BITS: usize,
     const PAGE_OFFSET_BITS: usize,
@@ -42,15 +42,25 @@ pub const TNSZ_MIN: usize = 12;
 /// space.
 pub const TNSZ_MAX: usize = 39;
 /// The size of AArch64 virtual addresses in bits.
+///
+/// The semantic virtual-address representation contains 64 bits.
 pub const ADDR_BITS: usize = 64;
 
-/// The base-2 logarithm of the size of a 4 KiB page (12).
+/// The base-2 logarithm of the size of a 4 KiB page.
+///
+/// This granule uses twelve offset bits below the page table indices.
 pub const PAGE_OFFSET_BITS_4KIB: usize = 12;
-/// The base-2 logarithm of the size of a 16 KiB page (14).
+/// The base-2 logarithm of the size of a 16 KiB page.
+///
+/// This granule uses fourteen offset bits below the page table indices.
 pub const PAGE_OFFSET_BITS_16KIB: usize = 14;
-/// The base-2 logarithm of the size of a 64 KiB page (16).
+/// The base-2 logarithm of the size of a 64 KiB page.
+///
+/// This granule uses sixteen offset bits below the page table indices.
 pub const PAGE_OFFSET_BITS_64KIB: usize = 16;
-/// The base-2 logarithm of the size of a page-table entry (3 for 8-byte entries).
+/// The base-2 logarithm of the size of a page table entry (3 for 8-byte entries).
+///
+/// Each page table entry occupies eight bytes for every supported granule.
 pub const PAGE_TABLE_ENTRY_SIZE_BITS: usize = 3;
 
 impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, C>
@@ -58,9 +68,10 @@ impl<const BITS: usize, const PAGE_OFFSET_BITS: usize, C>
 where
     C: AArch64Coverage,
 {
-    /// The number of virtual-address bits consumed by each level in the page
-    /// table. This equals to the base-2 logarithm of the number of entries per
-    /// page table level.
+    /// The index width of a full page table at each hierarchy level.
+    ///
+    /// This is the base-2 logarithm of the number of entries per page table.
+    /// The root page table may use fewer bits when the address width requires it.
     const EACH_LEVEL_BITS: usize = {
         match PAGE_OFFSET_BITS {
             PAGE_OFFSET_BITS_4KIB | PAGE_OFFSET_BITS_16KIB | PAGE_OFFSET_BITS_64KIB => {
@@ -71,6 +82,8 @@ where
     };
 
     /// The number of virtual-address bits used for the page index.
+    ///
+    /// This subtracts the page offset from the full hierarchy's address width.
     const PAGE_INDEX_BITS: usize = BITS.strict_sub(PAGE_OFFSET_BITS);
 }
 
@@ -115,7 +128,9 @@ where
         result
     } where [(); Self::LEVELS]: Sized;
 
-    /// The type-level coverage policy for this translation-table root.
+    /// The type-level coverage policy for this page table hierarchy.
+    ///
+    /// `C` selects the lower or upper canonical address range.
     type Coverage = C;
 
     const MAX_PAGE_LEVEL: usize = {
@@ -154,32 +169,50 @@ pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
     }
 }
 
-/// AArch64 page-table metadata with a 4 KiB granule.
+/// AArch64 page table hierarchy metadata with a 4 KiB granule.
+///
+/// `BITS` and `C` retain the selected address width and coverage policy.
 pub type AArch64PageTableMeta4KiB<const BITS: usize, C> =
     AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_4KIB, C>;
-/// AArch64 page-table metadata with a 16 KiB granule.
+/// AArch64 page table hierarchy metadata with a 16 KiB granule.
+///
+/// `BITS` and `C` retain the selected address width and coverage policy.
 pub type AArch64PageTableMeta16KiB<const BITS: usize, C> =
     AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_16KIB, C>;
-/// AArch64 page-table metadata with a 64 KiB granule.
+/// AArch64 page table hierarchy metadata with a 64 KiB granule.
+///
+/// `BITS` and `C` retain the selected address width and coverage policy.
 pub type AArch64PageTableMeta64KiB<const BITS: usize, C> =
     AArch64PageTableMeta<BITS, PAGE_OFFSET_BITS_64KIB, C>;
 
-/// AArch64 4 KiB lower-half page-table metadata.
+/// AArch64 4 KiB lower-half page table hierarchy metadata.
+///
+/// The lower coverage policy selects the TTBR0 address range.
 pub type AArch64PageTableMeta4KiBLower<const BITS: usize> =
     AArch64PageTableMeta4KiB<BITS, LowerCoverage<VirtAddr>>;
-/// AArch64 4 KiB upper-half page-table metadata.
+/// AArch64 4 KiB upper-half page table hierarchy metadata.
+///
+/// The upper coverage policy selects the TTBR1 address range.
 pub type AArch64PageTableMeta4KiBUpper<const BITS: usize> =
     AArch64PageTableMeta4KiB<BITS, UpperCoverage<VirtAddr>>;
-/// AArch64 16 KiB lower-half page-table metadata.
+/// AArch64 16 KiB lower-half page table hierarchy metadata.
+///
+/// The lower coverage policy selects the TTBR0 address range.
 pub type AArch64PageTableMeta16KiBLower<const BITS: usize> =
     AArch64PageTableMeta16KiB<BITS, LowerCoverage<VirtAddr>>;
-/// AArch64 16 KiB upper-half page-table metadata.
+/// AArch64 16 KiB upper-half page table hierarchy metadata.
+///
+/// The upper coverage policy selects the TTBR1 address range.
 pub type AArch64PageTableMeta16KiBUpper<const BITS: usize> =
     AArch64PageTableMeta16KiB<BITS, UpperCoverage<VirtAddr>>;
-/// AArch64 64 KiB lower-half page-table metadata.
+/// AArch64 64 KiB lower-half page table hierarchy metadata.
+///
+/// The lower coverage policy selects the TTBR0 address range.
 pub type AArch64PageTableMeta64KiBLower<const BITS: usize> =
     AArch64PageTableMeta64KiB<BITS, LowerCoverage<VirtAddr>>;
-/// AArch64 64 KiB upper-half page-table metadata.
+/// AArch64 64 KiB upper-half page table hierarchy metadata.
+///
+/// The upper coverage policy selects the TTBR1 address range.
 pub type AArch64PageTableMeta64KiBUpper<const BITS: usize> =
     AArch64PageTableMeta64KiB<BITS, UpperCoverage<VirtAddr>>;
 
@@ -188,7 +221,9 @@ mod tests {
     use super::AArch64PageTableMeta64KiBLower;
     use crate::meta::PageTableMeta;
 
-    /// Checks block sizes for a non-uniform 64 KiB page-table hierarchy.
+    /// Checks block sizes for a non-uniform 64 KiB page table hierarchy.
+    ///
+    /// A partially used root page table must not alter lower-level mapping sizes.
     #[test]
     fn computes_64k_level_page_sizes() {
         type Meta = AArch64PageTableMeta64KiBLower<48>;
@@ -200,7 +235,7 @@ mod tests {
     }
 }
 
-/// Metadata for AArch64 4 KiB, four-level, 48-bit translation tables.
+/// Metadata for AArch64 4 KiB, four-level, 48-bit page table hierarchies.
 ///
 /// Levels zero through two may contain leaf mappings, providing 4 KiB, 2 MiB,
 /// and 1 GiB mapping sizes.

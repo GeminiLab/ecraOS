@@ -1,4 +1,4 @@
-//! `x86_64` architecture-specific functions and types.
+//! x86_64 page table hierarchy metadata and TLB operations.
 //!
 //! The module describes standard four-level and five-level paging with 4 KiB
 //! base pages and provides local TLB invalidation.
@@ -22,7 +22,7 @@ pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
     }
 }
 
-/// Metadata for standard `x86_64` four-level page tables.
+/// Metadata for standard `x86_64` four-level page table hierarchies.
 ///
 /// The format addresses 48 virtual bits and supports leaf mappings up to 1 GiB
 /// at level two.
@@ -54,7 +54,7 @@ impl PageTableMeta for X86Level4PageTableMeta {
     }
 }
 
-/// Metadata for standard `x86_64` five-level page tables.
+/// Metadata for standard `x86_64` five-level page table hierarchies.
 ///
 /// The format addresses 57 virtual bits and supports leaf mappings up to 1 GiB
 /// at level two.

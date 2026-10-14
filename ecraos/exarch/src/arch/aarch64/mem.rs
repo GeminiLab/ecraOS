@@ -1,4 +1,7 @@
 //! AArch64 translation-table metadata and early memory discovery.
+//!
+//! Selects translation geometry and page-table descriptors specialized with the caller's page
+//! allocator, including independent lower and upper translation roots.
 
 use core::arch::asm;
 
@@ -7,6 +10,7 @@ use aarch64_cpu::{
     registers::{ID_AA64MMFR0_EL1, ID_AA64MMFR2_EL1, Readable, TCR_EL1, TTBR0_EL1, TTBR1_EL1},
 };
 use ecraldr_base::PlatformBootArg;
+use expalloc_trait::PageAllocator;
 use expt::opaque::{OpaquePageTableRoot, OpaquePageTableType};
 use fdt_rs::{
     base::DevTree,
@@ -461,8 +465,13 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     temp_pt::switch_to_temporary_page_tables(mode, tcr_for_mode(mode));
 }
 
-/// Returns the page-table implementation for an AArch64 mode.
-pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+/// Returns the page-table descriptor for an AArch64 mode and allocator.
+///
+/// The selected single-root or dual-root geometry captures `AL` for all operations that access,
+/// allocate, or release page-table pages. Selecting a descriptor does not allocate memory.
+pub fn get_page_table_type<AL: PageAllocator>(
+    mode: VirtAddrSpaceMode,
+) -> OpaquePageTableType<VirtAddr> {
     if !is_mode_supported(mode) {
         panic!("Unsupported AArch64 virtual address-space mode: {mode:?}");
     }
@@ -479,7 +488,7 @@ pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtA
     macro_rules! match_half_type {
         ([$(($page_shift:literal, $va_bits:literal)),+], $page_shift_var:ident, $va_bits_var:ident, $half:ident, $mode:ident) => {
             match ($page_shift_var, $va_bits_var) {
-                $(($page_shift, $va_bits) => OpaquePageTableType::new::<A<$va_bits, $page_shift, $half<VirtAddr>>, A64PTE>(),)+
+                $(($page_shift, $va_bits) => OpaquePageTableType::new::<A<$va_bits, $page_shift, $half<VirtAddr>>, A64PTE, AL>(),)+
                 _ => panic!("Unsupported AArch64 virtual address-space mode: {:?}", $mode),
             }
         };
@@ -495,6 +504,7 @@ pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtA
                             A64PTE,
                             A<$upper_va_bits, $upper_page_shift, U<VirtAddr>>,
                             A64PTE,
+                            AL,
                         >(),
                 )+
                 _ => panic!("Unsupported AArch64 virtual address-space mode: {:?}", $mode),

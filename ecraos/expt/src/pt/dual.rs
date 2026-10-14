@@ -1,11 +1,10 @@
-//! Dual-root page tables.
+//! Dual-root multi-level page table implementation.
 //!
-//! This module contains the architecture-independent representation of a pair
-//! of page-table roots. AArch64 uses one root for the lower address range and a
-//! second root for the upper address range.
+//! This module provides an architecture-independent Rust abstraction over two independent
+//! page table hierarchies. AArch64 uses one hierarchy for the lower address range and
+//! a second hierarchy for the upper address range.
 
-use expalloc_trait::{DynPageAllocator, PageAllocator};
-use maybe_non_generic::maybe_non_generic;
+use expalloc_trait::PageAllocator;
 use memory_addr::PhysAddr;
 use page_table_entry::{GenericPTE, MappingFlags};
 
@@ -18,77 +17,109 @@ use crate::{
     },
 };
 
-/// The physical roots of a dual page table.
+/// The physical root addresses of two page table hierarchies.
+///
+/// Copying these addresses does not change either hierarchy's table-frame lifetime.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DualPageTableRoot {
     /// The root used for lower virtual addresses.
+    ///
+    /// This address alone does not keep the lower page table hierarchy alive.
     pub lower: PhysAddr,
     /// The root used for upper virtual addresses.
+    ///
+    /// This address alone does not keep the upper page table hierarchy alive.
     pub upper: PhysAddr,
 }
 
-/// A pair of page tables covering the lower and upper virtual-address ranges.
+/// A dual-root multi-level page table for lower and upper virtual-address ranges.
 ///
-/// The type-level constraints make it impossible to construct a dual table from
-/// two symmetric roots or from roots using different virtual-address types. The
-/// two roots may still use different page-table geometries and entry types.
+/// The type-level constraints prevent combining symmetric roots or roots with
+/// different virtual-address types. The hierarchies may use different geometries
+/// and entry types. Both must form valid trees with disjoint table-frame
+/// allocations. Both roots use `AL` for their table frames. See the crate-level
+/// documentation for table-frame deallocation and hardware-use requirements.
 ///
 /// Each `map` and `unmap` operation is routed to the root selected by its
 /// starting virtual address. An individual range must remain within one
 /// canonical side and cannot cross the gap between the lower and upper ranges.
-pub struct DualPageTable<A, ML, PTEL, MU, PTEU>
+pub struct DualPageTable<A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
+    [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS]: Sized,
+    [(); MU::LEVELS - 1]: Sized,
 {
-    /// The lower-address translation root.
-    lower: PageTable<ML, PTEL>,
-    /// The upper-address translation root.
-    upper: PageTable<MU, PTEU>,
+    /// The lower-address multi-level page table.
+    ///
+    /// It manages the lower page table hierarchy through the allocator selected by `AL`.
+    lower: PageTable<ML, PTEL, AL>,
+    /// The upper-address multi-level page table.
+    ///
+    /// It manages the upper page table hierarchy through the allocator selected by `AL`.
+    upper: PageTable<MU, PTEU, AL>,
 }
 
-/// A mutating cursor over a dual page table.
-pub struct DualPageTableCursor<'a, A, ML, PTEL, MU, PTEU>
+/// A mutating cursor over lower and upper page table hierarchies.
+///
+/// The cursor batches local TLB invalidations for both roots. Its mutable borrow
+/// excludes other Rust mutations through this value but does not synchronize
+/// hardware page walks or remote TLBs.
+pub struct DualPageTableCursor<'a, A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
+    [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS]: Sized,
+    [(); MU::LEVELS - 1]: Sized,
 {
     /// The cursor for the lower-address root.
-    lower: PageTableCursor<'a, ML, PTEL>,
+    ///
+    /// Its destruction performs pending local invalidations for the lower page table hierarchy.
+    lower: PageTableCursor<'a, ML, PTEL, AL>,
     /// The cursor for the upper-address root.
-    upper: PageTableCursor<'a, MU, PTEU>,
+    ///
+    /// Its destruction performs pending local invalidations for the upper page table hierarchy.
+    upper: PageTableCursor<'a, MU, PTEU, AL>,
 }
 
-impl<A, ML, PTEL, MU, PTEU> DualPageTable<A, ML, PTEL, MU, PTEU>
+/// Dual-root construction, storage access, and table-frame lifecycle.
+///
+/// Both roots use the same static allocator type.
+impl<A, ML, PTEL, MU, PTEU, AL> DualPageTable<A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
+    [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS]: Sized,
+    [(); MU::LEVELS - 1]: Sized,
 {
-    /// Creates a dual page-table handle for existing roots.
+    /// Constructs a dual-root multi-level page table from existing lower and upper hierarchies.
     ///
     /// This function does not inspect either root. The caller must ensure that
-    /// both physical addresses identify valid page-table roots for their
+    /// both physical addresses identify valid page table roots for their
     /// respective metadata types.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that both roots in `root` are valid physical
-    /// addresses for the selected page-table formats.
+    /// Each root must satisfy [`PageTable::new_at`]. The two page table hierarchies
+    /// must not share table frames.
     pub unsafe fn new_at(root: DualPageTableRoot) -> Self {
         Self {
             lower: unsafe { PageTable::new_at(root.lower) },
@@ -96,39 +127,49 @@ where
         }
     }
 
-    /// Creates a dual page-table handle from two existing roots.
+    /// Constructs a dual-root multi-level page table from separate root addresses.
     ///
     /// This is a convenience wrapper around [`Self::new_at`].
     ///
     /// # Safety
     ///
-    /// The caller must ensure that both physical addresses identify valid roots
-    /// for their respective metadata types.
+    /// Same as [`Self::new_at`].
     pub unsafe fn new_at_roots(lower: PhysAddr, upper: PhysAddr) -> Self {
         unsafe { Self::new_at(DualPageTableRoot { lower, upper }) }
     }
 
-    /// Allocates and initializes both page-table roots through the specified
-    /// page allocator.
+    /// Allocates and initializes both root page tables through `AL`.
     ///
     /// The roots have the size required by the highest level in `ML` and `MU`
-    /// and are zero-initialized before the handle is returned.
-    #[maybe_non_generic(
-        new_alloc_dyn,
-        type(H => handler: &DynPageAllocator),
-        fn(PageTable::new_alloc => PageTable::new_alloc_dyn)
-    )]
-    pub fn new_alloc<H: PageAllocator>() -> PagingResult<A, Self>
+    /// and are zero-initialized before the value is returned.
+    /// If the upper-root allocation fails, the lower root is deallocated.
+    pub fn new_alloc() -> PagingResult<A, Self>
     where
         [(); ML::LEVELS - 1]: Sized,
         [(); MU::LEVELS - 1]: Sized,
     {
-        let lower = PageTable::<ML, PTEL>::new_alloc::<H>()?;
-        let upper = PageTable::<MU, PTEU>::new_alloc::<H>()?;
+        let lower = PageTable::<ML, PTEL, AL>::new_alloc()?;
+        let upper = PageTable::<MU, PTEU, AL>::new_alloc()?;
         Ok(Self { lower, upper })
     }
 
-    /// Returns both physical roots of the dual page table.
+    /// Consumes the value without deallocating table frames and returns both roots.
+    ///
+    /// Another dual-root multi-level page table can use the roots if its allocator can
+    /// access and deallocate every table frame. Otherwise, the caller must arrange
+    /// their deallocation. The allocator type may differ from `AL` if those
+    /// requirements hold.
+    pub fn leak(self) -> DualPageTableRoot {
+        let Self { lower, upper } = self;
+        DualPageTableRoot {
+            lower: lower.leak(),
+            upper: upper.leak(),
+        }
+    }
+
+    /// Returns both physical root addresses without changing table-frame lifetimes.
+    ///
+    /// This value must remain alive while its table frames are in use.
     pub const fn root(&self) -> DualPageTableRoot {
         DualPageTableRoot {
             lower: self.lower.root(),
@@ -136,8 +177,10 @@ where
         }
     }
 
-    /// Creates a cursor for batched mutations of both roots.
-    pub fn cursor(&mut self) -> DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU> {
+    /// Creates a cursor for batched local invalidations and mutations of both roots.
+    ///
+    /// The mutable borrow does not synchronize hardware page walks or remote TLBs.
+    pub fn cursor(&mut self) -> DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU, AL> {
         let Self { lower, upper } = self;
         DualPageTableCursor {
             lower: lower.cursor(),
@@ -145,98 +188,155 @@ where
         }
     }
 
-    /// Returns the lower-address page-table root.
-    pub const fn lower(&self) -> &PageTable<ML, PTEL> {
+    /// Returns the lower-address multi-level page table.
+    ///
+    /// The returned reference borrows the single-root value that manages the lower hierarchy.
+    pub const fn lower(&self) -> &PageTable<ML, PTEL, AL> {
         &self.lower
     }
 
-    /// Returns the upper-address page-table root.
-    pub const fn upper(&self) -> &PageTable<MU, PTEU> {
+    /// Returns the upper-address multi-level page table.
+    ///
+    /// The returned reference borrows the single-root value that manages the upper hierarchy.
+    pub const fn upper(&self) -> &PageTable<MU, PTEU, AL> {
         &self.upper
     }
 
-    /// Returns the mutable lower-address page-table root.
-    pub fn lower_mut(&mut self) -> &mut PageTable<ML, PTEL> {
+    /// Returns a mutable borrow of the lower-address multi-level page table.
+    ///
+    /// This borrow does not synchronize hardware page walks or remote TLBs.
+    pub fn lower_mut(&mut self) -> &mut PageTable<ML, PTEL, AL> {
         &mut self.lower
     }
 
-    /// Returns the mutable upper-address page-table root.
-    pub fn upper_mut(&mut self) -> &mut PageTable<MU, PTEU> {
+    /// Returns a mutable borrow of the upper-address multi-level page table.
+    ///
+    /// This borrow does not synchronize hardware page walks or remote TLBs.
+    pub fn upper_mut(&mut self) -> &mut PageTable<MU, PTEU, AL> {
         &mut self.upper
     }
 
-    /// Swaps the lower-address page-table root with the given one, returning the old root.
-    pub fn swap_lower(&mut self, other: PageTable<ML, PTEL>) -> PageTable<ML, PTEL> {
+    /// Replaces the lower-address multi-level page table and returns the previous value.
+    ///
+    /// The returned value contains the previous page table hierarchy.
+    pub fn swap_lower(&mut self, other: PageTable<ML, PTEL, AL>) -> PageTable<ML, PTEL, AL> {
         core::mem::replace(&mut self.lower, other)
     }
 
-    /// Swaps the upper-address page-table root with the given one, returning the old root.
-    pub fn swap_upper(&mut self, other: PageTable<MU, PTEU>) -> PageTable<MU, PTEU> {
+    /// Replaces the upper-address multi-level page table and returns the previous value.
+    ///
+    /// The returned value contains the previous page table hierarchy.
+    pub fn swap_upper(&mut self, other: PageTable<MU, PTEU, AL>) -> PageTable<MU, PTEU, AL> {
         core::mem::replace(&mut self.upper, other)
     }
 }
 
-impl<A, ML, PTEL, MU, PTEU> PageTableLike for DualPageTable<A, ML, PTEL, MU, PTEU>
+/// The common interface for dual-root multi-level page tables.
+///
+/// Operations delegate to the concrete methods with the same lifecycle contract.
+impl<A, ML, PTEL, MU, PTEU, AL> PageTableLike for DualPageTable<A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
     [(); MU::LEVELS]: Sized,
     [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS - 1]: Sized,
 {
+    /// The virtual-address type shared by both roots.
+    ///
+    /// Both metadata types require the same semantic address representation.
     type VirtAddr = A;
+    /// The pair of physical root addresses.
+    ///
+    /// Copying these addresses does not change either hierarchy's table-frame lifetime.
     type Root = DualPageTableRoot;
+    /// The cursor borrowing both multi-level page tables.
+    ///
+    /// It uses the metadata and entry types of the corresponding roots.
     type Cursor<'a>
-        = DualPageTableCursor<'a, A, ML, PTEL, MU, PTEU>
+        = DualPageTableCursor<'a, A, ML, PTEL, MU, PTEU, AL>
     where
         Self: 'a;
+    /// The allocator for both hierarchies' table frames.
+    ///
+    /// Table access, allocation, and deallocation use `AL`.
+    type Allocator = AL;
 
+    /// Constructs a dual-root multi-level page table from existing lower and upper hierarchies.
+    ///
+    /// The caller must meet the safety requirements of [`DualPageTable::new_at`].
     unsafe fn new_at(root: Self::Root) -> Self {
         unsafe { Self::new_at(root) }
     }
 
+    /// Allocates and initializes both root page tables.
+    ///
+    /// This delegates to [`DualPageTable::new_alloc`].
+    fn new_alloc() -> PagingResult<Self::VirtAddr, Self> {
+        Self::new_alloc()
+    }
+
+    /// Consumes the value while retaining both hierarchies' table frames.
+    ///
+    /// This delegates to [`DualPageTable::leak`] and returns the roots for transfer.
+    fn leak(self) -> Self::Root {
+        self.leak()
+    }
+
+    /// Returns both root addresses without changing table-frame lifetimes.
+    ///
+    /// This delegates to [`DualPageTable::root`].
     fn root(&self) -> Self::Root {
         self.root()
     }
 
-    fn new_alloc<H: PageAllocator>() -> PagingResult<Self::VirtAddr, Self> {
-        Self::new_alloc::<H>()
-    }
-
-    fn new_alloc_dyn(handler: &DynPageAllocator) -> PagingResult<Self::VirtAddr, Self> {
-        Self::new_alloc_dyn(handler)
-    }
-
+    /// Creates a cursor borrowing both roots.
+    ///
+    /// This delegates to [`DualPageTable::cursor`].
     fn cursor(&mut self) -> Self::Cursor<'_> {
         self.cursor()
     }
 }
 
-/// The side of a dual page table that a virtual address belongs to.
+/// The side of dual page table hierarchies that a virtual address belongs to.
 ///
 /// For internal use only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DualPageTableSide {
-    /// The lower-address side of the dual page table.
+    /// The lower-address page table hierarchy.
+    ///
+    /// Operations use the lower root for this side.
     Lower,
-    /// The upper-address side of the dual page table.
+    /// The upper-address page table hierarchy.
+    ///
+    /// Operations use the upper root for this side.
     Upper,
 }
 
-impl<A, ML, PTEL, MU, PTEU> DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU>
+/// Selection of a root from a virtual address.
+///
+/// Canonical coverage determines which root receives each operation.
+impl<A, ML, PTEL, MU, PTEU, AL> DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
+    [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS]: Sized,
+    [(); MU::LEVELS - 1]: Sized,
 {
+    /// Selects the lower or upper page table hierarchy for a canonical virtual address.
+    ///
+    /// Addresses accepted by neither root, or by both roots, are rejected.
     fn side(&self, vaddr: A) -> PagingResult<A, DualPageTableSide> {
         let lower =
             <ML::Coverage as PageTableCoverage>::validate_and_truncate_vaddr(vaddr, ML::VA_BITS)
@@ -253,19 +353,36 @@ where
     }
 }
 
-impl<A, ML, PTEL, MU, PTEU> PageTableCursorLike for DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU>
+/// The common mutation interface for a dual-root cursor.
+///
+/// Each mapping operation selects a root from its starting virtual address.
+impl<A, ML, PTEL, MU, PTEU, AL> PageTableCursorLike
+    for DualPageTableCursor<'_, A, ML, PTEL, MU, PTEU, AL>
 where
     A: VirtAddr,
     ML: PageTableMeta<VirtAddr = A, Coverage = LowerCoverage<A>>,
     MU: PageTableMeta<VirtAddr = A, Coverage = UpperCoverage<A>>,
     PTEL: GenericPTE,
     PTEU: GenericPTE,
+    AL: PageAllocator,
     [(); ML::LEVELS]: Sized,
+    [(); ML::LEVELS - 1]: Sized,
     [(); MU::LEVELS]: Sized,
+    [(); MU::LEVELS - 1]: Sized,
 {
+    /// The virtual-address type shared by both roots.
+    ///
+    /// It matches the address type of the borrowed dual-root multi-level page table.
     type VirtAddr = A;
+    /// The allocator for both borrowed hierarchies' table frames.
+    ///
+    /// Intermediate page table frame allocations use `AL`.
+    type Allocator = AL;
 
-    fn map<H: PageAllocator>(
+    /// Maps a virtual range through the root selected by its starting address.
+    ///
+    /// Mapped data frames remain caller-managed.
+    fn map(
         &mut self,
         vaddr: A,
         paddr: PhysAddr,
@@ -273,39 +390,24 @@ where
         flags: MappingFlags,
     ) -> PagingResult<A> {
         match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.map::<H>(vaddr, paddr, size, flags),
-            DualPageTableSide::Upper => self.upper.map::<H>(vaddr, paddr, size, flags),
+            DualPageTableSide::Lower => self.lower.map(vaddr, paddr, size, flags),
+            DualPageTableSide::Upper => self.upper.map(vaddr, paddr, size, flags),
         }
     }
 
-    fn map_dyn(
-        &mut self,
-        vaddr: A,
-        paddr: PhysAddr,
-        size: usize,
-        flags: MappingFlags,
-        handler: &DynPageAllocator,
-    ) -> PagingResult<A> {
+    /// Removes mappings through the root selected by the starting address.
+    ///
+    /// This does not deallocate the mapped data frames.
+    fn unmap(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
         match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.map_dyn(vaddr, paddr, size, flags, handler),
-            DualPageTableSide::Upper => self.upper.map_dyn(vaddr, paddr, size, flags, handler),
+            DualPageTableSide::Lower => self.lower.unmap(vaddr, size),
+            DualPageTableSide::Upper => self.upper.unmap(vaddr, size),
         }
     }
 
-    fn unmap<H: PageAllocator>(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
-        match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.unmap::<H>(vaddr, size),
-            DualPageTableSide::Upper => self.upper.unmap::<H>(vaddr, size),
-        }
-    }
-
-    fn unmap_dyn(&mut self, vaddr: A, size: usize, handler: &DynPageAllocator) -> PagingResult<A> {
-        match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.unmap_dyn(vaddr, size, handler),
-            DualPageTableSide::Upper => self.upper.unmap_dyn(vaddr, size, handler),
-        }
-    }
-
+    /// Flushes both cursors' accumulated local invalidations.
+    ///
+    /// Remote invalidation and hardware synchronization remain the caller's responsibility.
     fn flush(&mut self) {
         self.lower.flush();
         self.upper.flush();

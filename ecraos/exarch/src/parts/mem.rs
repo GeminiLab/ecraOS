@@ -1,6 +1,12 @@
+//! Architecture-independent memory interfaces.
+//!
+//! Defines physical memory regions, supported address-space modes, and architecture-selected
+//! page-table descriptors specialized with the caller's page allocator.
+
 use core::{fmt, num::NonZeroU8};
 
 use ecraldr_base::PlatformBootArg;
+use expalloc_trait::PageAllocator;
 use expt::opaque::{OpaquePageTableRoot, OpaquePageTableType};
 use heapless::Vec as HeaplessVec;
 use look_at::look_at;
@@ -366,16 +372,18 @@ look_at! {
     /// platform.
     pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
 
-    /// Gets the [`OpaquePageTableType`] for the specified virtual address space mode.
+    /// Gets the page-table descriptor for the specified mode and allocator.
     ///
-    /// When this function is called, allocation is not available.
+    /// The descriptor statically specializes its allocation, mutation, and destruction operations
+    /// for `AL`. The caller chooses an allocator that can access and release every owned table
+    /// page. This function only selects the descriptor and does not allocate memory.
     ///
     /// # Panics
     ///
     /// This function will and should panic if the specified mode is not in the
     /// list returned by [`virt_addr_space_modes`], and not supported by the
     /// platform.
-    pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
+    pub fn get_page_table_type<AL: PageAllocator>(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
 
     /// Sets the page table root for the current virtual address space mode.
     ///

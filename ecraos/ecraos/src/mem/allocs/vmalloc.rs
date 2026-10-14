@@ -247,7 +247,7 @@ impl VMAllocRange {
 
             if self.pages.is_mapped(index) {
                 mem::vmm::with_page_table(|pt| {
-                    pt.unmap::<mem::vmm::TmpGoodPagingHandler>(virt_addr, page_size)
+                    pt.unmap(virt_addr, page_size)
                 }).map_err(|e| {
                     error!("failed to unmap vmalloc page at {virt_addr:#x} while updating range {range:#x}: {e:?}");
                     VMAllocError::PageTableError
@@ -321,6 +321,7 @@ impl VMAllocRange {
         Ok(())
     }
 
+    /// Maps backing pages into a reserved subrange with rollback on failure.
     fn map_inner(
         &mut self,
         range: VirtAddrRange,
@@ -350,9 +351,7 @@ impl VMAllocRange {
             // - Err((e, None)) if the physical address could not be obtained.
             // - Err((e, Some(pa))) if the page-table mapping failed.
             let result = match pa_getter(page_index_range.start, index) {
-                Ok(pa) => match mem::vmm::with_page_table(|pt| {
-                    pt.map::<mem::vmm::TmpGoodPagingHandler>(va, pa, page_size, flags)
-                }) {
+                Ok(pa) => match mem::vmm::with_page_table(|pt| pt.map(va, pa, page_size, flags)) {
                     Ok(_) => Ok(pa),
                     Err(e) => {
                         error!("failed to map vmalloc page at {va:#x} ({pa:#x}): {e:?}");
@@ -381,10 +380,9 @@ impl VMAllocRange {
                     for previous_index in previous_range {
                         let virt_addr = self.non_guard_range.start + previous_index * page_size;
 
-                        mem::vmm::with_page_table(|pt| {
-                            pt.unmap::<mem::vmm::TmpGoodPagingHandler>(virt_addr, page_size)
-                        })
-                        .expect("failed to roll back vmalloc page-table mapping at {virt_addr:#x}");
+                        mem::vmm::with_page_table(|pt| pt.unmap(virt_addr, page_size)).expect(
+                            "failed to roll back vmalloc page-table mapping at {virt_addr:#x}",
+                        );
                     }
 
                     // Determine the index range to roll back the physical page assignments.

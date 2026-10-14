@@ -1,4 +1,6 @@
-//! TLB flush management for page-table mutations.
+//! TLB flush management for page table hierarchy mutations.
+//!
+//! Cursor operations accumulate local invalidations until explicit or implicit flush.
 
 use core::ops::{Add, AddAssign};
 
@@ -6,14 +8,13 @@ use heapless::Vec as HeaplessVec;
 
 use crate::meta::PageTableMeta;
 
-/// The maximum number of individual page flush requests retained before a full
-/// TLB flush.
+/// The capacity for individual mapping invalidations before a full flush.
 ///
 /// Recording one more page than this capacity promotes the pending operation to
 /// a full local TLB flush.
 pub(crate) const SMALL_FLUSH_THRESHOLD: usize = 32;
 
-/// A TLB invalidation requested by one page-table mutation.
+/// A TLB invalidation requested by one page table hierarchy mutation.
 ///
 /// Requests can leave the TLB unchanged, invalidate one virtual mapping, or
 /// invalidate the entire local TLB.
@@ -28,8 +29,8 @@ pub(crate) enum TlbFlush<M: PageTableMeta> {
     Page(M::VirtAddr),
     /// Invalidation of the entire local TLB.
     ///
-    /// This conservative request is used for changes involving huge mappings or
-    /// too many individual pages.
+    /// This conservative request is used for changes involving huge mappings or newly installed
+    /// child page table entries. Accumulating too many page requests also requires a full flush.
     Full,
 }
 
@@ -56,15 +57,15 @@ impl<M: PageTableMeta> AddAssign<TlbFlush<M>> for PendingTlbFlushes<M> {
     /// Merges one invalidation request into the pending state.
     ///
     /// Page requests accumulate until the bounded collection is full. A full
-    /// request, or an overflowing page collection, permanently promotes the state
-    /// to [`PendingTlbFlushes::Full`].
+    /// request, or an overflowing page collection, promotes the state to
+    /// [`PendingTlbFlushes::Full`] until the next flush clears it.
     fn add_assign(&mut self, rhs: TlbFlush<M>) {
         match rhs {
             TlbFlush::None => {}
             TlbFlush::Page(vaddr) => match self {
                 PendingTlbFlushes::None => {
                     let mut pages = HeaplessVec::new();
-                    // This is safe because the collection is initially empty and the push cannot fail.
+                    // The collection is initially empty, so this push cannot fail.
                     let _ = pages.push(vaddr);
                     *self = PendingTlbFlushes::Pages(pages);
                 }

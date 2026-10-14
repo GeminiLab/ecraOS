@@ -69,6 +69,7 @@ fn phys_addr_is_known(addr: PhysAddr) -> bool {
     regions.iter().any(|region| region.range.contains(addr))
 }
 
+/// Initializes early memory management and installs the kernel page-table.
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const ecraldr_base::KernelEntryType,
     hart_id: usize,
@@ -92,21 +93,21 @@ pub fn init_and_enable_vmm(
     // used again.
 
     // Determine the layout of the virtual address space.
-    vmm::init_vmm_layout();
+    vmm::init_vmm_layout::<early::EarlyPageAllocatorImpl>();
 
     // Initialize the early page allocator using the final region table. It depends on the page
     // size info.
     early::init_early_page_allocator();
 
     // Create the page table and early mappings. It depends on the early page allocator.
-    vmm::init_vmm_mapping_early::<early::EarlyPageAllocatorImpl>(pmm::phys_mem_regions());
+    vmm::init_vmm_mapping_early(pmm::phys_mem_regions());
 
     // Allocate the BSP stack area.
     early::init_bsp_stack(vmm::vmalloc_base());
     let bsp_stack = early::bsp_stack();
 
     vmm::with_page_table(|pt| {
-        pt.map::<early::EarlyPageAllocatorImpl>(
+        pt.map(
             bsp_stack.alloc_range.start,
             bsp_stack.pa_range.start,
             bsp_stack.alloc_range.size(),
@@ -147,6 +148,11 @@ pub fn init_and_enable_vmm(
     }
 }
 
+/// Initializes formal allocators after enabling the kernel virtual address space.
+///
+/// The physical allocator first records early allocations as allocated pages, including the active
+/// page-table tree. Its owner then transfers to the formal allocator before later initialization
+/// can create virtual mappings, while the identity map remains available for secondary CPU startup.
 pub fn init_after_enable_vmm() {
     print_kernel_location("Kernel location:");
 
@@ -155,6 +161,10 @@ pub fn init_after_enable_vmm() {
     // Initialize the page allocator.
     // TODO: recycle the loader memory region (as well as the bootstack).
     allocs::palloc::init_palloc();
+
+    // The early allocator is now destroyed. Transfer the active tree to the formal allocator and
+    // refresh relocated method pointers before any later initialization can use vmalloc.
+    vmm::use_formal_page_table_allocator();
 
     // Initialize the small object allocator.
     allocs::malloc::init_malloc_current_cpu();
@@ -180,8 +190,11 @@ pub fn init_ap() {
 }
 
 /// Removes the temporary identity mappings created during early boot.
+///
+/// Runs after secondary CPUs finish early startup. Page-table operations use the formal allocator
+/// captured by the owner during post-relocation memory initialization.
 pub fn remove_identical_mappings() {
-    vmm::remove_identical_mapping::<vmm::TmpGoodPagingHandler>(pmm::phys_mem_regions());
+    vmm::remove_identical_mapping(pmm::phys_mem_regions());
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.

@@ -1,4 +1,4 @@
-//! RISC-V 64 page-table metadata and TLB operations.
+//! RISC-V 64 page table hierarchy metadata and TLB operations.
 //!
 //! The module provides the standard Sv39, Sv48, and Sv57 formats with 4 KiB base
 //! pages.
@@ -12,7 +12,7 @@ use crate::meta::{PageTableMeta, SymmetricCoverage};
 /// [`Some`] issues `SFENCE.VMA` for the supplied virtual address. [`None`]
 /// issues the all-address form.
 #[inline]
-pub fn flush_riscv64_tlb(vaddr: Option<VirtAddr>) {
+pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
     if let Some(vaddr) = vaddr {
         riscv::asm::sfence_vma(0, vaddr.as_usize())
     } else {
@@ -20,7 +20,7 @@ pub fn flush_riscv64_tlb(vaddr: Option<VirtAddr>) {
     }
 }
 
-/// Metadata for the RISC-V Sv39 page-table format.
+/// Metadata for the RISC-V Sv39 page table hierarchy format.
 ///
 /// Sv39 uses three nine-bit levels and supports leaf mappings at every level.
 pub struct Sv39PageTableMeta;
@@ -31,9 +31,9 @@ impl PageTableMeta for Sv39PageTableMeta {
 
     /// Invalidates one mapping or all entries in the local TLB.
     ///
-    /// This delegates to [`flush_riscv64_tlb`].
+    /// This delegates to [`flush_local_tlb`].
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_riscv64_tlb(vaddr);
+        flush_local_tlb(vaddr);
     }
 
     /// The three translation levels in Sv39.
@@ -51,7 +51,7 @@ impl PageTableMeta for Sv39PageTableMeta {
     const MAX_PAGE_LEVEL: usize = 2;
 }
 
-/// Metadata for the RISC-V Sv48 page-table format.
+/// Metadata for the RISC-V Sv48 page table hierarchy format.
 ///
 /// Sv48 uses four nine-bit levels and supports leaf mappings at every level.
 pub struct Sv48PageTableMeta;
@@ -62,9 +62,9 @@ impl PageTableMeta for Sv48PageTableMeta {
 
     /// Invalidates one mapping or all entries in the local TLB.
     ///
-    /// This delegates to [`flush_riscv64_tlb`].
+    /// This delegates to [`flush_local_tlb`].
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_riscv64_tlb(vaddr);
+        flush_local_tlb(vaddr);
     }
 
     /// The four translation levels in Sv48.
@@ -82,7 +82,7 @@ impl PageTableMeta for Sv48PageTableMeta {
     const MAX_PAGE_LEVEL: usize = 3;
 }
 
-/// Metadata for the RISC-V Sv57 page-table format.
+/// Metadata for the RISC-V Sv57 page table hierarchy format.
 ///
 /// Sv57 uses five nine-bit levels and supports leaf mappings at every level.
 pub struct Sv57PageTableMeta;
@@ -93,9 +93,9 @@ impl PageTableMeta for Sv57PageTableMeta {
 
     /// Invalidates one mapping or all entries in the local TLB.
     ///
-    /// This delegates to [`flush_riscv64_tlb`].
+    /// This delegates to [`flush_local_tlb`].
     fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_riscv64_tlb(vaddr);
+        flush_local_tlb(vaddr);
     }
 
     /// The five translation levels in Sv57.

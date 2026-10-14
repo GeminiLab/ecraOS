@@ -8,6 +8,7 @@ bitflags = "2.11"
 crate_interface = { version = "0.3", features = ["weak_default"] }
 ecraldr_base.workspace = true
 expercpu = { path = "../expercpu/expercpu" }
+expalloc_trait = { path = "../expalloc_trait" }
 expt = { path = "../expt" }
 heapless = "0.9"
 kspin.workspace = true

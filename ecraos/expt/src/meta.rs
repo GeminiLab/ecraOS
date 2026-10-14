@@ -1,41 +1,46 @@
-//! Page-table geometry and address-space metadata.
+//! Page table hierarchy geometry and address-space metadata.
 //!
 //! This module defines the metadata trait [`PageTableMeta`], which describes:
 //!
-//! - The geometry of the page table, including the page size, number of levels,
-//!   and entries per level,
-//! - The TLB flushing behavior required by page-table mutations,
-//! - The virtual address type, constrained by the [`VirtAddr`] marker trait,
-//!   and
-//! - The virtual-address coverage policy, i.e. whether the page table covers
-//!   the lower half, upper half, or a symmetric sign-extended region of the
-//!   virtual address space, constrained by the [`PageTableCoverage`] trait.
+//! - The geometry of the page table hierarchy, including the page size, number of levels,
+//!   and entries per page table.
+//! - The local TLB invalidation operations used after mapping changes.
+//! - The virtual-address type, constrained by the [`VirtAddr`] marker trait.
+//! - The virtual-address coverage policy, constrained by [`PageTableCoverage`]. A hierarchy
+//!   can cover a lower-address range, an upper-address range, or both sign-extended ranges.
 //!
-//! Each implementation of [`PageTableMeta`] describes a specific page-table
+//! Each implementation of [`PageTableMeta`] describes a page table hierarchy
 //! format in a specific virtual address space of a specific architecture.
 
-use core::{fmt::LowerHex, marker::PhantomData};
+use core::{
+    fmt::{Debug, LowerHex},
+    marker::PhantomData,
+};
 
 use memory_addr::{AddrRange, MemoryAddr};
 
-/// A marker trait for virtual-address types used by page tables.
+/// A marker trait for virtual-address types used by page table hierarchies.
+///
+/// Address types provide arithmetic and hexadecimal formatting for traversal.
 pub const trait VirtAddr: [const] MemoryAddr + LowerHex {}
 
 const impl<T> VirtAddr for T where T: [const] MemoryAddr + LowerHex {}
 
-/// Describes the virtual-address region represented by a page table.
+/// The virtual-address coverage policy of a page table hierarchy.
 ///
 /// A coverage is a type-level policy rather than a runtime value. This lets a
-/// [`PageTableMeta`] implementation constrain its coverage and lets the page
-/// table dispatch canonical-address validation to that policy.
+/// [`PageTableMeta`] implementation constrain its coverage and lets the multi-level
+/// page table use that policy for canonical-address validation.
 pub const trait PageTableCoverage {
     /// The virtual-address type accepted by this coverage policy.
+    ///
+    /// Validation accepts this semantic address representation.
     type VirtAddr: [const] VirtAddr;
 
     /// Validates and truncates one virtual address.
     ///
-    /// `va_bits` specifies the number of address bits implemented by the page
-    /// table. The method returns `Ok` with the truncated address when the input
+    /// `va_bits` specifies the address width implemented by the page table
+    /// hierarchy. The method returns `Ok` with the truncated address when the input
     /// has the extension required by the coverage, and returns `Err` with the
     /// raw address when it is not valid.
     fn validate_and_truncate_vaddr(vaddr: Self::VirtAddr, va_bits: usize) -> Result<usize, usize>;
@@ -43,8 +48,8 @@ pub const trait PageTableCoverage {
     /// Validates and truncates a virtual-address range.
     ///
     /// The range is half-open. The returned pair contains truncated offsets in
-    /// the page table's address space. Implementations with a canonical hole
-    /// should override this method to reject ranges that cross that hole. A
+    /// the page table hierarchy's address space. Implementations with a canonical
+    /// hole should override this method to reject ranges that cross that hole. A
     /// non-empty range whose exclusive end is zero denotes the end of the
     /// `usize` address space.
     fn validate_and_truncate_vaddr_range(
@@ -70,17 +75,17 @@ pub const trait PageTableCoverage {
     }
 }
 
-/// Lower-half virtual-address coverage.
+/// Coverage of the lower virtual-address range.
 ///
-/// The upper bits of an address must be zero. `A` is the semantic virtual
-/// address type used by the associated page-table metadata.
+/// Bits above the implemented virtual-address width must be zero. `A` is the semantic virtual
+/// address type used by the associated page table hierarchy metadata.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LowerCoverage<A: VirtAddr>(PhantomData<A>);
 
-/// Upper-half virtual-address coverage.
+/// Coverage of the upper virtual-address range.
 ///
-/// The upper bits of an address must be one. `A` is the semantic virtual
-/// address type used by the associated page-table metadata.
+/// Bits above the implemented virtual-address width must be one. `A` is the semantic virtual
+/// address type used by the associated page table hierarchy metadata.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UpperCoverage<A: VirtAddr>(PhantomData<A>);
 
@@ -88,11 +93,14 @@ pub struct UpperCoverage<A: VirtAddr>(PhantomData<A>);
 ///
 /// Addresses are valid when bits above the implemented width equal the sign
 /// extension of the implemented address's most significant bit. `A` is the
-/// semantic virtual address type used by the associated page-table metadata.
+/// semantic virtual address type used by the associated page table hierarchy metadata.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SymmetricCoverage<A: VirtAddr>(PhantomData<A>);
 
 /// Returns masks for the implemented and non-implemented virtual-address bits.
+///
+/// The first mask contains the lowest `va_bits` bits, and the second mask
+/// contains the remaining high bits.
 const fn va_masks(va_bits: usize) -> (usize, usize) {
     assert!(va_bits > 0 && va_bits <= usize::BITS as usize);
     let valid_mask = usize::MAX >> (usize::BITS as usize - va_bits);
@@ -173,9 +181,8 @@ const impl<A: [const] VirtAddr> PageTableCoverage for SymmetricCoverage<A> {
             .checked_add(1)
             .expect("truncated virtual-address range end overflowed");
 
-        // If the control flow reaches here, we know that both start and end are
-        // valid, so we just need to check whether they are not in the same half
-        // of the virtual address space.
+        // Both the start and the last included address are canonical. Reject a range that
+        // crosses between the lower and upper canonical ranges through the address-space hole.
         if (start_truncated ^ end_last_truncated) & va_valid_msb_mask != 0 {
             Err(va_valid_msb_mask) // Return the first invalid address in the range.
         } else {
@@ -184,9 +191,9 @@ const impl<A: [const] VirtAddr> PageTableCoverage for SymmetricCoverage<A> {
     }
 }
 
-/// Returns the first virtual-address bit handled by a page-table level.
+/// Returns the first virtual-address bit handled by a page table level.
 ///
-/// Level numbering starts at zero for the lowest page-table level. The returned
+/// Level numbering starts at zero for the lowest page table level. The returned
 /// index includes the page-offset bits and the widths of all lower levels.
 pub const fn level_start_bit<M: PageTableMeta + ?Sized>(level: usize) -> usize
 where
@@ -201,7 +208,7 @@ where
     sum
 }
 
-/// Returns the exclusive end bit handled by a page-table level.
+/// Returns the exclusive end bit handled by a page table level.
 ///
 /// The result is the start bit of the next level and therefore defines a
 /// half-open bit range together with [`level_start_bit`].
@@ -212,20 +219,21 @@ where
     level_start_bit::<M>(level + 1)
 }
 
-/// The meta-information and architecture operations for a specific page-table
-/// format.
+/// Metadata and architecture operations for a page table hierarchy format.
 ///
 /// Implementations provide the virtual-address type, level widths, supported
 /// leaf levels, and local TLB invalidation primitive. The derived constants use
 /// those values to describe table sizes and address-bit ranges.
 pub trait PageTableMeta: Send + Sync {
-    /// The semantic virtual-address type used by this page-table format.
+    /// The semantic virtual-address type used by this page table hierarchy format.
     ///
     /// It must support address arithmetic and hexadecimal formatting in addition
     /// to the common [`MemoryAddr`] operations.
-    type VirtAddr: const VirtAddr;
+    type VirtAddr: const VirtAddr + Debug;
 
-    /// The type-level virtual-address coverage policy for this page table.
+    /// The type-level virtual-address coverage policy for this page table hierarchy.
+    ///
+    /// Canonical-address validation uses this policy.
     type Coverage: const PageTableCoverage<VirtAddr = Self::VirtAddr>;
 
     /// Flushes entries from the local translation lookaside buffer.
@@ -239,29 +247,28 @@ pub trait PageTableMeta: Send + Sync {
     fn flush_tlb(vaddr: Option<Self::VirtAddr>);
 
     // Required constants:
-    /// The number of levels in the page table.
+    /// The number of levels in the page table hierarchy.
     ///
-    /// Levels are numbered from zero at the lowest table. Implementations must
+    /// Levels are numbered from zero at the lowest page table. Implementations must
     /// provide a level count between one and five, inclusive.
     const LEVELS: usize;
     /// The number of bits in an in-page offset of the smallest page.
     ///
     /// This value is also the base-2 logarithm of [`Self::PAGE_SIZE`].
     const PAGE_OFFSET_BITS: usize;
-    /// The number of bits handled by each level of the page table.
+    /// The number of bits handled by each level of the page table hierarchy.
     ///
-    /// Note that `LEVEL_BITS[0]` is the number of bits handled by the last
-    /// level of the page table, and `LEVEL_BITS[LEVELS - 1]` is the number of
-    /// bits handled by the first level of the page table. For example, 32-bit
-    /// x86 PAE page tables have `[9, 9, 2]`, and RISC-V Sv39x4 page tables have
-    /// `[9, 9, 11]`.
+    /// `LEVEL_BITS[0]` is the width handled by the lowest page table, and
+    /// `LEVEL_BITS[LEVELS - 1]` is the width handled by the root page table. For
+    /// example, 32-bit x86 PAE page table hierarchies have `[9, 9, 2]`, and RISC-V
+    /// Sv39x4 page table hierarchies have `[9, 9, 11]`.
     const LEVEL_BITS: [usize; Self::LEVELS] where [(); Self::LEVELS]: Sized;
 
     // Required constants with default values:
-    /// The maximum level of the page table whose entries can be a page.
+    /// The maximum hierarchy level whose page table entries can be leaf mappings.
     ///
-    /// The value must be less than [`Self::LEVELS`]. Level zero page table
-    /// entries are always page entries.
+    /// The value must be less than [`Self::LEVELS`]. Level-zero page table entries
+    /// can contain leaf mappings but never references to child page tables.
     const MAX_PAGE_LEVEL: usize = 0;
 
     // Derived constants:
@@ -269,7 +276,7 @@ pub trait PageTableMeta: Send + Sync {
     ///
     /// The value is derived as `1 << PAGE_OFFSET_BITS`.
     const PAGE_SIZE: usize = 1 << Self::PAGE_OFFSET_BITS;
-    /// The virtual-address bit range handled by each page-table level.
+    /// The virtual-address bit range handled by each page table level.
     ///
     /// Each `(start, end)` pair is half-open: `start` is inclusive and `end` is
     /// exclusive. See [`Self::LEVEL_BITS`] for the level ordering.
@@ -282,7 +289,7 @@ pub trait PageTableMeta: Send + Sync {
         }
         ranges
     } where [(); Self::LEVELS]: Sized;
-    /// The number of entries in a table at each level.
+    /// The number of entries in a page table at each level.
     ///
     /// Each value is `1 << LEVEL_BITS[level]`. See [`Self::LEVEL_BITS`] for the
     /// level ordering.
@@ -295,9 +302,9 @@ pub trait PageTableMeta: Send + Sync {
         }
         sizes
     } where [(); Self::LEVELS]: Sized;
-    /// The total number of bits in the virtual address space.
+    /// The virtual-address width consumed by the page table hierarchy.
     ///
-    /// The value includes the page offset and the bit widths of every page-table
+    /// The value includes the page offset and the bit widths of every page table
     /// level.
     const VA_BITS: usize = {
         let mut sum = Self::PAGE_OFFSET_BITS;
@@ -308,10 +315,11 @@ pub trait PageTableMeta: Send + Sync {
         }
         sum
     } where [(); Self::LEVELS]: Sized;
-    /// The byte size of a leaf mapping at each page-table level.
+    /// The size of the virtual-address range covered by one entry at each page table level.
     ///
-    /// Level zero maps [`Self::PAGE_SIZE`] bytes. Each higher level multiplies
-    /// the previous size by its number of child entries.
+    /// Level zero covers [`Self::PAGE_SIZE`] bytes. Each higher level multiplies the previous
+    /// size by the number of entries in a child page table. At levels permitted by
+    /// [`Self::MAX_PAGE_LEVEL`], this is also the size of a leaf mapping.
     const LEVEL_PAGE_SIZE: [usize; Self::LEVELS] = {
         let mut sizes = [0; Self::LEVELS];
         sizes[0] = 1 << Self::PAGE_OFFSET_BITS;
@@ -324,7 +332,7 @@ pub trait PageTableMeta: Send + Sync {
     } where [(); Self::LEVELS]: Sized;
 }
 
-/// Compile-time validity checks for page-table metadata.
+/// Compile-time validity checks for page table hierarchy metadata.
 ///
 /// Referencing [`Self::ASSERTIONS`] verifies the supported virtual-address
 /// width, level count, and maximum leaf level for `M`.
@@ -346,7 +354,7 @@ impl<M: PageTableMeta> PageTableMetaAssertions<M> {
         "Virtual address space must fit in usize"
     ) where [(); M::LEVELS]: Sized;
 
-    /// The assertion that the page-table level count is supported.
+    /// The assertion that the page table level count is supported.
     ///
     /// Traversal currently handles between one and five levels, inclusive.
     const LEVELS_ASSERTIONS: () = assert!(

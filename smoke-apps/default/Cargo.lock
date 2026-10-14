@@ -176,6 +176,7 @@ dependencies = [
  "bitflags 2.11.1",
  "crate_interface",
  "ecraldr_base",
+ "expalloc_trait",
  "expercpu",
  "expt",
  "fdt-rs",

@@ -1,3 +1,9 @@
+//! x86-64 memory discovery and page-table selection.
+//!
+//! Provides the architecture implementation of memory interfaces while leaving page allocation
+//! to the caller-selected allocator.
+
+use expalloc_trait::PageAllocator;
 use expt::{
     arch::x86_64::{X86Level4PageTableMeta, X86Level5PageTableMeta},
     opaque::{OpaquePageTableRoot, OpaquePageTableType},
@@ -232,15 +238,20 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     )
 }
 
-/// Returns the page-table implementation for an x86-64 address-space mode.
-pub fn get_page_table_type(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr> {
+/// Returns the page-table descriptor for an x86-64 mode and allocator.
+///
+/// The selected four-level or five-level format captures `AL` for all operations that access,
+/// allocate, or release page-table pages. Selecting a descriptor does not allocate memory.
+pub fn get_page_table_type<AL: PageAllocator>(
+    mode: VirtAddrSpaceMode,
+) -> OpaquePageTableType<VirtAddr> {
     check_mode(
         mode,
         |is_la57| {
             if is_la57 {
-                OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE>()
+                OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE, AL>()
             } else {
-                OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE>()
+                OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE, AL>()
             }
         },
         |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
