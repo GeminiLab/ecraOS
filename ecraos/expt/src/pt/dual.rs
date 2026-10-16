@@ -70,7 +70,7 @@ where
 
 /// A mutating cursor over lower and upper page table hierarchies.
 ///
-/// The cursor batches cleanup for both roots using `AL` and `F`. Its mutable borrow excludes
+/// The cursor batches TLB invalidations for both roots using `F`. Its mutable borrow excludes
 /// other Rust mutations through this value. See [`PageTableCursor`] for synchronization
 /// requirements.
 pub struct DualPageTableCursor<'a, A, ML, PTEL, MU, PTEU, AL, F>
@@ -362,13 +362,46 @@ where
         }
     }
 
+    /// Maps a virtual range through the root selected by its starting address.
+    ///
+    /// Same as [`PageTableCursor::map`] for the selected hierarchy. See [`DualPageTable`] for
+    /// range coverage requirements.
+    pub fn map(
+        &mut self,
+        vaddr: A,
+        paddr: PhysAddr,
+        size: usize,
+        flags: MappingFlags,
+    ) -> PagingResult<A> {
+        match self.side(vaddr)? {
+            DualPageTableSide::Lower => self.lower.map(vaddr, paddr, size, flags),
+            DualPageTableSide::Upper => self.upper.map(vaddr, paddr, size, flags),
+        }
+    }
+
+    /// Removes mappings through the root selected by the starting address.
+    ///
+    /// Same as [`PageTableCursor::unmap`] for the selected hierarchy. See [`DualPageTable`] for
+    /// range coverage requirements.
+    pub fn unmap(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
+        match self.side(vaddr)? {
+            DualPageTableSide::Lower => self.lower.unmap(vaddr, size),
+            DualPageTableSide::Upper => self.upper.unmap(vaddr, size),
+        }
+    }
+
     /// Transfers both roots' pending cleanup into one batch without processing it.
     ///
-    /// See [PendingCleanup] for processing and synchronization requirements.
+    /// # Safety
+    ///
+    /// The caller must handle the returned cleanup properly after calling this
+    /// function, and before any other operations on the cursor.
+    ///
+    /// See [`PendingCleanup`] for synchronization requirements.
     pub unsafe fn take_cleanup(&mut self) -> PendingCleanup<A> {
         // SAFETY: the user promised it.
         let mut cleanup = unsafe { self.lower.take_cleanup() };
-        // SAFETY: they use the same allocator and tlb flusher.
+        // SAFETY: they use the same TLB flusher.
         unsafe { cleanup.append(self.upper.take_cleanup()) };
         cleanup
     }
@@ -415,20 +448,14 @@ where
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult<A> {
-        match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.map(vaddr, paddr, size, flags),
-            DualPageTableSide::Upper => self.upper.map(vaddr, paddr, size, flags),
-        }
+        self.map(vaddr, paddr, size, flags)
     }
 
     /// Removes mappings through the root selected by the starting address.
     ///
     /// This does not deallocate the mapped data frames.
     fn unmap(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
-        match self.side(vaddr)? {
-            DualPageTableSide::Lower => self.lower.unmap(vaddr, size),
-            DualPageTableSide::Upper => self.upper.unmap(vaddr, size),
-        }
+        self.unmap(vaddr, size)
     }
 
     /// Processes both cursors' accumulated cleanup.

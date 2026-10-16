@@ -6,7 +6,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use exarch::mem::{VirtAddrSpaceMode, VirtAddrSpaceModes};
+use exarch::mem::{LocalTlbFlusher, VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
 use expt::opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType};
 use kspin::SpinNoIrq;
@@ -185,7 +185,8 @@ pub fn page_table_root() -> OpaquePageTableRoot {
 /// Initializes the virtual address space.
 ///
 /// Detects the translation mode and calculates the kernel layout without allocating table pages.
-/// The initial opaque page table type captures `AL`, which early boot supplies as its page allocator.
+/// The initial opaque page table type captures the early allocator `AL` and [`LocalTlbFlusher`]
+/// for cleanup on the calling processor.
 pub(super) fn init_vmm_layout<AL: PageAllocator>() {
     kprintln!("Virtual address space:");
 
@@ -195,7 +196,10 @@ pub(super) fn init_vmm_layout<AL: PageAllocator>() {
 
     VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
         layout,
-        page_table_type_mutex: SpinNoIrq::new(exarch::mem::get_page_table_type::<AL>(mode)),
+        page_table_type_mutex: SpinNoIrq::new(exarch::mem::get_page_table_type::<
+            AL,
+            LocalTlbFlusher,
+        >(mode)),
         page_table_mutex: SpinNoIrq::new(OpaquePageTable::dummy()),
     });
 }
@@ -351,8 +355,9 @@ pub(super) fn init_vmm_mapping_early(phys_mem_regions: &MemoryRegions) {
 /// must have registered all early page-table allocations as allocated pages so it can release them.
 pub(super) fn use_formal_page_table_allocator() {
     // Fix function addresses in the opaque page table type first.
-    let page_table_type =
-        exarch::mem::get_page_table_type::<FormalPageAllocator>(VIRTUAL_ADDRESS_SPACE.layout.mode);
+    let page_table_type = exarch::mem::get_page_table_type::<FormalPageAllocator, LocalTlbFlusher>(
+        VIRTUAL_ADDRESS_SPACE.layout.mode,
+    );
     *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
 
     let mut page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();

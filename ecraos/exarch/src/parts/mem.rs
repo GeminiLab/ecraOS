@@ -1,13 +1,16 @@
 //! Architecture-independent memory interfaces.
 //!
 //! Defines physical memory regions, supported address-space modes, and architecture-selected
-//! page-table descriptors specialized with the caller's page allocator.
+//! page-table descriptors specialized with the caller's page allocator and TLB flusher.
 
 use core::{fmt, num::NonZeroU8};
 
 use ecraldr_base::PlatformBootArg;
 use expalloc_trait::PageAllocator;
-use expt::opaque::{OpaquePageTableRoot, OpaquePageTableType};
+use expt::{
+    opaque::{OpaquePageTableRoot, OpaquePageTableType},
+    pt::cleanup::TlbFlusher,
+};
 use heapless::Vec as HeaplessVec;
 use look_at::look_at;
 use memory_addr::{PhysAddrRange, VirtAddr};
@@ -343,6 +346,13 @@ impl VirtAddrSpaceModes {
 
 look_at! {
     @crate::arch::current::mem:
+    /// The current architecture's local TLB flushing strategy.
+    ///
+    /// This strategy affects only the calling processor. The concrete type documents its
+    /// architecture-specific address-space and global-translation limits. See [`TlbFlusher`]
+    /// for strategy selection and synchronization requirements.
+    pub type LocalTlbFlusher: TlbFlusher<VirtAddr>;
+
     /// Collects the memory regions from the platform boot argument.
     ///
     /// The returned memory regions should not contain the
@@ -372,19 +382,22 @@ look_at! {
     /// platform.
     pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode);
 
-    /// Gets the page-table descriptor for the specified mode and allocator.
+    /// Gets the page-table descriptor for the specified mode, allocator, and TLB flusher.
     ///
     /// The descriptor statically specializes its allocation, mutation, and destruction operations
-    /// for `AL`. The caller chooses an allocator that can access and deallocate every table
-    /// frame managed by the resulting value. This function only selects the descriptor and does
-    /// not allocate memory.
+    /// for `AL` and its pending cleanup for `F`. The caller chooses an allocator that can access
+    /// and deallocate every table frame in the resulting hierarchies, and a [`TlbFlusher`]
+    /// suitable for their hardware users. This function only selects the descriptor and does not
+    /// allocate memory or perform invalidation.
     ///
     /// # Panics
     ///
     /// This function will and should panic if the specified mode is not in the
     /// list returned by [`virt_addr_space_modes`], and not supported by the
     /// platform.
-    pub fn get_page_table_type<AL: PageAllocator>(mode: VirtAddrSpaceMode) -> OpaquePageTableType<VirtAddr>;
+    pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
+        mode: VirtAddrSpaceMode,
+    ) -> OpaquePageTableType<VirtAddr>;
 
     /// Sets the page table root for the current virtual address space mode.
     ///

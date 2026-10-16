@@ -5,7 +5,7 @@
 
 use core::{marker::PhantomData, mem::ManuallyDrop};
 
-use expalloc_trait::{DynPageAllocator, PageAllocator};
+use expalloc_trait::PageAllocator;
 use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
@@ -15,9 +15,7 @@ use crate::{
     meta::{PageTableCoverage, PageTableMeta},
     pt::{
         PageTableCursorLike, PageTableLike,
-        cleanup::{
-            DeallocationItem, DeallocationList, PendingCleanup, TlbFlush, TlbFlusher, TlbFlushes,
-        },
+        cleanup::{PendingCleanup, TlbFlush, TlbFlusher, TlbFlushes},
     },
 };
 
@@ -60,8 +58,8 @@ where
 /// remain responsible for coordinating hardware use with the selected [`TlbFlusher`],
 /// and for ensuring that no other multi-level page table manages the same table frames.
 ///
-/// See [`PageTableCursorLike`] for mutation and partial-failure behavior. [`PendingCleanup`]
-/// performs invalidation through `F` before deallocating detached table frames through `AL`.
+/// See [`PageTableCursorLike`] for mutation, table-frame deallocation, and partial-failure behavior.
+/// [`PendingCleanup`] performs pending invalidations through `F`.
 pub struct PageTableCursor<'a, M, PTE, AL, F>
 where
     M: PageTableMeta,
@@ -220,7 +218,7 @@ where
     pub fn cursor(&mut self) -> PageTableCursor<'_, M, PTE, AL, F> {
         PageTableCursor {
             table: self,
-            pending_cleanup: PendingCleanup::new_with::<AL, F>(),
+            pending_cleanup: PendingCleanup::new_with::<F>(),
         }
     }
 
@@ -293,18 +291,7 @@ where
     /// Child page tables are visited before their parents, and mapped data frames are retained.
     /// Destruction does not request TLB invalidation.
     fn drop(&mut self) {
-        // Recursively visit the page table hierarchy and deallocate its table frames.
-        let mut cursor = self.cursor();
-
-        cursor
-            .iter_existing_page_tables(&mut |level, paddr| {
-                AL::dealloc_frames_of_size(paddr, Self::table_size_non_const(level));
-
-                Ok(())
-            })
-            .unwrap();
-
-        drop(cursor);
+        PageTableCursor::<'_, M, PTE, AL, F>::free_table_subtree(self.root, M::LEVELS - 1);
     }
 }
 
@@ -336,10 +323,7 @@ where
     /// The caller must handle the returned cleanup properly after calling this
     /// function, and before any other operations on the cursor.
     pub unsafe fn take_cleanup(&mut self) -> PendingCleanup<M::VirtAddr> {
-        core::mem::replace(
-            &mut self.pending_cleanup,
-            PendingCleanup::new_with::<AL, F>(),
-        )
+        core::mem::replace(&mut self.pending_cleanup, PendingCleanup::new_with::<F>())
     }
 
     /// Locates and clears an entry at a requested level.
@@ -476,11 +460,9 @@ where
 
     /// Clears an entry or its descendant leaf mappings.
     ///
-    /// Clearing a leaf records the required TLB invalidation. When replacing a table entry, all
-    /// descendant table allocations are recorded before clearing the descriptor. Otherwise only
-    /// descendant leaves are cleared, retaining table descriptors and their allocations.
-    /// If recording allocations fails, the descriptor and its subtree remain unchanged and only
-    /// temporary record storage is deallocated.
+    /// Clearing a leaf records the required TLB invalidation. Replacing a child-table descriptor
+    /// deallocates its subtree, records a full invalidation, and clears the descriptor. Otherwise
+    /// only descendant leaves are cleared, retaining table descriptors and their allocations.
     fn clear_pte(
         &mut self,
         entry: &mut PTE,
@@ -499,27 +481,9 @@ where
             entry.clear();
             Ok(())
         } else if replace_table {
-            let mut records = DeallocationList::new(&DynPageAllocator::new::<AL>());
-
-            // Collect all frames in this subtree and record them for deallocation.
-            Self::iter_existing_page_tables_inner(
-                level - 1,
-                entry.paddr(),
-                PageTable::<M, PTE, AL, F>::table_of_mut_non_const(entry.paddr(), level - 1),
-                &mut |level, paddr| {
-                    records
-                        .push(DeallocationItem {
-                            paddr,
-                            size: PageTable::<M, PTE, AL, F>::table_size_non_const(level),
-                        })
-                        .map_err(|_| PagingError::AllocationFailed)
-                },
-            )?;
-
-            entry.clear();
+            Self::free_table_subtree(entry.paddr(), level - 1);
             self.pending_cleanup.append_flushes(TlbFlushes::Full);
-            // SAFETY: they all use the same allocator.
-            unsafe { self.pending_cleanup.append_deallocations(records) };
+            entry.clear();
             Ok(())
         } else {
             let table =
@@ -532,6 +496,29 @@ where
         }
     }
 
+    /// Deallocates a page table and its descendants in post-order.
+    ///
+    /// Each allocation is deallocated through `AL` using its level's table size, after accesses
+    /// through local references have ended. Mapped data frames are retained. The caller handles
+    /// any required TLB invalidation.
+    fn free_table_subtree(table_paddr: PhysAddr, level: usize) {
+        if level > 0 {
+            let table = PageTable::<M, PTE, AL, F>::table_of_mut_non_const(table_paddr, level);
+            for entry in table.iter() {
+                if entry.is_unused() || entry.is_huge() {
+                    continue;
+                }
+
+                Self::free_table_subtree(entry.paddr(), level - 1);
+            }
+        }
+
+        AL::dealloc_frames_of_size(
+            table_paddr,
+            PageTable::<M, PTE, AL, F>::table_size_non_const(level),
+        );
+    }
+
     /// Splits a range into the largest supported pages and invokes a callback for each.
     ///
     /// The function removes current mappings from the range and calls `c` for the
@@ -542,9 +529,9 @@ where
     /// is the lowest level and `M::LEVELS - 1` is the highest.
     ///
     /// Before invoking the callback, an existing leaf is [cleared](GenericPTE::clear). A child
-    /// table is either disconnected after recording its allocations or recursively cleared with
-    /// its table descriptors retained, according to the replacement argument. Huge mappings are
-    /// split when traversal must descend to a lower level.
+    /// table's subtree is either deallocated and its descriptor cleared, or its descendant leaves
+    /// are cleared with table descriptors retained, according to the replacement argument. Huge
+    /// mappings are split when traversal must descend to a lower level.
     ///
     /// The input range is expanded outward to the page size of the lowest level.
     ///
@@ -608,82 +595,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Invokes a callback for each page table in the hierarchy rooted here.
-    ///
-    /// The callback parameters are the level of the page table, and the physical
-    /// address of the page table.
-    ///
-    /// This function performs a depth-first post-order traversal of the page table
-    /// hierarchy. At the same level, page tables are visited from left to right.
-    /// For example, a three-level page table hierarchy with two entries per page
-    /// table has this layout:
-    ///
-    /// ```text
-    /// Root page table (level 2):
-    /// - Entry 0 -> Page table (level 1) 0:
-    ///   - Entry 0 -> Page table (level 0) 0: Entries 0 and 1
-    ///   - Entry 1 -> Page table (level 0) 1: Entries 0 and 1
-    /// - Entry 1 -> Page table (level 1) 1:
-    ///   - Entry 0 -> Page table (level 0) 2: Entries 0 and 1
-    ///   - Entry 1 -> Page table (level 0) 3: Entries 0 and 1
-    /// ```
-    ///
-    /// The suffixes identify page tables within each level. Entry indices are local to each table.
-    ///
-    /// The order will be:
-    ///
-    /// ```text
-    /// Page table (level 0) 0
-    /// Page table (level 0) 1
-    /// Page table (level 1) 0
-    /// Page table (level 0) 2
-    /// Page table (level 0) 3
-    /// Page table (level 1) 1
-    /// Root page table (level 2)
-    /// ```
-    fn iter_existing_page_tables<C>(&mut self, c: &mut C) -> PagingResult<M::VirtAddr>
-    where
-        C: FnMut(usize, PhysAddr) -> PagingResult<M::VirtAddr>,
-        [(); M::LEVELS - 1]: Sized,
-    {
-        let root_paddr = self.table.root;
-        let root_table = PageTable::<M, PTE, AL, F>::table_of_mut::<{ M::LEVELS - 1 }>(root_paddr);
-        Self::iter_existing_page_tables_inner(M::LEVELS - 1, root_paddr, root_table, c)
-    }
-
-    /// Visits a page table's descendants and then invokes its callback.
-    ///
-    /// The callback receives the level and physical address of each page table in post-order.
-    fn iter_existing_page_tables_inner<C>(
-        this_level: usize,
-        this_paddr: PhysAddr,
-        this_table: &mut [PTE],
-        c: &mut C,
-    ) -> PagingResult<M::VirtAddr>
-    where
-        C: FnMut(usize, PhysAddr) -> PagingResult<M::VirtAddr>,
-    {
-        // Above level zero, visit each child page table before visiting this page table.
-        if this_level > 0 {
-            for entry in this_table.iter_mut() {
-                if entry.is_unused() || entry.is_huge() {
-                    continue;
-                }
-
-                let next_paddr = entry.paddr();
-                let next_table =
-                    PageTable::<M, PTE, AL, F>::table_of_mut_non_const(next_paddr, this_level - 1);
-                Self::iter_existing_page_tables_inner(this_level - 1, next_paddr, next_table, c)?;
-            }
-        }
-
-        // The callback runs after this page table's descendants have been visited.
-        // Known issue: a deallocation callback can invalidate `this_table` before this function
-        // returns, violating Rust's reference-validity requirements. We just trust the Rust Compiler
-        // not to complain about it.
-        c(this_level, this_paddr)
     }
 
     /// Maps a virtual address range to a physical address range.
@@ -874,7 +785,7 @@ where
         self.unmap(vaddr, size)
     }
 
-    /// Processes accumulated invalidations and deallocations.
+    /// Processes accumulated TLB invalidations.
     ///
     /// Same as [`PageTableCursor::clean_up`].
     fn clean_up(&mut self) {

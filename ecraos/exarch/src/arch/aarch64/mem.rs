@@ -1,7 +1,7 @@
 //! AArch64 translation-table metadata and early memory discovery.
 //!
 //! Selects translation geometry and page-table descriptors specialized with the caller's page
-//! allocator, including independent lower and upper translation roots.
+//! allocator and TLB flusher, including independent lower and upper translation roots.
 
 use core::arch::asm;
 
@@ -11,7 +11,10 @@ use aarch64_cpu::{
 };
 use ecraldr_base::PlatformBootArg;
 use expalloc_trait::PageAllocator;
-use expt::opaque::{OpaquePageTableRoot, OpaquePageTableType};
+use expt::{
+    opaque::{OpaquePageTableRoot, OpaquePageTableType},
+    pt::cleanup::TlbFlusher,
+};
 use fdt_rs::{
     base::DevTree,
     prelude::{FallibleIterator, PropReader},
@@ -33,6 +36,11 @@ use crate::{
 /// This child module owns the short-lived roots used while changing AArch64
 /// translation geometry.
 mod temp_pt;
+
+/// The AArch64 local TLB flushing strategy.
+///
+/// See [`expt::arch::aarch64::AArch64LocalTlbFlusher`] for its stage-one invalidation scope.
+pub type LocalTlbFlusher = expt::arch::aarch64::AArch64LocalTlbFlusher;
 
 /// The description attached to the device tree memory range.
 ///
@@ -465,11 +473,12 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     temp_pt::switch_to_temporary_page_tables(mode, tcr_for_mode(mode));
 }
 
-/// Returns the page-table descriptor for an AArch64 mode and allocator.
+/// Returns the page-table descriptor for an AArch64 mode and caller-selected strategies.
 ///
 /// The selected single-root or dual-root geometry captures `AL` for all operations that access,
-/// allocate, or deallocate page-table frames. Selecting a descriptor does not allocate memory.
-pub fn get_page_table_type<AL: PageAllocator>(
+/// allocate, or deallocate table frames, and `F` for pending cleanup on both sides. See
+/// [`crate::mem::get_page_table_type`] for caller requirements.
+pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {
     if !is_mode_supported(mode) {
@@ -488,7 +497,7 @@ pub fn get_page_table_type<AL: PageAllocator>(
     macro_rules! match_half_type {
         ([$(($page_shift:literal, $va_bits:literal)),+], $page_shift_var:ident, $va_bits_var:ident, $half:ident, $mode:ident) => {
             match ($page_shift_var, $va_bits_var) {
-                $(($page_shift, $va_bits) => OpaquePageTableType::new::<A<$va_bits, $page_shift, $half<VirtAddr>>, A64PTE, AL>(),)+
+                $(($page_shift, $va_bits) => OpaquePageTableType::new::<A<$va_bits, $page_shift, $half<VirtAddr>>, A64PTE, AL, F>(),)+
                 _ => panic!("Unsupported AArch64 virtual address-space mode: {:?}", $mode),
             }
         };
@@ -505,6 +514,7 @@ pub fn get_page_table_type<AL: PageAllocator>(
                             A<$upper_va_bits, $upper_page_shift, U<VirtAddr>>,
                             A64PTE,
                             AL,
+                            F,
                         >(),
                 )+
                 _ => panic!("Unsupported AArch64 virtual address-space mode: {:?}", $mode),

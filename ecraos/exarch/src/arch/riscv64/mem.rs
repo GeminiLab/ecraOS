@@ -1,13 +1,14 @@
 //! RISC-V memory discovery and page-table selection.
 //!
 //! Provides the architecture implementation of memory interfaces while leaving page allocation
-//! to the caller-selected allocator.
+//! and TLB flushing to caller-selected strategies.
 
 use ecraldr_base::PlatformBootArg;
 use expalloc_trait::PageAllocator;
 use expt::{
     arch::riscv64::{Sv39PageTableMeta, Sv48PageTableMeta, Sv57PageTableMeta},
     opaque::{OpaquePageTableRoot, OpaquePageTableType},
+    pt::cleanup::TlbFlusher,
     pte::riscv::Rv64PTE,
 };
 use fdt_rs::{
@@ -20,6 +21,11 @@ use crate::mem::{
     DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
     VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
 };
+
+/// The RISC-V 64 local TLB flushing strategy.
+///
+/// See [`expt::arch::riscv64::Riscv64LocalTlbFlusher`] for ASID and global-translation limits.
+pub type LocalTlbFlusher = expt::arch::riscv64::Riscv64LocalTlbFlusher;
 
 core::arch::global_asm!(include_str!("mem.S"),);
 
@@ -210,11 +216,12 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     }
 }
 
-/// Returns the page-table descriptor for a RISC-V mode and allocator.
+/// Returns the page-table descriptor for a RISC-V mode and caller-selected strategies.
 ///
 /// The selected Sv39, Sv48, or Sv57 format captures `AL` for all operations that access,
-/// allocate, or deallocate page-table frames. Selecting a descriptor does not allocate memory.
-pub fn get_page_table_type<AL: PageAllocator>(
+/// allocate, or deallocate table frames, and `F` for pending cleanup. See
+/// [`crate::mem::get_page_table_type`] for caller requirements.
+pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {
     if let VirtAddrSpaceMode::Unified(VirtAddrSpaceProps {
@@ -223,11 +230,11 @@ pub fn get_page_table_type<AL: PageAllocator>(
     }) = mode
     {
         if va_bits == 57 {
-            OpaquePageTableType::new::<Sv57PageTableMeta, Rv64PTE, AL>()
+            OpaquePageTableType::new::<Sv57PageTableMeta, Rv64PTE, AL, F>()
         } else if va_bits == 48 {
-            OpaquePageTableType::new::<Sv48PageTableMeta, Rv64PTE, AL>()
+            OpaquePageTableType::new::<Sv48PageTableMeta, Rv64PTE, AL, F>()
         } else if va_bits == 39 {
-            OpaquePageTableType::new::<Sv39PageTableMeta, Rv64PTE, AL>()
+            OpaquePageTableType::new::<Sv39PageTableMeta, Rv64PTE, AL, F>()
         } else {
             panic!("Unexpected virtual address space mode: {:?}", mode);
         }

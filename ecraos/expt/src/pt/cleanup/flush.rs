@@ -13,11 +13,12 @@ use crate::meta::VirtAddr;
 ///
 /// Implementations select the architecture and invalidation scope. A local strategy affects only
 /// the calling processor. A strategy covering remote processors must complete the required remote
-/// invalidations before returning, including translation and page-walk synchronization needed for
-/// subsequent table-frame deallocation.
+/// invalidations before returning, including the required translation and page-walk synchronization
+/// within that scope.
 ///
 /// Callers must select a strategy suitable for the affected page table hierarchy and its hardware
-/// users. An incorrect strategy can leave stale translations or permit premature deallocation.
+/// users. An incorrect strategy can leave stale translations or page-walk state when accesses
+/// resume under the crate-level access coordination contract.
 /// A strategy that waits for remote acknowledgement must not be invoked while the caller holds an
 /// IRQ-disabling guard, page-table lock, or allocator lock.
 #[dyn_static_traits(DynTlbFlusher)]

@@ -7,16 +7,30 @@
 //!
 //! Mutations are performed through [`crate::pt::PageTableCursor`]. See
 //! [`crate::pt::PageTableCursorLike`] for range expansion, partial failure, and cleanup behavior.
-//! [`crate::pt::cleanup::PendingCleanup`] groups pending invalidations and detached table-frame
-//! allocations. The selected [`crate::pt::cleanup::TlbFlusher`] determines invalidation scope and
-//! completion guarantees. Callers can transfer these records out of a cursor to coordinate
-//! hardware synchronization before deallocation.
+//! [`crate::pt::cleanup::PendingCleanup`] groups pending TLB invalidations with the selected
+//! [`crate::pt::cleanup::TlbFlusher`], which determines invalidation scope and completion guarantees.
+//! Callers can transfer pending cleanup out of a cursor to process it themselves.
 //!
 //! Multi-level page table values deallocate all table frames in their page table hierarchies
-//! when dropped. Detached table frames are deallocated by the cleanup batch. Mapped data frames
-//! remain caller-managed. Callers must quiesce hardware users before dropping a multi-level page
-//! table, and retain detached frames until required translation and page-walk synchronization has
-//! completed. A mutable Rust borrow does not exclude hardware page walks.
+//! when dropped. Replacing a child-table descriptor deallocates its subtree's table frames during
+//! the mutation, without waiting for pending TLB invalidations. Mapped data frames remain
+//! caller-managed. Callers must quiesce hardware users before dropping a multi-level page table.
+//! A mutable Rust borrow does not exclude hardware page walks.
+//!
+//! # Access coordination
+//!
+//! Page table mutation operations such as `map` and `unmap` do not coordinate software or hardware
+//! accesses during mutation. Before a mutation begins, the caller must ensure that all existing
+//! accesses to potentially affected virtual address ranges and to page tables at any level that may
+//! be modified or deallocated have completed. From the start of the mutation until both the operation
+//! has ended and [`crate::pt::cleanup::PendingCleanup`] has been correctly processed, software and
+//! hardware on all processors must not access those ranges or page table memory in any form, except
+//! as part of the mutation itself or the processing of pending cleanup.
+//!
+//! This requirement covers software and hardware accesses on all processors and must be upheld by
+//! the caller in the system design. It is not expressed by marking each page table mutation method
+//! as `unsafe`. The caller is responsible for enforcing it at the boundaries where the page table
+//! hierarchy is put into hardware use and subsequent accesses are coordinated.
 //!
 //! # Terminology
 //!
@@ -48,7 +62,6 @@
 #![feature(const_convert)]
 #![feature(const_closures)]
 #![feature(const_result_trait_fn)]
-#![feature(gen_blocks)]
 #![warn(missing_docs)]
 
 /// The standard library used by unit tests.

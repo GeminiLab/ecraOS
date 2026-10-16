@@ -92,9 +92,10 @@ pub trait PageTableLike: Sized {
 /// hardware page walks.
 ///
 /// Map and unmap round ranges outward to base-page boundaries. A successful return means the PTE
-/// mutations are complete, with cleanup still pending. Errors retain earlier mutations, including
-/// any intermediate tables already installed. Unattached allocations from failed preparation are
-/// deallocated. Operations are not transactional.
+/// mutations and any table-frame deallocations are complete, with TLB invalidations still pending.
+/// Errors retain earlier mutations, including any intermediate tables already installed and any
+/// table frames already deallocated. Operations are not transactional. See the crate-level
+/// documentation for access coordination requirements.
 ///
 /// Cleanup remains pending until [`Self::clean_up`] processes it or [`Self::take_cleanup`]
 /// transfers it to the caller. Implementations also process any remaining cleanup automatically
@@ -117,8 +118,8 @@ pub trait PageTableCursorLike {
     /// Maps a virtual range to physical memory.
     ///
     /// This operation changes page table entries while mapped data frames remain
-    /// caller-managed. Replacing a child-table descriptor records its table-frame allocations for
-    /// deferred deallocation. See the trait-level contract for partial failure and cleanup.
+    /// caller-managed. Replacing a child-table descriptor immediately deallocates its subtree's
+    /// table frames. See the trait-level contract for partial failure and cleanup.
     fn map(
         &mut self,
         vaddr: Self::VirtAddr,
@@ -134,7 +135,7 @@ pub trait PageTableCursorLike {
     /// and cleanup.
     fn unmap(&mut self, vaddr: Self::VirtAddr, size: usize) -> PagingResult<Self::VirtAddr>;
 
-    /// Processes pending cleanup using the selected TLB flushing strategy and allocator.
+    /// Processes pending invalidations using the selected TLB flushing strategy.
     ///
     /// See [`PendingCleanup`] for synchronization requirements.
     fn clean_up(&mut self);

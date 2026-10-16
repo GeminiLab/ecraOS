@@ -15,7 +15,7 @@ use crate::{
     error::PagingResult,
     meta::{PageTableMeta, VirtAddr},
     pt::{
-        PageTable, PageTableCursorLike,
+        PageTable,
         cleanup::{PendingCleanup, TlbFlusher},
     },
 };
@@ -77,6 +77,12 @@ pub enum OpaquePageTableRoot {
     Dual(crate::pt::DualPageTableRoot),
 }
 
+/// The function type for applying a sequence of page table actions.
+type ApplyActionsFn<A> = for<'a> fn(
+    root: OpaquePageTableRoot,
+    actions: &'a mut dyn Iterator<Item = PageTableAction<A>>,
+) -> PagingResult<A, PendingCleanup<A>>;
+
 /// The operations for one concrete multi-level page table type.
 ///
 /// Mutation functions reconstruct a temporary concrete value while preserving its table frames.
@@ -86,10 +92,7 @@ struct PageTableMethods<A: VirtAddr> {
     /// Creates a new, empty and zeroed page table hierarchy.
     pub new_alloc: fn() -> PagingResult<A, OpaquePageTableRoot>,
     /// Applies a sequence of updates to a page table hierarchy and returns the pending cleanup.
-    pub apply_actions: for<'a> fn(
-        root: OpaquePageTableRoot,
-        actions: &'a mut dyn Iterator<Item = PageTableAction<A>>,
-    ) -> PagingResult<A, PendingCleanup<A>>,
+    pub apply_actions: ApplyActionsFn<A>,
     /// Destroys and deallocates a page table hierarchy.
     pub destroy: fn(root: OpaquePageTableRoot),
 }
@@ -435,8 +438,8 @@ impl<A: VirtAddr> OpaquePageTable<A> {
     /// Applies a sequence of page table hierarchy actions.
     ///
     /// The concrete page table hierarchy format comes from the originating descriptor. Each
-    /// action is applied in order. Cleanup uses the captured [`TlbFlusher`] before detached table
-    /// frames are deallocated and this method returns.
+    /// action is applied in order, including any immediate table-frame deallocation. Pending TLB
+    /// invalidations are processed through the captured [`TlbFlusher`] before this method returns.
     ///
     /// If an action fails, earlier actions remain applied and their pending TLB
     /// invalidations are flushed before the error is returned. An iterator panic also flushes

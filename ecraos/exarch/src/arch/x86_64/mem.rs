@@ -1,12 +1,13 @@
 //! x86-64 memory discovery and page-table selection.
 //!
 //! Provides the architecture implementation of memory interfaces while leaving page allocation
-//! to the caller-selected allocator.
+//! and TLB flushing to caller-selected strategies.
 
 use expalloc_trait::PageAllocator;
 use expt::{
     arch::x86_64::{X86Level4PageTableMeta, X86Level5PageTableMeta},
     opaque::{OpaquePageTableRoot, OpaquePageTableType},
+    pt::cleanup::TlbFlusher,
     pte::x86_64::X64PTE,
 };
 use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddr};
@@ -23,6 +24,11 @@ use crate::{
         VirtAddrSpaceProps,
     },
 };
+
+/// The x86-64 local TLB flushing strategy.
+///
+/// See [`expt::arch::x86_64::X86LocalTlbFlusher`] for PCID and global-translation limits.
+pub type LocalTlbFlusher = expt::arch::x86_64::X86LocalTlbFlusher;
 
 /// The implementation of the [`MemoryManagement`] trait for the multiboot
 /// information.
@@ -238,20 +244,21 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
     )
 }
 
-/// Returns the page-table descriptor for an x86-64 mode and allocator.
+/// Returns the page-table descriptor for an x86-64 mode and caller-selected strategies.
 ///
 /// The selected four-level or five-level format captures `AL` for all operations that access,
-/// allocate, or deallocate page-table frames. Selecting a descriptor does not allocate memory.
-pub fn get_page_table_type<AL: PageAllocator>(
+/// allocate, or deallocate table frames, and `F` for pending cleanup. See
+/// [`crate::mem::get_page_table_type`] for caller requirements.
+pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {
     check_mode(
         mode,
         |is_la57| {
             if is_la57 {
-                OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE, AL>()
+                OpaquePageTableType::new::<X86Level5PageTableMeta, X64PTE, AL, F>()
             } else {
-                OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE, AL>()
+                OpaquePageTableType::new::<X86Level4PageTableMeta, X64PTE, AL, F>()
             }
         },
         |mode| panic!("Unsupported virtual address space mode: {:?}", mode),
