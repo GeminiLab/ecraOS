@@ -375,8 +375,9 @@ look_at! {
     /// Gets the page-table descriptor for the specified mode and allocator.
     ///
     /// The descriptor statically specializes its allocation, mutation, and destruction operations
-    /// for `AL`. The caller chooses an allocator that can access and release every owned table
-    /// page. This function only selects the descriptor and does not allocate memory.
+    /// for `AL`. The caller chooses an allocator that can access and deallocate every table
+    /// frame managed by the resulting value. This function only selects the descriptor and does
+    /// not allocate memory.
     ///
     /// # Panics
     ///

@@ -8,7 +8,10 @@ use core::marker::PhantomData;
 use aarch64_cpu::asm::barrier::{ISH, ISHST, SY, dsb, isb};
 use memory_addr::VirtAddr;
 
-use crate::meta::{LowerCoverage, PageTableCoverage, PageTableMeta, UpperCoverage};
+use crate::{
+    meta::{LowerCoverage, PageTableCoverage, PageTableMeta, UpperCoverage},
+    pt::cleanup::TlbFlusher,
+};
 
 /// A coverage policy supported by an AArch64 root page table.
 ///
@@ -140,12 +143,14 @@ where
             2
         }
     };
+}
 
-    /// Invalidates translations on the issuing PE only.
-    ///
-    /// Common acknowledged shootdown owns remote completion independently of the granule.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
+/// The local TLB flushing strategy for AArch64.
+pub struct AArch64LocalTlbFlusher;
+
+impl TlbFlusher<VirtAddr> for AArch64LocalTlbFlusher {
+    fn flush(addr: Option<VirtAddr>) {
+        flush_local_tlb(addr);
     }
 }
 
@@ -153,7 +158,7 @@ where
 ///
 /// DSB orders prior PTE stores before TLBI and completes invalidation before subsequent access.
 /// VAAE1 selects the VA's TTBR regime with VA bits 55:12 for every supported runtime granule.
-pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
+fn flush_local_tlb(vaddr: Option<VirtAddr>) {
     unsafe {
         dsb(ISHST);
         match vaddr {

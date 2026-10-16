@@ -115,9 +115,10 @@ PTE 清零、descriptor 覆盖、child table 从 hierarchy 断开和 table-frame
 在 `Drop` 并 deallocate table frames 之前，调用者必须让所有 CPU 停止使用该 hierarchy，
 并完成所需的失效与同步。这个前提强于“cursor 已完成本地 flush”。
 
-`PageTableMeta::flush_tlb` 仅表示调用 CPU 的本地失效。cursor 的显式 flush 和 Drop
-处理 pending 本地失效，不完成远程 acknowledgement，也不证明旧 table/data frames
-已经可以安全 deallocate。expt 不建立第二套 CPU inventory、IPI 或远程等待机制。
+`TlbFlushes::flush_locally` 仅表示调用 CPU 的本地失效。cursor 的显式 `flush` 和 Drop
+处理 pending cleanup 中的本地失效，不完成远程 acknowledgement，也不证明旧 table/data
+frames 已经可以安全 deallocate。调用者可以通过 `take_cleanup` 取得 cleanup，完成所需
+的远程同步后再处理 deallocation。expt 不建立第二套 CPU inventory、IPI 或远程等待机制。
 
 这一运行前提的澄清是文档工作。它本身不要求更改 PageTable API，也不能据此声称
 当前 kernel 已完整实现远程失效协议。

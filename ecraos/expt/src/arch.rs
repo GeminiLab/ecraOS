@@ -12,13 +12,3 @@ pub mod riscv64;
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
-
-/// The target-selected PE-local invalidation primitive.
-///
-/// Remote IPI handlers need no runtime hierarchy metadata type to execute this function.
-#[cfg(target_arch = "aarch64")]
-pub use aarch64::flush_local_tlb;
-#[cfg(target_arch = "riscv64")]
-pub use riscv64::flush_local_tlb;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::flush_local_tlb;

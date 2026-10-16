@@ -4,7 +4,6 @@
 //!
 //! - The geometry of the page table hierarchy, including the page size, number of levels,
 //!   and entries per page table.
-//! - The local TLB invalidation operations used after mapping changes.
 //! - The virtual-address type, constrained by the [`VirtAddr`] marker trait.
 //! - The virtual-address coverage policy, constrained by [`PageTableCoverage`]. A hierarchy
 //!   can cover a lower-address range, an upper-address range, or both sign-extended ranges.
@@ -219,10 +218,10 @@ where
     level_start_bit::<M>(level + 1)
 }
 
-/// Metadata and architecture operations for a page table hierarchy format.
+/// Metadata for a page table hierarchy format.
 ///
 /// Implementations provide the virtual-address type, level widths, supported
-/// leaf levels, and local TLB invalidation primitive. The derived constants use
+/// leaf levels. The derived constants use
 /// those values to describe table sizes and address-bit ranges.
 pub trait PageTableMeta: Send + Sync {
     /// The semantic virtual-address type used by this page table hierarchy format.
@@ -235,16 +234,6 @@ pub trait PageTableMeta: Send + Sync {
     ///
     /// Canonical-address validation uses this policy.
     type Coverage: const PageTableCoverage<VirtAddr = Self::VirtAddr>;
-
-    /// Flushes entries from the local translation lookaside buffer.
-    ///
-    /// `Some(vaddr)` flushes the entry for the mapping containing `vaddr`.
-    /// `None` flushes the whole local TLB.
-    ///
-    /// This function only flushes the calling CPU's TLB. If other CPUs use the
-    /// modified mappings, the caller must arrange TLB invalidation on those CPUs
-    /// and wait for it to finish.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>);
 
     // Required constants:
     /// The number of levels in the page table hierarchy.

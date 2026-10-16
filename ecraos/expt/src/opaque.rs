@@ -14,7 +14,10 @@ use page_table_entry::{GenericPTE, MappingFlags};
 use crate::{
     error::PagingResult,
     meta::{PageTableMeta, VirtAddr},
-    pt::{PageTable, PageTableCursorLike},
+    pt::{
+        PageTable, PageTableCursorLike,
+        cleanup::{PendingCleanup, TlbFlusher},
+    },
 };
 
 /// The actions that mutate a page table hierarchy.
@@ -31,7 +34,7 @@ pub enum PageTableAction<A: VirtAddr> {
         vaddr: A,
         /// The start of the physical address range.
         ///
-        /// Mapping preserves the offset between this address and `vaddr`.
+        /// The address is rounded down as described by [`crate::pt::PageTableCursor::map`].
         paddr: PhysAddr,
         /// The size of the ranges in bytes.
         ///
@@ -70,7 +73,7 @@ pub enum OpaquePageTableRoot {
     /// Independent lower and upper physical roots used by AArch64.
     ///
     /// Each address identifies the root page table of a separate hierarchy.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(test, target_arch = "aarch64"))]
     Dual(crate::pt::DualPageTableRoot),
 }
 
@@ -80,20 +83,14 @@ pub enum OpaquePageTableRoot {
 /// Destruction deallocates table frames through the concrete value's destructor.
 #[derive(Clone)]
 struct PageTableMethods<A: VirtAddr> {
-    /// The allocation operation for zero-initialized root page tables.
-    ///
-    /// The function returns one root address, or two root addresses for a dual-root format.
+    /// Creates a new, empty and zeroed page table hierarchy.
     pub new_alloc: fn() -> PagingResult<A, OpaquePageTableRoot>,
-    /// The mutation operation for an existing page table hierarchy or pair of hierarchies.
-    ///
-    /// The concrete allocator remains statically specialized in this function pointer.
+    /// Applies a sequence of updates to a page table hierarchy and returns the pending cleanup.
     pub apply_actions: for<'a> fn(
         root: OpaquePageTableRoot,
         actions: &'a mut dyn Iterator<Item = PageTableAction<A>>,
-    ) -> PagingResult<A>,
-    /// The destruction operation for a concrete multi-level page table.
-    ///
-    /// It reconstructs the concrete value and invokes its table-frame deallocation.
+    ) -> PagingResult<A, PendingCleanup<A>>,
+    /// Destroys and deallocates a page table hierarchy.
     pub destroy: fn(root: OpaquePageTableRoot),
 }
 
@@ -124,59 +121,59 @@ impl<A: VirtAddr> PageTableMethods<A> {
     /// `M` supplies the page table hierarchy geometry and must use `A` for virtual addresses.
     /// `PTE` supplies the concrete entry representation, and `AL` supplies table frame allocation,
     /// address translation, and destruction.
-    pub const fn new<M, PTE, AL>() -> Self
+    pub const fn new<M, PTE, AL, F>() -> Self
     where
         M: PageTableMeta<VirtAddr = A>,
         PTE: GenericPTE,
         AL: PageAllocator,
+        F: TlbFlusher<A>,
         [(); M::LEVELS - 1]: Sized,
     {
         Self {
             new_alloc: || {
-                PageTable::<M, PTE, AL>::new_alloc()
+                PageTable::<M, PTE, AL, F>::new_alloc()
                     .map(|pt| OpaquePageTableRoot::Single(pt.leak()))
             },
             apply_actions: |root, actions| {
-                #[cfg(not(target_arch = "aarch64"))]
+                #[cfg(not(any(test, target_arch = "aarch64")))]
                 let OpaquePageTableRoot::Single(root) = root;
-                #[cfg(target_arch = "aarch64")]
+                #[cfg(any(test, target_arch = "aarch64"))]
                 let OpaquePageTableRoot::Single(root) = root else {
                     panic!("passing dual-root page table to single-root page table operation")
                 };
-                // Cursor unwinding must flush without deallocating the temporary value's frames.
-                let mut pt = ManuallyDrop::new(unsafe { PageTable::<M, PTE, AL>::new_at(root) });
+                // Use `ManuallyDrop` to avoid dropping the hierarchy on error.
+                let mut pt = ManuallyDrop::new(unsafe { PageTable::<M, PTE, AL, F>::new_at(root) });
                 let mut cursor = pt.cursor();
-                let result = (|| {
-                    for action in actions {
-                        match action {
-                            PageTableAction::Map {
-                                vaddr,
-                                paddr,
-                                size,
-                                flags,
-                            } => {
-                                cursor.map(vaddr, paddr, size, flags)?;
-                            }
-                            PageTableAction::Unmap { vaddr, size } => {
-                                cursor.unmap(vaddr, size)?;
-                            }
+
+                for action in actions {
+                    match action {
+                        PageTableAction::Map {
+                            vaddr,
+                            paddr,
+                            size,
+                            flags,
+                        } => {
+                            cursor.map(vaddr, paddr, size, flags)?;
+                        }
+                        PageTableAction::Unmap { vaddr, size } => {
+                            cursor.unmap(vaddr, size)?;
                         }
                     }
-                    Ok(())
-                })();
+                }
 
+                let result = unsafe { cursor.take_cleanup() };
                 drop(cursor);
 
                 let new_root = ManuallyDrop::into_inner(pt).leak();
                 debug_assert_eq!(root, new_root);
 
-                result
+                Ok(result)
             },
             destroy: |root| match root {
                 OpaquePageTableRoot::Single(root) => {
-                    drop(unsafe { PageTable::<M, PTE, AL>::new_at(root) });
+                    drop(unsafe { PageTable::<M, PTE, AL, F>::new_at(root) });
                 }
-                #[cfg(target_arch = "aarch64")]
+                #[cfg(any(test, target_arch = "aarch64"))]
                 OpaquePageTableRoot::Dual(_) => {
                     panic!("passing dual-root page table to single-root page table destruction")
                 }
@@ -187,20 +184,21 @@ impl<A: VirtAddr> PageTableMethods<A> {
     /// Creates a method table for a dual-root multi-level page table type.
     ///
     /// Both roots use the statically selected allocator for table frames and destruction.
-    #[cfg(target_arch = "aarch64")]
-    pub const fn new_dual<ML, PTEL, MU, PTEU, AL>() -> Self
+    #[cfg(any(test, target_arch = "aarch64"))]
+    pub const fn new_dual<ML, PTEL, MU, PTEU, AL, F>() -> Self
     where
         ML: PageTableMeta<VirtAddr = A, Coverage = crate::meta::LowerCoverage<A>>,
         PTEL: GenericPTE,
         MU: PageTableMeta<VirtAddr = A, Coverage = crate::meta::UpperCoverage<A>>,
         PTEU: GenericPTE,
         AL: PageAllocator,
+        F: TlbFlusher<A>,
         [(); ML::LEVELS - 1]: Sized,
         [(); MU::LEVELS - 1]: Sized,
     {
         Self {
             new_alloc: || {
-                crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL>::new_alloc()
+                crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL, F>::new_alloc()
                     .map(|pt| OpaquePageTableRoot::Dual(pt.leak()))
             },
             apply_actions: |root, actions| {
@@ -208,44 +206,41 @@ impl<A: VirtAddr> PageTableMethods<A> {
                     panic!("passing single-root page table to dual-root page table operation")
                 };
 
-                // Suppress Drop on errors or panics without suppressing cursor flushing.
+                // Suppress hierarchy destruction on errors or panics while transferring cleanup.
                 let mut pt = ManuallyDrop::new(unsafe {
-                    crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL>::new_at(root)
+                    crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL, F>::new_at(root)
                 });
                 let mut cursor = pt.cursor();
-
-                let result = (|| {
-                    for action in actions {
-                        match action {
-                            PageTableAction::Map {
-                                vaddr,
-                                paddr,
-                                size,
-                                flags,
-                            } => {
-                                cursor.map(vaddr, paddr, size, flags)?;
-                            }
-                            PageTableAction::Unmap { vaddr, size } => {
-                                cursor.unmap(vaddr, size)?;
-                            }
+                for action in actions {
+                    match action {
+                        PageTableAction::Map {
+                            vaddr,
+                            paddr,
+                            size,
+                            flags,
+                        } => {
+                            cursor.map(vaddr, paddr, size, flags)?;
+                        }
+                        PageTableAction::Unmap { vaddr, size } => {
+                            cursor.unmap(vaddr, size)?;
                         }
                     }
-                    Ok(())
-                })();
+                }
 
+                let result = unsafe { cursor.take_cleanup() };
                 drop(cursor);
 
                 let new_root = ManuallyDrop::into_inner(pt).leak();
                 debug_assert_eq!(root, new_root);
 
-                result
+                Ok(result)
             },
             destroy: |root| {
                 let OpaquePageTableRoot::Dual(root) = root else {
                     panic!("passing single-root page table to dual-root page table destruction")
                 };
                 drop(unsafe {
-                    crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL>::new_at(root)
+                    crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL, F>::new_at(root)
                 });
             },
         }
@@ -280,15 +275,17 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
     // NOTE: This direct bound currently compiles on nightly-2026-06-01, but
     // newer nightly trait solvers may report E0284 when downstream crates
     // instantiate it with architecture metadata.
-    pub const fn new<M, PTE: GenericPTE, AL>() -> Self
+    pub const fn new<M, PTE, AL, F>() -> Self
     where
         M: PageTableMeta<VirtAddr = A>,
+        PTE: GenericPTE,
         AL: PageAllocator,
+        F: TlbFlusher<A>,
         [(); M::LEVELS]: Sized,
         [(); M::LEVELS - 1]: Sized,
     {
         Self {
-            methods: PageTableMethods::<A>::new::<M, PTE, AL>(),
+            methods: PageTableMethods::<A>::new::<M, PTE, AL, F>(),
         }
     }
 
@@ -300,19 +297,20 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
     /// upper coverage policies.
     // NOTE: As with `new`, newer nightly trait solvers may fail to infer these
     // anonymous const bounds when a downstream crate instantiates this method.
-    #[cfg(target_arch = "aarch64")]
-    pub const fn new_dual<ML, PTEL, MU, PTEU, AL>() -> Self
+    #[cfg(any(test, target_arch = "aarch64"))]
+    pub const fn new_dual<ML, PTEL, MU, PTEU, AL, F>() -> Self
     where
         ML: PageTableMeta<VirtAddr = A, Coverage = crate::meta::LowerCoverage<A>>,
         PTEL: GenericPTE,
         MU: PageTableMeta<VirtAddr = A, Coverage = crate::meta::UpperCoverage<A>>,
         PTEU: GenericPTE,
         AL: PageAllocator,
+        F: TlbFlusher<A>,
         [(); ML::LEVELS - 1]: Sized,
         [(); MU::LEVELS - 1]: Sized,
     {
         Self {
-            methods: PageTableMethods::<A>::new_dual::<ML, PTEL, MU, PTEU, AL>(),
+            methods: PageTableMethods::<A>::new_dual::<ML, PTEL, MU, PTEU, AL, F>(),
         }
     }
 
@@ -372,7 +370,8 @@ pub struct OpaquePageTable<A: VirtAddr> {
 
 /// Operations on an opaque multi-level page table.
 ///
-/// Each mutation call uses a temporary concrete cursor and flushes its pending local invalidations.
+/// Mutation uses a temporary concrete cursor. Cleanup uses the captured [`TlbFlusher`] or is
+/// transferred explicitly to the caller.
 impl<A: VirtAddr> OpaquePageTable<A> {
     /// Creates a sentinel multi-level page table.
     ///
@@ -409,9 +408,7 @@ impl<A: VirtAddr> OpaquePageTable<A> {
     /// The concrete page table hierarchy format comes from the originating descriptor. The
     /// range is rounded to base-page boundaries and existing mappings are
     /// replaced according to [`crate::pt::PageTableCursorLike::map`].
-    /// Required local TLB invalidations are performed before this method returns, including
-    /// after a partial failure. Remote invalidation and hardware synchronization remain the
-    /// caller's responsibility.
+    /// See [`Self::apply_actions`] for cleanup and partial-failure behavior.
     pub fn map(
         &mut self,
         vaddr: A,
@@ -419,45 +416,53 @@ impl<A: VirtAddr> OpaquePageTable<A> {
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult<A> {
-        (self.methods.apply_actions)(
-            self.root,
-            &mut core::iter::once(PageTableAction::Map {
-                vaddr,
-                paddr,
-                size,
-                flags,
-            }),
-        )
+        self.apply_actions(core::iter::once(PageTableAction::Map {
+            vaddr,
+            paddr,
+            size,
+            flags,
+        }))
     }
 
     /// Removes mappings from a virtual address range.
     ///
     /// The range is rounded to base-page boundaries and mapped data frames remain caller-managed.
-    /// Required local TLB invalidations are performed before this method returns, including
-    /// after a partial failure. Remote invalidation and hardware synchronization remain the
-    /// caller's responsibility.
+    /// See [`Self::apply_actions`] for cleanup and partial-failure behavior.
     pub fn unmap(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
-        (self.methods.apply_actions)(
-            self.root,
-            &mut core::iter::once(PageTableAction::Unmap { vaddr, size }),
-        )
+        self.apply_actions(core::iter::once(PageTableAction::Unmap { vaddr, size }))
     }
 
     /// Applies a sequence of page table hierarchy actions.
     ///
     /// The concrete page table hierarchy format comes from the originating descriptor. Each
-    /// action is applied in order, and required local TLB invalidations are performed
-    /// before this method returns.
+    /// action is applied in order. Cleanup uses the captured [`TlbFlusher`] before detached table
+    /// frames are deallocated and this method returns.
     ///
     /// If an action fails, earlier actions remain applied and their pending TLB
     /// invalidations are flushed before the error is returned. An iterator panic also flushes
-    /// completed mutations during unwinding while preserving the hierarchy's table frames.
-    /// The operation is not transactional. Remote invalidation and hardware synchronization
-    /// remain the caller's responsibility.
+    /// completed mutations during unwinding while retaining the table frames in the remaining
+    /// hierarchy. The operation is not transactional. See [`PendingCleanup`] for synchronization
+    /// requirements and [`Self::apply_actions_with_cleanup`] for transferring cleanup on success.
     pub fn apply_actions<I: IntoIterator<Item = PageTableAction<A>>>(
         &mut self,
         actions: I,
     ) -> PagingResult<A> {
+        let cleanup = self.apply_actions_with_cleanup(actions)?;
+        cleanup.clean_up();
+        Ok(())
+    }
+
+    /// Applies actions and returns pending cleanup on success.
+    ///
+    /// Same mutation and partial-failure behavior as [`Self::apply_actions`]. Successful calls
+    /// transfer cleanup without processing it. An action error or iterator panic instead causes
+    /// the temporary cursor to process pending cleanup before returning the error or unwinding.
+    /// The selected strategy and hardware-use preconditions must therefore permit automatic
+    /// cleanup on these paths. See [`PendingCleanup`] for synchronization requirements.
+    pub fn apply_actions_with_cleanup<I: IntoIterator<Item = PageTableAction<A>>>(
+        &mut self,
+        actions: I,
+    ) -> PagingResult<A, PendingCleanup<A>> {
         let mut actions = actions.into_iter();
         (self.methods.apply_actions)(self.root, &mut actions)
     }

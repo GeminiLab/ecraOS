@@ -5,22 +5,10 @@
 
 use memory_addr::VirtAddr;
 
-use crate::meta::{PageTableMeta, SymmetricCoverage};
-
-/// Flushes one mapping or the entire local x86-64 TLB.
-///
-/// [`Some`] invalidates the entry containing the supplied virtual address, while
-/// [`None`] invalidates all local entries.
-#[inline]
-pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
-    unsafe {
-        if let Some(vaddr) = vaddr {
-            x86::tlb::flush(vaddr.into());
-        } else {
-            x86::tlb::flush_all();
-        }
-    }
-}
+use crate::{
+    meta::{PageTableMeta, SymmetricCoverage},
+    pt::cleanup::TlbFlusher,
+};
 
 /// Metadata for standard `x86_64` four-level page table hierarchies.
 ///
@@ -45,13 +33,6 @@ impl PageTableMeta for X86Level4PageTableMeta {
     ///
     /// Level two maps 1 GiB pages, while level three remains table-only.
     const MAX_PAGE_LEVEL: usize = 2;
-
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// This delegates to the module's common x86-64 invalidation helper.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
-    }
 }
 
 /// Metadata for standard `x86_64` five-level page table hierarchies.
@@ -77,11 +58,36 @@ impl PageTableMeta for X86Level5PageTableMeta {
     ///
     /// Level two maps 1 GiB pages, while levels three and four remain table-only.
     const MAX_PAGE_LEVEL: usize = 2;
+}
 
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// This delegates to the module's common x86-64 invalidation helper.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
+/// The local TLB flushing strategy for x86-64.
+///
+/// `Some(addr)` uses `INVLPG` for the current address space, including global translations for
+/// that address. `None` reloads CR3, invalidating non-global translations for the current PCID.
+/// With CR4.PGE enabled, global translations survive the CR3 reload. Invalidation of other
+/// PCIDs is not guaranteed.
+///
+/// Use this strategy only when affected translations belong to the current address space and
+/// full invalidation does not need to discard global translations or translations for other
+/// PCIDs. See [`TlbFlusher`] for synchronization requirements.
+pub struct X86LocalTlbFlusher;
+
+impl TlbFlusher<VirtAddr> for X86LocalTlbFlusher {
+    fn flush(addr: Option<VirtAddr>) {
+        flush_local_tlb(addr);
+    }
+}
+
+/// Invalidates translations in the current x86-64 address space on the calling CPU.
+///
+/// See [`X86LocalTlbFlusher`] for the scope of the address-specific and full operations.
+#[inline]
+pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
+    unsafe {
+        if let Some(vaddr) = vaddr {
+            x86::tlb::flush(vaddr.into());
+        } else {
+            x86::tlb::flush_all();
+        }
     }
 }

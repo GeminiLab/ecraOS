@@ -1,7 +1,7 @@
 //! Unit tests for multi-level page table management.
 //!
 //! Compact and multi-frame formats exercise hierarchy traversal, mapping changes,
-//! table-frame ownership, and local TLB invalidation with a deterministic host allocator.
+//! table-frame management, and local TLB invalidation with a deterministic host allocator.
 
 use std::{
     alloc::{Layout, alloc, dealloc},
@@ -10,7 +10,7 @@ use std::{
     vec::Vec,
 };
 
-use expalloc_trait::PageAllocator;
+use expalloc_trait::{DynPageAllocator, PageAllocator};
 use memory_addr::{AddrRange, PhysAddr, VirtAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
@@ -18,7 +18,11 @@ use crate::{
     error::PagingError,
     meta::{LowerCoverage, PageTableCoverage, PageTableMeta, SymmetricCoverage, UpperCoverage},
     opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType, PageTableAction},
-    pt::{DualPageTable, PageTable, PageTableCursorLike, single::checked_page_end},
+    pt::{
+        DualPageTable, PageTable, PageTableCursorLike,
+        cleanup::{SMALL_FLUSH_THRESHOLD, TlbFlush, TlbFlushes},
+        single::checked_page_end,
+    },
 };
 
 /// The tag for an unused test entry.
@@ -198,14 +202,6 @@ impl PageTableMeta for TestMeta {
     ///
     /// Every level in the compact format supports page mappings.
     const MAX_PAGE_LEVEL: usize = 2;
-    /// Records a requested test TLB invalidation.
-    ///
-    /// Addresses are stored as integers and [`None`] represents a full flush.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        FLUSH_LOG.with(|log| {
-            log.borrow_mut().push(vaddr.map(|vaddr| vaddr.as_usize()));
-        });
-    }
 }
 
 /// Metadata for the upper half of the dual-root page table hierarchy tests.
@@ -238,15 +234,6 @@ impl PageTableMeta for TestUpperMeta {
     ///
     /// Huge leaves therefore exercise the same destruction paths as lower mappings.
     const MAX_PAGE_LEVEL: usize = 2;
-
-    /// Records a requested test TLB invalidation.
-    ///
-    /// Both roots share the log so tests observe all pending flushes.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        FLUSH_LOG.with(|log| {
-            log.borrow_mut().push(vaddr.map(|vaddr| vaddr.as_usize()));
-        });
-    }
 }
 
 /// Metadata for testing symmetric canonical-address validation.
@@ -276,11 +263,6 @@ impl PageTableMeta for SymmetricTestMeta {
     ///
     /// Its coverage includes both canonical sides with a gap between them.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
-
-    /// Ignores invalidations in the canonical-validation test format.
-    ///
-    /// These tests inspect range validation without installing mappings.
-    fn flush_tlb(_vaddr: Option<Self::VirtAddr>) {}
 }
 
 /// Metadata whose table levels each require multiple allocator frames.
@@ -305,17 +287,14 @@ impl PageTableMeta for MultiFrameTestMeta {
     ///
     /// The middle level contains twice as many entries as the other levels.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 10, 9];
+    /// The highest leaf level used to exercise replacement of a large subtree.
+    ///
+    /// Level two covers the entire middle-level table in the record-growth failure test.
+    const MAX_PAGE_LEVEL: usize = 2;
     /// The canonical coverage of the large test format.
     ///
     /// Every mapping belongs to its lower virtual-address range.
     type Coverage = LowerCoverage<Self::VirtAddr>;
-
-    /// Records a requested invalidation for the large test format.
-    ///
-    /// Sharing the log keeps allocation and mutation observations deterministic.
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        TestMeta::flush_tlb(vaddr);
-    }
 }
 
 /// The resolved mapping observed by the test page table hierarchy walker.
@@ -372,6 +351,8 @@ struct AllocState {
     ///
     /// A missing value disables failure injection.
     fail_on_alloc: Option<usize>,
+    /// The allocation attempt that should panic before allocating memory.
+    panic_on_alloc: Option<usize>,
     /// The byte sizes requested when deallocating table frames.
     ///
     /// The record is captured before frame rounding so incorrect byte arguments remain visible.
@@ -380,6 +361,8 @@ struct AllocState {
     ///
     /// Each record identifies an allocation that was removed from the live set exactly once.
     deallocations: Vec<(PhysAddr, usize)>,
+    /// The completed local flush count observed at each frame deallocation.
+    deallocation_flush_counts: Vec<usize>,
 }
 
 impl AllocState {
@@ -436,6 +419,11 @@ impl PageAllocator for TestPagingHandler {
         ALLOC_STATE.with(|state| {
             let mut state = state.borrow_mut();
             state.alloc_count += 1;
+            assert_ne!(
+                state.panic_on_alloc,
+                Some(state.alloc_count),
+                "injected allocator panic"
+            );
             if state.fail_on_alloc == Some(state.alloc_count) {
                 return None;
             }
@@ -468,6 +456,7 @@ impl PageAllocator for TestPagingHandler {
             assert_eq!(record.layout.size(), page_count << Self::page_size_shift());
             let record = state.allocations.remove(index);
             state.deallocations.push((addr, page_count));
+            state.deallocation_flush_counts.push(flush_log().len());
             unsafe { dealloc(record.ptr as *mut u8, record.layout) };
         });
     }
@@ -539,8 +528,10 @@ fn reset_test_state() {
         state.dealloc_all();
         state.alloc_count = 0;
         state.fail_on_alloc = None;
+        state.panic_on_alloc = None;
         state.dealloc_requests.clear();
         state.deallocations.clear();
+        state.deallocation_flush_counts.clear();
     });
     FLUSH_LOG.with(|log| log.borrow_mut().clear());
 }
@@ -598,12 +589,590 @@ fn clear_flush_log() {
     FLUSH_LOG.with(|log| log.borrow_mut().clear());
 }
 
+/// Records an architecture-local invalidation without executing privileged instructions.
+///
+/// This replaces only the hardware boundary in host tests, independently of hierarchy metadata.
+pub(crate) fn record_local_flush(vaddr: Option<VirtAddr>) {
+    FLUSH_LOG.with(|log| log.borrow_mut().push(vaddr.map(VirtAddr::as_usize)));
+}
+
+/// Checks explicit, implicit, and ignored processing of transferred invalidations.
+///
+/// Explicit processing must not repeat during Drop, and ignore must suppress all local operations.
+#[test]
+fn standalone_flushes_are_consumed_exactly_once() {
+    clear_flush_log();
+    let mut flushes = TlbFlushes::None;
+    flushes += TlbFlush::Page(VirtAddr::from_usize(0x1000));
+    flushes.flush_locally();
+    assert_eq!(flush_log(), std::vec![Some(0x1000)]);
+
+    let mut flushes = TlbFlushes::None;
+    flushes += TlbFlush::Page(VirtAddr::from_usize(0x2000));
+    drop(flushes);
+    assert_eq!(flush_log(), std::vec![Some(0x1000), Some(0x2000)]);
+
+    let flushes = TlbFlushes::<VirtAddr>::Full;
+    // SAFETY: this test has no hardware translations to invalidate.
+    unsafe { flushes.ignore() };
+    assert_eq!(flush_log(), std::vec![Some(0x1000), Some(0x2000)]);
+}
+
+/// Checks bounded accumulation without flushing records during promotion.
+///
+/// Duplicate addresses occupy slots, all 32 slots remain individual, and the 33rd promotes to Full.
+#[test]
+fn standalone_flushes_preserve_duplicates_and_promote_without_early_flush() {
+    clear_flush_log();
+    let mut flushes = TlbFlushes::None;
+    for _ in 0..32 {
+        flushes += TlbFlush::Page(VirtAddr::from_usize(0x1000));
+    }
+    assert!(matches!(&flushes, TlbFlushes::Pages(pages) if pages.len() == 32));
+    assert!(flush_log().is_empty());
+    flushes += TlbFlush::Page(VirtAddr::from_usize(0x2000));
+    assert!(matches!(&flushes, TlbFlushes::Full));
+    assert!(flush_log().is_empty());
+    flushes.flush_locally();
+    assert_eq!(flush_log(), std::vec![None]);
+}
+
+/// Checks growing record storage and exact byte-size deallocation across multiple record pages.
+///
+/// Every independent allocation must be processed exactly once, including non-frame-sized requests.
+#[test]
+fn deallocation_list_grows_and_deallocates_exact_allocations() {
+    use crate::pt::cleanup::{DeallocationItem, DeallocationList};
+
+    reset_test_state();
+    let allocator = DynPageAllocator::new::<TestPagingHandler>();
+    let mut list = DeallocationList::new(&allocator);
+    for _ in 0..600 {
+        let paddr = TestPagingHandler::alloc_frames_of_size(5000).unwrap();
+        // SAFETY: each newly allocated run is exclusively transferred into the list.
+        unsafe { list.push(DeallocationItem { paddr, size: 5000 }) }.unwrap();
+    }
+    assert_eq!(list.iter().count(), 600);
+    assert_eq!(allocation_count(), 603);
+    list.deallocate_all();
+    assert_eq!(allocation_count(), 0);
+    assert_eq!(dealloc_requests().len(), 600);
+    assert!(dealloc_requests().iter().all(|(_, size)| *size == 5000));
+}
+
+/// Checks appending lists whose allocators manage the same allocation pool.
+///
+/// The destination allocator deallocates all records, including records from the appended list.
+#[test]
+fn deallocation_list_append_uses_compatible_destination_allocator() {
+    use crate::pt::cleanup::{DeallocationItem, DeallocationList};
+
+    reset_test_state();
+    let first = DeallocationItem {
+        paddr: TestPagingHandler::alloc_frames_of_size(5000).unwrap(),
+        size: 5000,
+    };
+    let second = DeallocationItem {
+        paddr: AlternateTestPagingHandler::alloc_frames_of_size(7000).unwrap(),
+        size: 7000,
+    };
+    let third = DeallocationItem {
+        paddr: AlternateTestPagingHandler::alloc_frames_of_size(8193).unwrap(),
+        size: 8193,
+    };
+    let mut list = DeallocationList::new(&DynPageAllocator::new::<TestPagingHandler>());
+    // SAFETY: each allocation is exclusively transferred into its corresponding list.
+    unsafe { list.push(first) }.unwrap();
+    let mut other = DeallocationList::new(&DynPageAllocator::new::<AlternateTestPagingHandler>());
+    unsafe { other.push(second) }.unwrap();
+    unsafe { other.push(third) }.unwrap();
+    let attempts_before_append = ALLOC_STATE.with(|state| state.borrow().alloc_count);
+
+    list.append(other);
+    assert_eq!(
+        ALLOC_STATE.with(|state| state.borrow().alloc_count),
+        attempts_before_append
+    );
+    assert_eq!(
+        list.iter().copied().collect::<Vec<_>>(),
+        [first, second, third]
+    );
+    assert!(deallocations().is_empty());
+    list.deallocate_all();
+
+    // Both allocator types manage the same pool, so the destination can process every record.
+    assert_eq!(
+        dealloc_requests(),
+        std::vec![
+            (first.paddr, 5000),
+            (second.paddr, 7000),
+            (third.paddr, 8193)
+        ]
+    );
+    assert_eq!(allocation_count(), 0);
+    assert!(flush_log().is_empty());
+}
+
+/// Checks allocation failure when a record page is full.
+///
+/// Existing records remain intact and the rejected allocation stays under the caller's management.
+#[test]
+fn deallocation_list_growth_failure_preserves_prior_records() {
+    use crate::pt::cleanup::{DeallocationItem, DeallocationList};
+
+    reset_test_state();
+    let allocator = DynPageAllocator::new::<TestPagingHandler>();
+    let mut list = DeallocationList::new(&allocator);
+    let mut accepted = 0;
+    loop {
+        ALLOC_STATE.with(|state| state.borrow_mut().fail_on_alloc = None);
+        let paddr = TestPagingHandler::alloc_frame().unwrap();
+        let next_attempt = ALLOC_STATE.with(|state| state.borrow().alloc_count + 1);
+        if accepted > 0 {
+            fail_on_alloc(next_attempt);
+        }
+        // SAFETY: the allocation is not otherwise managed after a successful push.
+        let result = unsafe { list.push(DeallocationItem { paddr, size: 4096 }) };
+        if result.is_err() {
+            assert_eq!(list.iter().count(), accepted);
+            assert!(allocation_contains(paddr, 4096));
+            TestPagingHandler::dealloc_frame(paddr);
+            break;
+        }
+        accepted += 1;
+    }
+    assert!(accepted > 1);
+    list.deallocate_all();
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks that a failed record collection can discard storage without deallocating table frames.
+///
+/// This is the rollback path while the original hierarchy still contains all recorded tables.
+#[test]
+fn discarded_deallocation_records_leave_allocations_live() {
+    use crate::pt::cleanup::{DeallocationItem, DeallocationList};
+
+    reset_test_state();
+    let allocator = DynPageAllocator::new::<TestPagingHandler>();
+    let paddr = TestPagingHandler::alloc_frame().unwrap();
+    let mut list = DeallocationList::new(&allocator);
+    // SAFETY: the test retains exclusive control and will discard this provisional record.
+    unsafe { list.push(DeallocationItem { paddr, size: 4096 }) }.unwrap();
+    // SAFETY: the caller resumes responsibility for the allocation.
+    unsafe { list.clear_list() };
+    assert_eq!(allocation_count(), 1);
+    TestPagingHandler::dealloc_frame(paddr);
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks transfer of both invalidation and detached table-frame deallocation.
+///
+/// Dropping an emptied cursor must not process records retained by the caller.
+#[test]
+fn detached_tables_wait_for_taken_cleanup() {
+    reset_test_state();
+    let mut table = PageTable::<TestMeta, TestPte, TestPagingHandler>::new_alloc().unwrap();
+    let mut cursor = table.cursor();
+    cursor
+        .map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x100000),
+            4096,
+            MappingFlags::READ,
+        )
+        .unwrap();
+    cursor.clean_up();
+    clear_flush_log();
+    cursor
+        .map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x200000),
+            65536,
+            MappingFlags::READ,
+        )
+        .unwrap();
+    let (flushes, deallocations) = cursor.take_cleanup().into_parts();
+    assert_eq!(deallocations.iter().count(), 2);
+    let detached: Vec<_> = deallocations.iter().copied().collect();
+    drop(cursor);
+    assert!(flush_log().is_empty());
+    assert_eq!(allocation_count(), 4);
+    flushes.flush_locally();
+    deallocations.deallocate_all();
+    assert_eq!(flush_log(), std::vec![None]);
+    ALLOC_STATE.with(|state| {
+        assert!(
+            state
+                .borrow()
+                .deallocation_flush_counts
+                .iter()
+                .all(|count| *count == 1)
+        )
+    });
+    for item in detached {
+        assert!(dealloc_requests().contains(&(item.paddr, 96)));
+    }
+    assert_eq!(allocation_count(), 1);
+    drop(table);
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks failure before a subtree can be recorded for deallocation.
+///
+/// Neither the old descriptor nor its descendants may change on record-storage failure.
+#[test]
+fn detached_table_record_failure_preserves_original_subtree() {
+    reset_test_state();
+    let mut table = PageTable::<TestMeta, TestPte, TestPagingHandler>::new_alloc().unwrap();
+    let root = table.root();
+    let mut cursor = table.cursor();
+    cursor
+        .map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x100000),
+            4096,
+            MappingFlags::READ,
+        )
+        .unwrap();
+    cursor.clean_up();
+    clear_flush_log();
+    let next_attempt = ALLOC_STATE.with(|state| state.borrow().alloc_count + 1);
+    fail_on_alloc(next_attempt);
+    assert!(matches!(
+        cursor.map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x200000),
+            65536,
+            MappingFlags::READ
+        ),
+        Err(PagingError::AllocationFailed)
+    ));
+    drop(cursor);
+    assert_eq!(allocation_count(), 3);
+    assert!(flush_log().is_empty());
+    assert_eq!(lookup_root(root, 0).unwrap().paddr, 0x100000);
+    drop(table);
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks that both roots transfer cleanup without independently processing it.
+///
+/// Full invalidation dominates across roots and both detached subtrees remain live until processed.
+#[test]
+fn dual_cursor_transfers_combined_cleanup() {
+    reset_test_state();
+    let mut table = DualPageTable::<
+        VirtAddr,
+        TestMeta,
+        TestPte,
+        TestUpperMeta,
+        TestPte,
+        TestPagingHandler,
+    >::new_alloc()
+    .unwrap();
+    let upper_base = !((1usize << TestUpperMeta::VA_BITS) - 1);
+    let mut cursor = table.cursor();
+    for base in [0, upper_base] {
+        cursor
+            .map(
+                VirtAddr::from_usize(base),
+                PhysAddr::from_usize(0x100000),
+                4096,
+                MappingFlags::READ,
+            )
+            .unwrap();
+    }
+    cursor.clean_up();
+    clear_flush_log();
+    for base in [0, upper_base] {
+        cursor
+            .map(
+                VirtAddr::from_usize(base),
+                PhysAddr::from_usize(0x200000),
+                65536,
+                MappingFlags::READ,
+            )
+            .unwrap();
+    }
+    let (flushes, deallocations) = cursor.take_cleanup().into_parts();
+    assert_eq!(deallocations.iter().count(), 4);
+    drop(cursor);
+    assert!(flush_log().is_empty());
+    flushes.flush_locally();
+    deallocations.deallocate_all();
+    assert_eq!(flush_log(), std::vec![None]);
+    assert_eq!(allocation_count(), 2);
+    drop(table);
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks deferred opaque cleanup after a later action fails or its iterator panics.
+///
+/// Completed replacement and its cleanup survive both exits without prematurely deallocating
+/// tables.
+#[test]
+fn opaque_deferred_cleanup_survives_error_and_unwind() {
+    for panic_after_replacement in [false, true] {
+        reset_test_state();
+        let format = OpaquePageTableType::<VirtAddr>::new::<TestMeta, TestPte, TestPagingHandler>();
+        let mut table = format.new_pagetable_alloc().unwrap();
+        table
+            .map(
+                VirtAddr::from_usize(0),
+                PhysAddr::from_usize(0x100000),
+                4096,
+                MappingFlags::READ,
+            )
+            .unwrap();
+        clear_flush_log();
+        let mut cleanup = table.new_cleanup();
+        let mut count = 0;
+        let actions = core::iter::from_fn(|| {
+            count += 1;
+            if count == 1 {
+                Some(PageTableAction::Map {
+                    vaddr: VirtAddr::from_usize(0),
+                    paddr: PhysAddr::from_usize(0x200000),
+                    size: 65536,
+                    flags: MappingFlags::READ,
+                })
+            } else {
+                assert!(!panic_after_replacement, "injected iterator panic");
+                Some(PageTableAction::Unmap {
+                    vaddr: VirtAddr::from_usize(usize::MAX),
+                    size: 4096,
+                })
+            }
+        });
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            table.apply_actions_with_cleanup(actions, &mut cleanup)
+        }));
+        if panic_after_replacement {
+            assert!(result.is_err());
+        } else {
+            assert!(matches!(
+                result.unwrap(),
+                Err(PagingError::NonCanonical { .. })
+            ));
+        }
+        assert!(flush_log().is_empty());
+        let (flushes, deallocations) = cleanup.into_parts();
+        assert_eq!(deallocations.iter().count(), 2);
+        assert_eq!(allocation_count(), 4);
+        flushes.flush_locally();
+        deallocations.deallocate_all();
+        assert_eq!(flush_log(), std::vec![None]);
+        assert_eq!(allocation_count(), 1);
+        drop(table);
+        assert_eq!(allocation_count(), 0);
+    }
+}
+
+/// Checks failure after provisional records have filled one storage frame.
+///
+/// Discarding provisional storage must leave all original table allocations and mappings intact.
+#[test]
+fn subtree_record_growth_failure_preserves_all_tables() {
+    reset_test_state();
+    let mut table =
+        PageTable::<MultiFrameTestMeta, TestPte, TestPagingHandler>::new_alloc().unwrap();
+    let root = table.root();
+    let mut cursor = table.cursor();
+    for index in 0..260 {
+        cursor
+            .map(
+                VirtAddr::from_usize(index * 0x200000),
+                PhysAddr::from_usize(0x400000),
+                4096,
+                MappingFlags::READ,
+            )
+            .unwrap();
+    }
+    cursor.clean_up();
+    clear_flush_log();
+    let second_record_page = ALLOC_STATE.with(|state| state.borrow().alloc_count + 2);
+    fail_on_alloc(second_record_page);
+    assert!(matches!(
+        cursor.map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x80000000),
+            0x80000000,
+            MappingFlags::READ
+        ),
+        Err(PagingError::AllocationFailed)
+    ));
+    drop(cursor);
+    assert_eq!(allocation_count(), 262);
+    assert!(flush_log().is_empty());
+    // The root still points to its original middle-level table and all 260 base-page tables.
+    let root_table = unsafe { core::slice::from_raw_parts(root.as_usize() as *const TestPte, 512) };
+    assert_eq!(root_table[0].kind, PTE_TABLE);
+    let middle = unsafe {
+        core::slice::from_raw_parts(root_table[0].paddr().as_usize() as *const TestPte, 1024)
+    };
+    for entry in &middle[..260] {
+        assert_eq!(entry.kind, PTE_TABLE);
+        let leaf = unsafe { &*(entry.paddr().as_usize() as *const TestPte) };
+        assert_eq!(leaf.kind, PTE_PAGE);
+        assert_eq!(leaf.paddr(), PhysAddr::from_usize(0x400000));
+    }
+    drop(table);
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks unwinding after provisional records have filled one storage frame.
+///
+/// An allocator panic must discard only record storage while the original hierarchy stays intact.
+#[test]
+fn subtree_record_growth_panic_preserves_all_tables() {
+    reset_test_state();
+    let mut table =
+        PageTable::<MultiFrameTestMeta, TestPte, TestPagingHandler>::new_alloc().unwrap();
+    let mut cursor = table.cursor();
+    for index in 0..260 {
+        cursor
+            .map(
+                VirtAddr::from_usize(index * 0x200000),
+                PhysAddr::from_usize(0x400000),
+                4096,
+                MappingFlags::READ,
+            )
+            .unwrap();
+    }
+    cursor.clean_up();
+    clear_flush_log();
+    ALLOC_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.panic_on_alloc = Some(state.alloc_count + 2);
+    });
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        cursor.map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x80000000),
+            0x80000000,
+            MappingFlags::READ,
+        )
+    }));
+    drop(cursor);
+    // Keep a broken implementation from dereferencing deallocated tables during test unwinding.
+    let root = table.leak();
+    assert!(result.is_err());
+    assert_eq!(allocation_count(), 262);
+    assert!(flush_log().is_empty());
+    assert_eq!(deallocations().len(), 1);
+    assert!(dealloc_requests().is_empty());
+    let root_table = unsafe { core::slice::from_raw_parts(root.as_usize() as *const TestPte, 512) };
+    assert_eq!(root_table[0].kind, PTE_TABLE);
+    let middle = unsafe {
+        core::slice::from_raw_parts(root_table[0].paddr().as_usize() as *const TestPte, 1024)
+    };
+    for entry in &middle[..260] {
+        assert_eq!(entry.kind, PTE_TABLE);
+        let leaf = unsafe { &*(entry.paddr().as_usize() as *const TestPte) };
+        assert_eq!(leaf.kind, PTE_PAGE);
+        assert_eq!(leaf.paddr(), PhysAddr::from_usize(0x400000));
+    }
+    drop(unsafe { PageTable::<MultiFrameTestMeta, TestPte, TestPagingHandler>::new_at(root) });
+    assert_eq!(allocation_count(), 0);
+}
+
+/// Checks partial progress when a second huge-page split cannot allocate its table.
+///
+/// The first split remains installed and its Full invalidation survives the later failure.
+#[test]
+fn huge_split_failure_retains_prior_split_and_cleanup() {
+    reset_test_state();
+    let mut table = PageTable::<TestMeta, TestPte, TestPagingHandler>::new_alloc().unwrap();
+    let root = table.root();
+    let mut cursor = table.cursor();
+    cursor
+        .map(
+            VirtAddr::from_usize(0),
+            PhysAddr::from_usize(0x100000),
+            65536,
+            MappingFlags::READ,
+        )
+        .unwrap();
+    cursor.clean_up();
+    clear_flush_log();
+    fail_on_alloc(3);
+    assert!(matches!(
+        cursor.unmap(VirtAddr::from_usize(4096), 4096),
+        Err(PagingError::AllocationFailed)
+    ));
+    let (flushes, deallocations) = cursor.take_cleanup().into_parts();
+    assert_eq!(deallocations.iter().count(), 0);
+    assert!(matches!(&flushes, TlbFlushes::Full));
+    drop(cursor);
+    assert_eq!(allocation_count(), 2);
+    assert_eq!(
+        lookup_root(root, 4096).unwrap(),
+        MappingSnapshot {
+            paddr: 0x101000,
+            flags: MappingFlags::READ,
+            page_size: 16384
+        }
+    );
+    flushes.flush_locally();
+    deallocations.deallocate_all();
+    assert_eq!(flush_log(), std::vec![None]);
+    drop(table);
+    assert_eq!(allocation_count(), 0);
+}
+
 /// Computes the test page table index for a virtual address and level.
 ///
-/// The calculation uses the bit ranges derived from [`TestMeta`].
+/// The calculation uses the bit ranges derived from [TestMeta].
 fn index_for(level: usize, vaddr: usize) -> usize {
     let (start, end) = TestMeta::LEVEL_BIT_RANGES[level];
     (vaddr >> start) & ((1 << (end - start)) - 1)
+}
+
+/// Checks fallback processing on both normal exit and iterator unwinding.
+///
+/// Local invalidation must precede every detached table-frame and record-storage deallocation.
+#[test]
+fn opaque_fallback_cleanup_flushes_before_deallocation() {
+    for panic_after_replacement in [false, true] {
+        reset_test_state();
+        let format = OpaquePageTableType::<VirtAddr>::new::<TestMeta, TestPte, TestPagingHandler>();
+        let mut table = format.new_pagetable_alloc().unwrap();
+        table
+            .map(
+                VirtAddr::from_usize(0),
+                PhysAddr::from_usize(0x100000),
+                4096,
+                MappingFlags::READ,
+            )
+            .unwrap();
+        clear_flush_log();
+        let mut count = 0;
+        let actions = core::iter::from_fn(|| {
+            count += 1;
+            if count == 1 {
+                Some(PageTableAction::Map {
+                    vaddr: VirtAddr::from_usize(0),
+                    paddr: PhysAddr::from_usize(0x200000),
+                    size: 65536,
+                    flags: MappingFlags::READ,
+                })
+            } else {
+                assert!(!panic_after_replacement, "injected iterator panic");
+                None
+            }
+        });
+        let result = catch_unwind(AssertUnwindSafe(|| table.apply_actions(actions)));
+        assert_eq!(result.is_err(), panic_after_replacement);
+        assert_eq!(flush_log(), std::vec![None]);
+        assert_eq!(allocation_count(), 1);
+        ALLOC_STATE.with(|state| {
+            let state = state.borrow();
+            assert_eq!(state.deallocation_flush_counts, std::vec![1, 1, 1]);
+        });
+        drop(table);
+        assert_eq!(allocation_count(), 0);
+    }
 }
 
 /// Copies the test table entries stored at a physical address.
@@ -749,12 +1318,9 @@ fn new_alloc_initializes_zeroed_root_table() {
 
 /// Verifies that dropping a concrete multi-level page table deallocates its table frames.
 ///
-/// Detached table frames are included, while mapped data frames remain caller-managed.
-///
-/// TODO: Add coverage for detached table frames once the mapping-replacement leak is fixed.
-/// The current test only checks table frames that remain reachable from the root.
+/// Mapped data frames remain caller-managed.
 #[test]
-fn concrete_drop_frees_reachable_tables_but_not_mapped_data() {
+fn concrete_drop_deallocates_tables_but_not_mapped_data() {
     reset_test_state();
     let data_frame = TestPagingHandler::alloc_frames(1).unwrap();
     let mut table = new_table();
@@ -805,7 +1371,7 @@ fn concrete_drop_frees_reachable_tables_but_not_mapped_data() {
 ///
 /// Dropping the multi-level page table once also leaves its mapped data frame allocated.
 #[test]
-fn concrete_drop_releases_multiframe_tables_with_exact_bytes_in_order() {
+fn concrete_drop_deallocates_multiframe_tables_with_exact_bytes_in_order() {
     reset_test_state();
     let data_frame = TestPagingHandler::alloc_frames(1).unwrap();
     let mut table =
@@ -878,7 +1444,7 @@ fn leaked_concrete_root_can_be_adopted_by_another_allocator_type() {
 ///
 /// Splitting twice creates tables at both lower levels while data frames remain caller-managed.
 #[test]
-fn concrete_drop_releases_table_frames_created_by_huge_mapping_split() {
+fn concrete_drop_deallocates_table_frames_created_by_huge_mapping_split() {
     reset_test_state();
     let mut table = new_table();
     table
@@ -939,7 +1505,7 @@ fn cursor_maps_and_unmaps_single_base_page() {
             TestMeta::PAGE_SIZE,
         );
 
-        cursor.flush();
+        cursor.clean_up();
         cursor
             .unmap(VirtAddr::from_usize(0x3000), TestMeta::PAGE_SIZE)
             .unwrap();
@@ -1208,12 +1774,9 @@ fn opaque_page_table_applies_action_batch() {
         ])
         .unwrap();
 
-    #[cfg(target_arch = "aarch64")]
     let OpaquePageTableRoot::Single(root) = opaque_page_table.root() else {
         panic!("single-root opaque table returned a dual root");
     };
-    #[cfg(not(target_arch = "aarch64"))]
-    let OpaquePageTableRoot::Single(root) = opaque_page_table.root();
     assert_mapping_at_root(
         root,
         0x3000,
@@ -1237,7 +1800,7 @@ fn opaque_page_table_applies_action_batch() {
 ///
 /// The descriptor supplies the allocator type, and mapped data frames remain caller-managed.
 #[test]
-fn opaque_drop_frees_reachable_tables_but_not_mapped_data() {
+fn opaque_drop_deallocates_tables_but_not_mapped_data() {
     reset_test_state();
     let data_frame = TestPagingHandler::alloc_frames(1).unwrap();
     let page_table_type =
@@ -1267,17 +1830,14 @@ fn opaque_drop_frees_reachable_tables_but_not_mapped_data() {
 /// The temporary concrete value must not deallocate table frames while reporting an
 /// allocation error.
 #[test]
-fn opaque_failed_action_preserves_owned_root() {
+fn opaque_failed_action_preserves_root_allocation() {
     reset_test_state();
     let page_table_type =
         OpaquePageTableType::<VirtAddr>::new::<TestMeta, TestPte, TestPagingHandler>();
     let mut table = page_table_type.new_pagetable_alloc().unwrap();
-    #[cfg(target_arch = "aarch64")]
     let OpaquePageTableRoot::Single(root) = table.root() else {
         panic!("single-root descriptor returned a dual root");
     };
-    #[cfg(not(target_arch = "aarch64"))]
-    let OpaquePageTableRoot::Single(root) = table.root();
     fail_on_alloc(2);
 
     let result = table.map(
@@ -1317,12 +1877,9 @@ fn opaque_later_action_failure_preserves_earlier_mapping_and_pending_flush() {
             MappingFlags::READ,
         )
         .unwrap();
-    #[cfg(target_arch = "aarch64")]
     let OpaquePageTableRoot::Single(root) = table.root() else {
         panic!("single-root descriptor returned a dual root");
     };
-    #[cfg(not(target_arch = "aarch64"))]
-    let OpaquePageTableRoot::Single(root) = table.root();
     clear_flush_log();
     fail_on_alloc(4);
 
@@ -1376,7 +1933,7 @@ fn opaque_later_action_failure_preserves_earlier_mapping_and_pending_flush() {
 ///
 /// Unwinding must drop the cursor while leaving table frames for the opaque value's drop.
 #[test]
-fn opaque_panicking_iterator_preserves_mapping_flush_and_owner() {
+fn opaque_panicking_iterator_preserves_mapping_flush_and_hierarchy() {
     reset_test_state();
     let page_table_type =
         OpaquePageTableType::<VirtAddr>::new::<TestMeta, TestPte, TestPagingHandler>();
@@ -1389,12 +1946,9 @@ fn opaque_panicking_iterator_preserves_mapping_flush_and_owner() {
             MappingFlags::READ,
         )
         .unwrap();
-    #[cfg(target_arch = "aarch64")]
     let OpaquePageTableRoot::Single(root) = table.root() else {
         panic!("single-root descriptor returned a dual root");
     };
-    #[cfg(not(target_arch = "aarch64"))]
-    let OpaquePageTableRoot::Single(root) = table.root();
     clear_flush_log();
     let mut yielded = false;
     let actions = core::iter::from_fn(|| {
@@ -1496,12 +2050,7 @@ fn opaque_root_can_be_adopted_by_another_allocator_type() {
 
 /// Verifies that an opaque dual-root multi-level page table dispatches actions to both roots.
 ///
-/// Dropping it deallocates all table frames in both page table hierarchies, including detached
-/// frames.
-///
-/// TODO: Add coverage for detached table frames once the mapping-replacement leak is fixed.
-/// The current actions only create mappings and do not detach child page tables.
-#[cfg(target_arch = "aarch64")]
+/// Dropping it deallocates all table frames in both page table hierarchies.
 #[test]
 fn opaque_dual_page_table_applies_actions_to_both_roots() {
     reset_test_state();
@@ -1544,7 +2093,7 @@ fn opaque_dual_page_table_applies_actions_to_both_roots() {
         MappingFlags::READ | MappingFlags::WRITE,
         4096,
     );
-    assert_eq!(flush_log(), vec![None, None]);
+    assert_eq!(flush_log(), std::vec![None]);
     drop(opaque_page_table);
     assert_eq!(allocation_count(), 0);
     assert_eq!(deallocations().len(), 6);
@@ -1554,7 +2103,6 @@ fn opaque_dual_page_table_applies_actions_to_both_roots() {
 /// Verifies preserved table frames and local flushes when a later dual action fails.
 ///
 /// Mutations in both canonical ranges survive a failed child page table allocation.
-#[cfg(target_arch = "aarch64")]
 #[test]
 fn opaque_dual_later_action_failure_preserves_both_hierarchies_and_flushes() {
     reset_test_state();
@@ -1642,7 +2190,6 @@ fn opaque_dual_later_action_failure_preserves_both_hierarchies_and_flushes() {
 /// Verifies that a dual iterator panic flushes its completed mutation and retains both roots.
 ///
 /// Unwinding an upper-range mutation must preserve both independent page table hierarchies.
-#[cfg(target_arch = "aarch64")]
 #[test]
 fn opaque_dual_panicking_iterator_preserves_both_hierarchies_and_flushes() {
     reset_test_state();
@@ -1716,7 +2263,7 @@ fn opaque_dual_panicking_iterator_preserves_both_hierarchies_and_flushes() {
 ///
 /// The two address ranges create independent page table hierarchies using one allocator type.
 #[test]
-fn dual_drop_frees_both_reachable_table_trees() {
+fn dual_drop_deallocates_both_hierarchies() {
     reset_test_state();
     /// The dual-root multi-level page table type used for deallocation tests.
     ///
@@ -1792,7 +2339,7 @@ fn dual_drop_frees_both_reachable_table_trees() {
 /// The result must leave no table frames allocated for an incomplete dual-root multi-level
 /// page table.
 #[test]
-fn dual_new_alloc_failure_releases_first_root() {
+fn dual_new_alloc_failure_deallocates_first_root() {
     reset_test_state();
     /// The dual-root multi-level page table type used for allocation failure tests.
     ///
@@ -1982,7 +2529,7 @@ fn splitting_huge_page_preserves_unaffected_subpages_and_full_flushes() {
                 MappingFlags::READ,
             )
             .unwrap();
-        cursor.flush();
+        cursor.clean_up();
         clear_flush_log();
 
         cursor
@@ -2046,7 +2593,7 @@ fn unmapping_huge_leaf_records_full_flush() {
                 MappingFlags::READ,
             )
             .unwrap();
-        cursor.flush();
+        cursor.clean_up();
         clear_flush_log();
 
         cursor
@@ -2079,7 +2626,7 @@ fn unmapping_base_page_inside_huge_page_splits_and_full_flushes() {
                 MappingFlags::READ,
             )
             .unwrap();
-        cursor.flush();
+        cursor.clean_up();
         clear_flush_log();
 
         cursor
@@ -2216,7 +2763,7 @@ fn cursor_manual_flush_is_idempotent_with_drop() {
                 MappingFlags::READ,
             )
             .unwrap();
-        cursor.flush();
+        cursor.clean_up();
         assert_eq!(flush_log(), std::vec![Some(0x2000)]);
     }
 
@@ -2235,14 +2782,14 @@ fn cursor_flush_threshold_falls_back_to_full_flush() {
     let mut table = new_table();
     prepare_existing_leaf_tables(
         &mut table,
-        &(0..=super::flush::SMALL_FLUSH_THRESHOLD)
+        &(0..=SMALL_FLUSH_THRESHOLD)
             .map(|page| page * TestMeta::PAGE_SIZE)
             .collect::<Vec<_>>(),
     );
 
     {
         let mut cursor = table.cursor();
-        for page in 0..=super::flush::SMALL_FLUSH_THRESHOLD {
+        for page in 0..=SMALL_FLUSH_THRESHOLD {
             cursor
                 .map(
                     VirtAddr::from_usize(page * TestMeta::PAGE_SIZE),

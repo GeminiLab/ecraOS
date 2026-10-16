@@ -5,23 +5,29 @@
 
 use core::{marker::PhantomData, mem::ManuallyDrop};
 
-use expalloc_trait::PageAllocator;
+use expalloc_trait::{DynPageAllocator, PageAllocator};
 use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
 
 use crate::{
     error::{PagingError, PagingResult},
-    flush::{PendingTlbFlushes, TlbFlush},
     meta::{PageTableCoverage, PageTableMeta},
-    pt::{PageTableCursorLike, PageTableLike},
+    pt::{
+        PageTableCursorLike, PageTableLike,
+        cleanup::{
+            DeallocationItem, DeallocationList, PendingCleanup, TlbFlush, TlbFlusher, TlbFlushes,
+        },
+    },
 };
 
 /// A single-root multi-level page table.
 ///
-/// `M` describes the virtual-address layout and TLB operations, `PTE` supplies
-/// the concrete entry representation, and `A` selects the allocator that is
-/// used to allocate and deallocate table frames.
+/// `M` describes the virtual-address layout, `PTE` supplies
+/// the concrete entry representation, and `AL` selects the allocator that is
+/// used to allocate and deallocate table frames. `F` selects the [`TlbFlusher`] used by cursor
+/// cleanup, including its local or remote invalidation scope. See that trait for strategy
+/// selection and synchronization requirements.
 ///
 /// The page table hierarchy must form a valid tree.
 ///
@@ -29,8 +35,12 @@ use crate::{
 ///
 /// Use [`PageTable::leak`] to consume this value while retaining its table frames, then use
 /// [`PageTable::new_at`] to construct another value from the existing hierarchy.
-pub struct PageTable<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator>
+pub struct PageTable<M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
@@ -38,33 +48,37 @@ where
     ///
     /// The table is accessed through the selected [`PageAllocator`].
     root: PhysAddr,
-    /// The marker for the metadata, entry, and allocator types.
+    /// The marker for the metadata, entry, allocator, and TLB flusher types.
     ///
     /// These types determine the value's behavior without being stored as runtime fields.
-    _phantom: PhantomData<(PTE, M, A)>,
+    _phantom: PhantomData<(PTE, M, AL, F)>,
 }
 
 /// A mutating cursor over a [`PageTable`].
 ///
 /// The mutable borrow excludes other Rust mutations through the borrowed value. Callers
-/// remain responsible for coordinating hardware page walks and remote TLB invalidation,
-/// and for ensuring that no other multi-level page table owns the same table frames.
+/// remain responsible for coordinating hardware use with the selected [`TlbFlusher`],
+/// and for ensuring that no other multi-level page table manages the same table frames.
 ///
-/// Cursor operations record affected virtual mappings and flush the local TLB
-/// when [`Self::flush`] is called or when the cursor is dropped.
-pub struct PageTableCursor<'a, M: PageTableMeta, PTE: GenericPTE, A: PageAllocator>
+/// See [`PageTableCursorLike`] for mutation and partial-failure behavior. [`PendingCleanup`]
+/// performs invalidation through `F` before deallocating detached table frames through `AL`.
+pub struct PageTableCursor<'a, M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
     /// The [`PageTable`] being mutated.
     ///
     /// The mutable borrow lasts for the cursor's lifetime.
-    pub(crate) table: &'a mut PageTable<M, PTE, A>,
-    /// The TLB invalidations accumulated by cursor operations.
+    pub(crate) table: &'a mut PageTable<M, PTE, AL, F>,
+    /// The cleanup accumulated by cursor operations.
     ///
-    /// These records are consumed by [`Self::flush`] or [`Drop::drop`].
-    pending_flushes: PendingTlbFlushes<M>,
+    /// See [`Self::take_cleanup`] for transferring records before synchronization.
+    pending_cleanup: PendingCleanup<M::VirtAddr>,
 }
 
 /// Computes the end of a page without exceeding a range.
@@ -80,11 +94,44 @@ pub(crate) fn checked_page_end<A: MemoryAddr>(start: A, end: A, page_size: usize
     }
 }
 
+/// Returns the maximum page level whose corresponding page size is a factor of the offset.
+///
+/// This function is used to determine the maximum huge page size when mapping a virtual address
+/// range, to make sure that both physical address and virtual address are aligned to the same page
+/// size.
+///
+/// Zero offset is considered to be a multiple of any page size.
+///
+/// Returns [`None`] when the offset is invalid, i.e. not a multiple of any page size.
+pub(crate) fn max_page_level_for_offset<M: PageTableMeta>(offset: usize) -> Option<usize>
+where
+    [(); M::LEVELS]: Sized,
+{
+    let mut level = M::MAX_PAGE_LEVEL;
+
+    loop {
+        let level_page_size = M::LEVEL_PAGE_SIZE[level];
+        if offset.is_multiple_of(level_page_size) {
+            return Some(level);
+        }
+
+        if level == 0 {
+            return None;
+        }
+
+        level -= 1;
+    }
+}
+
 /// Virtual-address validation utilities.
 ///
 /// Validation uses the coverage policy selected by `M`.
-impl<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> PageTable<M, PTE, A>
+impl<M, PTE, AL, F> PageTable<M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
@@ -104,16 +151,20 @@ where
 
 /// Multi-level page table construction and access to hierarchy table frames.
 ///
-/// All table frame allocations and physical-address translations use `A`.
-impl<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> PageTable<M, PTE, A>
+/// All table frame allocations and physical-address translations use `AL`.
+impl<M, PTE, AL, F> PageTable<M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
     /// Constructs a multi-level page table from an existing page table hierarchy.
     ///
     /// This function does not inspect or initialize the root page table. Later
-    /// operations access it through `A`.
+    /// operations access it through `AL`.
     ///
     /// # Safety
     ///
@@ -122,7 +173,7 @@ where
     /// No other code may access the page table hierarchy while the [`PageTable`]
     /// lives.
     ///
-    /// The [`PageAllocator`] specified by `A` must be able to manage the existing
+    /// The [`PageAllocator`] specified by `AL` must be able to manage the existing
     /// table frames.
     pub unsafe fn new_at(paddr: PhysAddr) -> Self {
         #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
@@ -134,7 +185,7 @@ where
         }
     }
 
-    /// Allocates and initializes a new [`PageTable`] through `A`.
+    /// Allocates and initializes a new [`PageTable`] through `AL`.
     ///
     /// This function allocates only the root level page table and zero-initializes it.
     pub fn new_alloc() -> PagingResult<M::VirtAddr, Self> {
@@ -154,7 +205,7 @@ where
     ///
     /// Another [`PageTable`] can use the root if its allocator can access and
     /// deallocate every table frame in the page table hierarchy. Otherwise, the caller must
-    /// arrange their deallocation. The allocator type may differ from `A` if those
+    /// arrange their deallocation. The allocator type may differ from `AL` if those
     /// requirements hold. The returned address remains usable until the retained
     /// table frames are deallocated, either by the caller or by a value that adopts them.
     pub fn leak(self) -> PhysAddr {
@@ -164,13 +215,12 @@ where
 
     /// Creates a cursor for batched page table hierarchy mutations.
     ///
-    /// Mapping changes through the returned cursor collect affected virtual
-    /// mappings for local TLB invalidation. The borrow does not synchronize
-    /// hardware page walks or remote TLBs.
-    pub fn cursor(&mut self) -> PageTableCursor<'_, M, PTE, A> {
+    /// Mapping changes accumulate [`PendingCleanup`]. See [`PageTableCursor`] for batching and
+    /// synchronization requirements.
+    pub fn cursor(&mut self) -> PageTableCursor<'_, M, PTE, AL, F> {
         PageTableCursor {
             table: self,
-            pending_flushes: PendingTlbFlushes::None,
+            pending_cleanup: PendingCleanup::new_with::<AL, F>(),
         }
     }
 
@@ -178,6 +228,7 @@ where
     ///
     /// The size is the concrete entry size multiplied by the number of entries
     /// configured for `LEVEL`.
+    #[maybe_non_generic(table_size_non_const, const(LEVEL => level: usize))]
     const fn table_size<const LEVEL: usize>() -> usize {
         size_of::<PTE>() << M::LEVEL_BITS[LEVEL]
     }
@@ -201,7 +252,7 @@ where
         let entry_count = M::LEVEL_TABLE_SIZE[LEVEL];
 
         unsafe {
-            let ptr: *mut PTE = A::phys_to_virt(paddr).as_mut_ptr_of();
+            let ptr: *mut PTE = AL::phys_to_virt(paddr).as_mut_ptr_of();
             core::slice::from_raw_parts_mut(ptr, entry_count)
         }
     }
@@ -213,8 +264,8 @@ where
     fn alloc_table<const LEVEL: usize>() -> PagingResult<M::VirtAddr, PhysAddr> {
         let bytes_required = Self::table_size::<LEVEL>();
 
-        if let Some(paddr) = A::alloc_frames_of_size(bytes_required) {
-            let vaddr = A::phys_to_virt(paddr);
+        if let Some(paddr) = AL::alloc_frames_of_size(bytes_required) {
+            let vaddr = AL::phys_to_virt(paddr);
             unsafe {
                 core::ptr::write_bytes(vaddr.as_mut_ptr(), 0, bytes_required);
             }
@@ -228,63 +279,67 @@ where
 /// Table-frame deallocation.
 ///
 /// See the crate-level documentation for the deallocated frames and hardware-use requirements.
-impl<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> Drop for PageTable<M, PTE, A>
+impl<M, PTE, AL, F> Drop for PageTable<M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
     /// Deallocates the page table hierarchy's table frames.
     ///
     /// Child page tables are visited before their parents, and mapped data frames are retained.
+    /// Destruction does not request TLB invalidation.
     fn drop(&mut self) {
         // Recursively visit the page table hierarchy and deallocate its table frames.
-        // TODO: Also reclaim table frames detached by mapping replacement. They are currently
-        // unreachable from the root and are not recorded for this traversal.
         let mut cursor = self.cursor();
 
         cursor
-            .iter_existing_page_tables(|level, table| {
-                if level > 0 {
-                    for entry in table.iter_mut() {
-                        if entry.is_unused() || entry.is_huge() {
-                            continue;
-                        }
-
-                        // The entry points to a page table, so deallocate its frame allocation.
-                        let sub_table_addr = entry.paddr();
-                        let sub_table_size = size_of::<PTE>() * M::LEVEL_TABLE_SIZE[level - 1];
-                        A::dealloc_frames_of_size(sub_table_addr, sub_table_size);
-                    }
-                }
+            .iter_existing_page_tables(&mut |level, paddr| {
+                AL::dealloc_frames_of_size(paddr, Self::table_size_non_const(level));
 
                 Ok(())
             })
             .unwrap();
 
         drop(cursor);
-        A::dealloc_frames_of_size(
-            self.root,
-            size_of::<PTE>() * M::LEVEL_TABLE_SIZE[M::LEVELS - 1],
-        );
     }
 }
 
 /// Cursor traversal and mutation operations.
 ///
-/// Mutations accumulate local TLB invalidations until explicit or implicit flush.
-impl<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> PageTableCursor<'_, M, PTE, A>
+/// Mutations accumulate [`PendingCleanup`] until it is processed or transferred to the caller.
+impl<M, PTE, AL, F> PageTableCursor<'_, M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
-    /// Flushes all TLB entries affected by changes made through this cursor.
+    /// Processes all pending cleanup.
     ///
-    /// This performs local TLB invalidation only. Callers must coordinate remote
-    /// invalidation and hardware page walks. Clearing the pending set prevents
-    /// the cursor's eventual [`Drop`] from flushing the same records again
-    /// unless later operations add new pending flushes.
-    pub fn flush(&mut self) {
-        self.pending_flushes.flush();
+    /// Takes the current batch and calls [`PendingCleanup::clean_up`]. Later mutations accumulate
+    /// new cleanup records.
+    pub fn clean_up(&mut self) {
+        // Safety: we'll handle it immediately after calling this function.
+        unsafe { self.take_cleanup() }.clean_up();
+    }
+
+    /// Transfers pending cleanup to the caller and empties this cursor's records.
+    ///
+    /// # Safety
+    ///
+    /// The caller must handle the returned cleanup properly after calling this
+    /// function, and before any other operations on the cursor.
+    pub unsafe fn take_cleanup(&mut self) -> PendingCleanup<M::VirtAddr> {
+        core::mem::replace(
+            &mut self.pending_cleanup,
+            PendingCleanup::new_with::<AL, F>(),
+        )
     }
 
     /// Locates and clears an entry at a requested level.
@@ -299,6 +354,7 @@ where
         level: usize,
         create_if_not_exists: bool,
         split_huge_page: bool,
+        replace_table: bool,
     ) -> PagingResult<M::VirtAddr, (&mut PTE, usize)> {
         if level > M::MAX_PAGE_LEVEL {
             return Err(PagingError::CannotBePage { level });
@@ -310,59 +366,59 @@ where
             let p1 = if M::LEVELS > 2 {
                 let p2 = if M::LEVELS > 3 {
                     let p3 = if M::LEVELS > 4 {
-                        let p4 = PageTable::<M, PTE, A>::table_of_mut::<4>(self.table.root);
-                        let index4 = PageTable::<M, PTE, A>::index::<4>(vaddr_truncated);
+                        let p4 = PageTable::<M, PTE, AL, F>::table_of_mut::<4>(self.table.root);
+                        let index4 = PageTable::<M, PTE, AL, F>::index::<4>(vaddr_truncated);
                         let p4e = &mut p4[index4];
 
                         if level == 4 {
-                            self.clear_pte(p4e, 4, vaddr)?;
+                            self.clear_pte(p4e, 4, vaddr, replace_table)?;
                             return Ok((p4e, index4));
                         }
 
                         self.next_table_mut::<3>(p4e, create_if_not_exists, split_huge_page)?
                     } else {
-                        PageTable::<M, PTE, A>::table_of_mut::<3>(self.table.root)
+                        PageTable::<M, PTE, AL, F>::table_of_mut::<3>(self.table.root)
                     };
-                    let index3 = PageTable::<M, PTE, A>::index::<3>(vaddr_truncated);
+                    let index3 = PageTable::<M, PTE, AL, F>::index::<3>(vaddr_truncated);
                     let p3e = &mut p3[index3];
 
                     if level == 3 {
-                        self.clear_pte(p3e, 3, vaddr)?;
+                        self.clear_pte(p3e, 3, vaddr, replace_table)?;
                         return Ok((p3e, index3));
                     }
 
                     self.next_table_mut::<2>(p3e, create_if_not_exists, split_huge_page)?
                 } else {
-                    PageTable::<M, PTE, A>::table_of_mut::<2>(self.table.root)
+                    PageTable::<M, PTE, AL, F>::table_of_mut::<2>(self.table.root)
                 };
-                let index2 = PageTable::<M, PTE, A>::index::<2>(vaddr_truncated);
+                let index2 = PageTable::<M, PTE, AL, F>::index::<2>(vaddr_truncated);
                 let p2e = &mut p2[index2];
 
                 if level == 2 {
-                    self.clear_pte(p2e, 2, vaddr)?;
+                    self.clear_pte(p2e, 2, vaddr, replace_table)?;
                     return Ok((p2e, index2));
                 }
 
                 self.next_table_mut::<1>(p2e, create_if_not_exists, split_huge_page)?
             } else {
-                PageTable::<M, PTE, A>::table_of_mut::<1>(self.table.root)
+                PageTable::<M, PTE, AL, F>::table_of_mut::<1>(self.table.root)
             };
-            let index1 = PageTable::<M, PTE, A>::index::<1>(vaddr_truncated);
+            let index1 = PageTable::<M, PTE, AL, F>::index::<1>(vaddr_truncated);
             let p1e = &mut p1[index1];
 
             if level == 1 {
-                self.clear_pte(p1e, 1, vaddr)?;
+                self.clear_pte(p1e, 1, vaddr, replace_table)?;
                 return Ok((p1e, index1));
             }
 
             self.next_table_mut::<0>(p1e, create_if_not_exists, split_huge_page)?
         } else {
-            PageTable::<M, PTE, A>::table_of_mut::<0>(self.table.root)
+            PageTable::<M, PTE, AL, F>::table_of_mut::<0>(self.table.root)
         };
-        let index0 = PageTable::<M, PTE, A>::index::<0>(vaddr_truncated);
+        let index0 = PageTable::<M, PTE, AL, F>::index::<0>(vaddr_truncated);
         let p0e = &mut p0[index0];
 
-        self.clear_pte(p0e, 0, vaddr)?;
+        self.clear_pte(p0e, 0, vaddr, replace_table)?;
         Ok((p0e, index0))
     }
 
@@ -379,12 +435,13 @@ where
     ) -> PagingResult<M::VirtAddr, &'a mut [PTE]> {
         if entry.is_unused() {
             if create_if_not_exists {
-                let table = PageTable::<M, PTE, A>::alloc_table::<LEVEL>()?;
+                let table = PageTable::<M, PTE, AL, F>::alloc_table::<LEVEL>()?;
                 *entry = GenericPTE::new_table(table);
                 // A new non-leaf descriptor changes the walk topology. RISC-V address-specific
-                // SFENCE.VMA covers leaf translations only, so invalidate the complete local view.
-                self.pending_flushes += TlbFlush::Full;
-                Ok(PageTable::<M, PTE, A>::table_of_mut::<LEVEL>(table))
+                // SFENCE.VMA covers leaf translations only, so conservatively request all-address
+                // invalidation through the selected strategy.
+                self.pending_cleanup.push_flush(TlbFlush::Full);
+                Ok(PageTable::<M, PTE, AL, F>::table_of_mut::<LEVEL>(table))
             } else {
                 Err(PagingError::NotMapped)
             }
@@ -393,14 +450,14 @@ where
                 let old_paddr = entry.paddr();
                 let flags = entry.flags();
 
-                let table_paddr = PageTable::<M, PTE, A>::alloc_table::<LEVEL>()?;
+                let table_paddr = PageTable::<M, PTE, AL, F>::alloc_table::<LEVEL>()?;
                 *entry = GenericPTE::new_table(table_paddr);
 
                 // A huge-page TLB entry may cover any address in the old mapping.
                 // Use a conservative full flush when replacing a huge leaf with a table.
-                self.pending_flushes += TlbFlush::Full;
+                self.pending_cleanup.push_flush(TlbFlush::Full);
 
-                let table = PageTable::<M, PTE, A>::table_of_mut::<LEVEL>(table_paddr);
+                let table = PageTable::<M, PTE, AL, F>::table_of_mut::<LEVEL>(table_paddr);
                 for (i, entry) in table.iter_mut().enumerate() {
                     *entry =
                         PTE::new_page(old_paddr + i * M::LEVEL_PAGE_SIZE[LEVEL], flags, LEVEL != 0);
@@ -411,36 +468,65 @@ where
                 Err(PagingError::MappedToHugePage)
             }
         } else {
-            Ok(PageTable::<M, PTE, A>::table_of_mut::<LEVEL>(entry.paddr()))
+            Ok(PageTable::<M, PTE, AL, F>::table_of_mut::<LEVEL>(
+                entry.paddr(),
+            ))
         }
     }
 
-    /// Clears an entry and all leaf mappings below it.
+    /// Clears an entry or its descendant leaf mappings.
     ///
-    /// Clearing a leaf records the required TLB invalidation. For a table entry,
-    /// the function recursively clears its descendants while retaining all table
-    /// frame allocations.
+    /// Clearing a leaf records the required TLB invalidation. When replacing a table entry, all
+    /// descendant table allocations are recorded before clearing the descriptor. Otherwise only
+    /// descendant leaves are cleared, retaining table descriptors and their allocations.
+    /// If recording allocations fails, the descriptor and its subtree remain unchanged and only
+    /// temporary record storage is deallocated.
     fn clear_pte(
         &mut self,
         entry: &mut PTE,
         level: usize,
         vaddr: M::VirtAddr,
+        replace_table: bool,
     ) -> PagingResult<M::VirtAddr> {
         if entry.is_unused() {
             Ok(())
         } else if level == 0 || entry.is_huge() {
-            if entry.is_huge() {
-                self.pending_flushes += TlbFlush::Full;
+            self.pending_cleanup.push_flush(if entry.is_huge() {
+                TlbFlush::Full
             } else {
-                self.pending_flushes += TlbFlush::Page(vaddr);
-            }
+                TlbFlush::Page(vaddr)
+            });
             entry.clear();
             Ok(())
+        } else if replace_table {
+            let mut records = DeallocationList::new(&DynPageAllocator::new::<AL>());
+
+            // Collect all frames in this subtree and record them for deallocation.
+            Self::iter_existing_page_tables_inner(
+                level - 1,
+                entry.paddr(),
+                PageTable::<M, PTE, AL, F>::table_of_mut_non_const(entry.paddr(), level - 1),
+                &mut |level, paddr| {
+                    records
+                        .push(DeallocationItem {
+                            paddr,
+                            size: PageTable::<M, PTE, AL, F>::table_size_non_const(level),
+                        })
+                        .map_err(|_| PagingError::AllocationFailed)
+                },
+            )?;
+
+            entry.clear();
+            self.pending_cleanup.append_flushes(TlbFlushes::Full);
+            // SAFETY: they all use the same allocator.
+            unsafe { self.pending_cleanup.append_deallocations(records) };
+            Ok(())
         } else {
-            let table = PageTable::<M, PTE, A>::table_of_mut_non_const(entry.paddr(), level - 1);
+            let table =
+                PageTable::<M, PTE, AL, F>::table_of_mut_non_const(entry.paddr(), level - 1);
             for (index, child) in table.iter_mut().enumerate() {
                 let child_vaddr = vaddr + index * M::LEVEL_PAGE_SIZE[level - 1];
-                self.clear_pte(child, level - 1, child_vaddr)?;
+                self.clear_pte(child, level - 1, child_vaddr, false)?;
             }
             Ok(())
         }
@@ -448,38 +534,51 @@ where
 
     /// Splits a range into the largest supported pages and invokes a callback for each.
     ///
-    /// The function removes current mappings from the range and calls `f` for the
+    /// The function removes current mappings from the range and calls `c` for the
     /// entry representing each selected page.
     ///
     /// The callback parameters are the entry level, its table index, the page's
     /// starting virtual address, and a mutable reference to the entry. Level `0`
     /// is the lowest level and `M::LEVELS - 1` is the highest.
     ///
-    /// Before invoking `f`, an existing leaf entry is [cleared](GenericPTE::clear). If
-    /// the selected entry points to a child page table, its descendant leaf entries are
-    /// cleared recursively while the table entries and table frames are retained. Huge
-    /// mappings are split when traversal must descend to a lower level.
+    /// Before invoking the callback, an existing leaf is [cleared](GenericPTE::clear). A child
+    /// table is either disconnected after recording its allocations or recursively cleared with
+    /// its table descriptors retained, according to the replacement argument. Huge mappings are
+    /// split when traversal must descend to a lower level.
     ///
     /// The input range is expanded outward to the page size of the lowest level.
-    fn iter_pages_in_range<F>(
+    ///
+    /// `max_page_level` is the maximum supported page level, `None` means using the maximum page
+    /// level specified by the metadata.
+    fn iter_pages_in_range<C>(
         &mut self,
         range: AddrRange<M::VirtAddr>,
-        mut f: F,
+        max_page_level: Option<usize>,
+        replace_table: bool,
+        mut c: C,
     ) -> PagingResult<M::VirtAddr>
     where
-        F: FnMut(usize, usize, M::VirtAddr, &mut PTE) -> PagingResult<M::VirtAddr, TlbFlush<M>>,
+        C: FnMut(
+            usize,
+            usize,
+            M::VirtAddr,
+            &mut PTE,
+        ) -> PagingResult<M::VirtAddr, TlbFlush<M::VirtAddr>>,
     {
+        let max_page_level = max_page_level
+            .unwrap_or(M::MAX_PAGE_LEVEL)
+            .min(M::MAX_PAGE_LEVEL);
         let range_aligned = range
             .align_outwards(M::LEVEL_PAGE_SIZE[0])
             .ok_or(PagingError::NonCanonical { vaddr: range.end })?;
         let range_truncated =
-            PageTable::<M, PTE, A>::validate_and_truncate_vaddr_range(range_aligned)?;
+            PageTable::<M, PTE, AL, F>::validate_and_truncate_vaddr_range(range_aligned)?;
 
         let (mut start_truncated, end_truncated) = range_truncated;
         let mut start_vaddr = range_aligned.start;
 
         while start_truncated < end_truncated {
-            for level in (0..=M::MAX_PAGE_LEVEL).rev() {
+            for level in (0..=max_page_level).rev() {
                 let page_size = M::LEVEL_PAGE_SIZE[level];
                 if start_truncated.is_aligned(page_size) {
                     let Some(next_truncated) =
@@ -495,10 +594,12 @@ where
                             level,
                             true,
                             true,
+                            replace_table,
                         )?;
-                        f(level, index, start_vaddr, entry)?
+                        c(level, index, start_vaddr, entry)?
                     };
-                    self.pending_flushes += flush;
+                    self.pending_cleanup
+                        .append_flushes(TlbFlushes::None + flush);
                     start_vaddr = start_vaddr + (next_truncated - start_truncated);
                     start_truncated = next_truncated;
                     break;
@@ -511,8 +612,8 @@ where
 
     /// Invokes a callback for each page table in the hierarchy rooted here.
     ///
-    /// The callback parameters are the level of the page table and a mutable
-    /// reference to the page table.
+    /// The callback parameters are the level of the page table, and the physical
+    /// address of the page table.
     ///
     /// This function performs a depth-first post-order traversal of the page table
     /// hierarchy. At the same level, page tables are visited from left to right.
@@ -542,25 +643,27 @@ where
     /// Page table (level 1) 1
     /// Root page table (level 2)
     /// ```
-    fn iter_existing_page_tables<F>(&mut self, f: F) -> PagingResult<M::VirtAddr>
+    fn iter_existing_page_tables<C>(&mut self, c: &mut C) -> PagingResult<M::VirtAddr>
     where
-        F: FnMut(usize, &mut [PTE]) -> PagingResult<M::VirtAddr>,
+        C: FnMut(usize, PhysAddr) -> PagingResult<M::VirtAddr>,
         [(); M::LEVELS - 1]: Sized,
     {
-        let root_table = PageTable::<M, PTE, A>::table_of_mut::<{ M::LEVELS - 1 }>(self.table.root);
-        Self::iter_existing_page_tables_inner(root_table, M::LEVELS - 1, f).map(|_| ())
+        let root_paddr = self.table.root;
+        let root_table = PageTable::<M, PTE, AL, F>::table_of_mut::<{ M::LEVELS - 1 }>(root_paddr);
+        Self::iter_existing_page_tables_inner(M::LEVELS - 1, root_paddr, root_table, c)
     }
 
     /// Visits a page table's descendants and then invokes its callback.
     ///
-    /// Returning the callback carries its state through the recursive traversal.
-    fn iter_existing_page_tables_inner<F>(
-        this_table: &mut [PTE],
+    /// The callback receives the level and physical address of each page table in post-order.
+    fn iter_existing_page_tables_inner<C>(
         this_level: usize,
-        mut f: F,
-    ) -> PagingResult<M::VirtAddr, F>
+        this_paddr: PhysAddr,
+        this_table: &mut [PTE],
+        c: &mut C,
+    ) -> PagingResult<M::VirtAddr>
     where
-        F: FnMut(usize, &mut [PTE]) -> PagingResult<M::VirtAddr>,
+        C: FnMut(usize, PhysAddr) -> PagingResult<M::VirtAddr>,
     {
         // Above level zero, visit each child page table before visiting this page table.
         if this_level > 0 {
@@ -569,45 +672,57 @@ where
                     continue;
                 }
 
+                let next_paddr = entry.paddr();
                 let next_table =
-                    PageTable::<M, PTE, A>::table_of_mut_non_const(entry.paddr(), this_level - 1);
-                f = Self::iter_existing_page_tables_inner(next_table, this_level - 1, f)?;
+                    PageTable::<M, PTE, AL, F>::table_of_mut_non_const(next_paddr, this_level - 1);
+                Self::iter_existing_page_tables_inner(this_level - 1, next_paddr, next_table, c)?;
             }
         }
 
-        f(this_level, this_table).map(|_| f)
+        // The callback runs after this page table's descendants have been visited.
+        // Known issue: a deallocation callback can invalidate `this_table` before this function
+        // returns, violating Rust's reference-validity requirements. We just trust the Rust Compiler
+        // not to complain about it.
+        c(this_level, this_paddr)
     }
 
     /// Maps a virtual address range to a physical address range.
     ///
-    /// The range is rounded to base-page boundaries, existing mappings in the
-    /// covered range are replaced, and the virtual-to-physical offset is
+    /// The range is rounded outwards to base-page boundaries, existing mappings
+    /// in the covered range are replaced, and the virtual-to-physical offset is
     /// preserved across the mapped range.
     ///
-    /// Mapped data frames remain caller-managed. Child tables detached by mapping
-    /// replacement are deallocated when the multi-level page table is dropped.
-    /// An error can leave earlier changes applied. Their local
-    /// invalidations remain pending until the cursor is flushed or dropped.
+    /// The physical address is rounded down to base-page boundary.
     ///
-    /// TODO: Retain the addresses of detached child page tables for destruction. Currently,
-    /// replacing a table entry with a leaf loses those addresses and leaks their table frames.
-    pub fn map_inner(
+    /// Mapping a range of zero size is a no-op.
+    ///
+    /// See [PageTableCursorLike::map] for cleanup and partial-failure behavior.
+    pub fn map(
         &mut self,
         vaddr: M::VirtAddr,
         paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult<M::VirtAddr> {
-        let offset = usize::wrapping_sub(vaddr.into(), paddr.into());
+        if size == 0 {
+            return Ok(());
+        }
+
+        let paddr = paddr.align_down(M::LEVEL_PAGE_SIZE[0]);
+        let vaddr_aligned = vaddr.align_down(M::LEVEL_PAGE_SIZE[0]);
+        let offset = usize::wrapping_sub(vaddr_aligned.into(), paddr.into());
         let end = vaddr
             .checked_add(size)
             .ok_or(PagingError::NonCanonical { vaddr })?;
+        let max_page_level = max_page_level_for_offset::<M>(offset).unwrap_or_else(|| {
+            unreachable!("offset must be a multiple of some page size");
+        });
         self.iter_pages_in_range::<_>(
             AddrRange::new(vaddr, end),
+            Some(max_page_level),
+            true,
             |level, _index, page_vaddr, entry| {
                 let page_paddr = PhysAddr::from_usize(page_vaddr.wrapping_sub(offset).into());
-                // TODO: Record any child page table still referenced by this entry before
-                // replacing it, so its table frames can be deallocated when PageTable is dropped.
                 *entry = GenericPTE::new_page(page_paddr, flags, level != 0);
                 Ok(TlbFlush::Page(page_vaddr))
             },
@@ -618,17 +733,25 @@ where
     ///
     /// The range is rounded to base-page boundaries. Existing huge mappings may
     /// be split or cleared as needed, and any affected TLB entries are recorded
-    /// for this cursor's next flush.
+    /// for this cursor's next cleanup.
+    ///
+    /// Unmapping a range of zero size is no-op.
     ///
     /// Data frames are not deallocated. Intermediate tables remain allocated, and
     /// absent paths may allocate tables. An error can leave earlier changes
-    /// applied, with local invalidations pending until explicit or implicit flush.
-    pub fn unmap_inner(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult<M::VirtAddr> {
+    /// applied. See [PageTableCursorLike::unmap] for cleanup behavior.
+    pub fn unmap(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult<M::VirtAddr> {
+        if size == 0 {
+            return Ok(());
+        }
+
         let end = vaddr
             .checked_add(size)
             .ok_or(PagingError::NonCanonical { vaddr })?;
         self.iter_pages_in_range::<_>(
             AddrRange::new(vaddr, end),
+            None,
+            false,
             |_level, _index, _page_vaddr, _entry| Ok(TlbFlush::None),
         )
     }
@@ -637,8 +760,12 @@ where
 /// The common interface for a single-root multi-level page table.
 ///
 /// Operations delegate to the concrete methods with the same lifecycle contract.
-impl<M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> PageTableLike for PageTable<M, PTE, A>
+impl<M, PTE, AL, F> PageTableLike for PageTable<M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
@@ -650,17 +777,21 @@ where
     ///
     /// Copying this address does not change the hierarchy's table-frame lifetime.
     type Root = PhysAddr;
-    /// The cursor borrowing the multi-level page table.
-    ///
-    /// It uses the same metadata, entry, and allocator types as the borrowed value.
-    type Cursor<'a>
-        = PageTableCursor<'a, M, PTE, A>
-    where
-        Self: 'a;
     /// The allocator for table frames.
     ///
-    /// Table access, allocation, and deallocation use `A`.
-    type Allocator = A;
+    /// Table access, allocation, and deallocation use `AL`.
+    type Allocator = AL;
+    /// The TLB flusher for this page table hierarchy.
+    ///
+    /// TLB invalidations are performed using this type.
+    type TlbFlusher = F;
+    /// The cursor borrowing the multi-level page table.
+    ///
+    /// It uses the same metadata, entry, allocator, and TLB flusher types as the borrowed value.
+    type Cursor<'a>
+        = PageTableCursor<'a, M, PTE, AL, F>
+    where
+        Self: 'a;
 
     /// Constructs a single-root multi-level page table from an existing root.
     ///
@@ -700,10 +831,13 @@ where
 
 /// The common mutation interface for a single-root cursor.
 ///
-/// Operations preserve the concrete cursor's local invalidation behavior.
-impl<'a, M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> PageTableCursorLike
-    for PageTableCursor<'a, M, PTE, A>
+/// Operations preserve the concrete cursor's cleanup behavior.
+impl<'a, M, PTE, AL, F> PageTableCursorLike for PageTableCursor<'a, M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
@@ -713,12 +847,16 @@ where
     type VirtAddr = M::VirtAddr;
     /// The allocator for the borrowed page table hierarchy's table frames.
     ///
-    /// Intermediate page table frame allocations use `A`.
-    type Allocator = A;
+    /// Intermediate page table frame allocations use `AL`.
+    type Allocator = AL;
+    /// The multi-level page table type being mutated by this cursor.
+    ///
+    /// The cursor borrows the multi-level page table mutably during mutation.
+    type PageTable = PageTable<M, PTE, AL, F>;
 
     /// Maps a virtual range while leaving data frames caller-managed.
     ///
-    /// This delegates to [`PageTableCursor::map_inner`].
+    /// This delegates to [`PageTableCursor::map`].
     fn map(
         &mut self,
         vaddr: Self::VirtAddr,
@@ -726,39 +864,54 @@ where
         size: usize,
         flags: MappingFlags,
     ) -> PagingResult<Self::VirtAddr> {
-        self.map_inner(vaddr, paddr, size, flags)
+        self.map(vaddr, paddr, size, flags)
     }
 
     /// Removes mappings without deallocating their data frames.
     ///
-    /// This delegates to [`PageTableCursor::unmap_inner`].
+    /// This delegates to [`PageTableCursor::unmap`].
     fn unmap(&mut self, vaddr: Self::VirtAddr, size: usize) -> PagingResult<Self::VirtAddr> {
-        self.unmap_inner(vaddr, size)
+        self.unmap(vaddr, size)
     }
 
-    /// Flushes accumulated invalidations on the local processor.
+    /// Processes accumulated invalidations and deallocations.
     ///
-    /// This delegates to [`PageTableCursor::flush`].
-    fn flush(&mut self) {
-        self.flush();
+    /// Same as [`PageTableCursor::clean_up`].
+    fn clean_up(&mut self) {
+        self.clean_up();
+    }
+
+    /// Transfers accumulated cleanup without processing it.
+    ///
+    /// # Safety
+    ///
+    /// The caller must handle the returned cleanup properly after calling this
+    /// function, and before any other operations on the cursor.
+    ///
+    /// See [`PendingCleanup`] for synchronization requirements.
+    unsafe fn take_cleanup(&mut self) -> PendingCleanup<Self::VirtAddr> {
+        // Safety: the user promised it.
+        unsafe { self.take_cleanup() }
     }
 }
+// }
 
-/// Local invalidation when a cursor leaves scope.
+/// Fallback cleanup when a cursor leaves scope.
 ///
-/// A cursor's destruction preserves pending invalidations after partial failure.
-impl<'a, M: PageTableMeta, PTE: GenericPTE, A: PageAllocator> Drop
-    for PageTableCursor<'a, M, PTE, A>
+/// A cursor's destruction processes pending records after partial failure.
+impl<'a, M, PTE, AL, F> Drop for PageTableCursor<'a, M, PTE, AL, F>
 where
+    M: PageTableMeta,
+    PTE: GenericPTE,
+    AL: PageAllocator,
+    F: TlbFlusher<M::VirtAddr>,
     [(); M::LEVELS]: Sized,
     [(); M::LEVELS - 1]: Sized,
 {
-    /// Flushes invalidations left pending when the cursor leaves scope.
+    /// Processes cleanup left pending when the cursor leaves scope.
     ///
-    /// This applies local invalidations for mutations that completed before a
-    /// later cursor operation returned an error. It does not synchronize remote
-    /// TLBs or concurrent hardware page walks.
+    /// Same as [`PageTableCursor::clean_up`].
     fn drop(&mut self) {
-        self.flush();
+        self.clean_up();
     }
 }

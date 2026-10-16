@@ -351,7 +351,8 @@ pub(super) fn init_vmm_mapping_early(phys_mem_regions: &MemoryRegions) {
 /// must have registered all early page-table allocations as allocated pages so it can release them.
 pub(super) fn use_formal_page_table_allocator() {
     // Fix function addresses in the opaque page table type first.
-    let page_table_type = exarch::mem::get_page_table_type::<FormalPageAllocator>(VIRTUAL_ADDRESS_SPACE.layout.mode);
+    let page_table_type =
+        exarch::mem::get_page_table_type::<FormalPageAllocator>(VIRTUAL_ADDRESS_SPACE.layout.mode);
     *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
 
     let mut page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();

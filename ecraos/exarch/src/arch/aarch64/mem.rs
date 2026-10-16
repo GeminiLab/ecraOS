@@ -468,7 +468,7 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
 /// Returns the page-table descriptor for an AArch64 mode and allocator.
 ///
 /// The selected single-root or dual-root geometry captures `AL` for all operations that access,
-/// allocate, or release page-table pages. Selecting a descriptor does not allocate memory.
+/// allocate, or deallocate page-table frames. Selecting a descriptor does not allocate memory.
 pub fn get_page_table_type<AL: PageAllocator>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {

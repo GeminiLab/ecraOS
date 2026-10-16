@@ -5,20 +5,10 @@
 
 use memory_addr::VirtAddr;
 
-use crate::meta::{PageTableMeta, SymmetricCoverage};
-
-/// Flushes one mapping or the entire local RISC-V TLB.
-///
-/// [`Some`] issues `SFENCE.VMA` for the supplied virtual address. [`None`]
-/// issues the all-address form.
-#[inline]
-pub fn flush_local_tlb(vaddr: Option<VirtAddr>) {
-    if let Some(vaddr) = vaddr {
-        riscv::asm::sfence_vma(0, vaddr.as_usize())
-    } else {
-        riscv::asm::sfence_vma_all();
-    }
-}
+use crate::{
+    meta::{PageTableMeta, SymmetricCoverage},
+    pt::cleanup::TlbFlusher,
+};
 
 /// Metadata for the RISC-V Sv39 page table hierarchy format.
 ///
@@ -28,13 +18,6 @@ pub struct Sv39PageTableMeta;
 impl PageTableMeta for Sv39PageTableMeta {
     /// The standard virtual-address type used by Sv39.
     type VirtAddr = VirtAddr;
-
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// This delegates to [`flush_local_tlb`].
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
-    }
 
     /// The three translation levels in Sv39.
     const LEVELS: usize = 3;
@@ -60,13 +43,6 @@ impl PageTableMeta for Sv48PageTableMeta {
     /// The standard virtual-address type used by Sv48.
     type VirtAddr = VirtAddr;
 
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// This delegates to [`flush_local_tlb`].
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
-    }
-
     /// The four translation levels in Sv48.
     const LEVELS: usize = 4;
     /// The twelve offset bits in an Sv48 4 KiB page.
@@ -91,13 +67,6 @@ impl PageTableMeta for Sv57PageTableMeta {
     /// The standard virtual-address type used by Sv57.
     type VirtAddr = VirtAddr;
 
-    /// Invalidates one mapping or all entries in the local TLB.
-    ///
-    /// This delegates to [`flush_local_tlb`].
-    fn flush_tlb(vaddr: Option<Self::VirtAddr>) {
-        flush_local_tlb(vaddr);
-    }
-
     /// The five translation levels in Sv57.
     const LEVELS: usize = 5;
     /// The twelve offset bits in an Sv57 4 KiB page.
@@ -111,4 +80,34 @@ impl PageTableMeta for Sv57PageTableMeta {
     ///
     /// Every level in Sv57 may contain a leaf.
     const MAX_PAGE_LEVEL: usize = 4;
+}
+
+/// The local TLB flushing strategy for RISC-V 64.
+///
+/// `Some(addr)` uses address-specific `SFENCE.VMA` with ASID zero in a general-purpose register
+/// as `rs2`. It invalidates non-global leaf translations for that address and ASID zero.
+/// `None` uses `SFENCE.VMA x0, x0`, covering all addresses and ASIDs, including global
+/// translations.
+///
+/// Use this strategy only when address-specific invalidations affect ASID-zero, non-global
+/// translations. A global ancestor descriptor also makes a translation global. See
+/// [`TlbFlusher`] for synchronization requirements.
+pub struct Riscv64LocalTlbFlusher;
+
+impl TlbFlusher<VirtAddr> for Riscv64LocalTlbFlusher {
+    fn flush(addr: Option<VirtAddr>) {
+        flush_local_tlb(addr);
+    }
+}
+
+/// Flushes one mapping or the entire local RISC-V TLB.
+///
+/// See [`Riscv64LocalTlbFlusher`] for the ASID and global-translation scope of each operation.
+#[inline]
+fn flush_local_tlb(vaddr: Option<VirtAddr>) {
+    if let Some(vaddr) = vaddr {
+        riscv::asm::sfence_vma(0, vaddr.as_usize())
+    } else {
+        riscv::asm::sfence_vma_all();
+    }
 }

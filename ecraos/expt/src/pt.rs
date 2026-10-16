@@ -1,17 +1,19 @@
 //! Common multi-level page table interfaces and concrete implementations.
 //!
-//! The traits describe construction, table-frame ownership, and cursor-based mutation for
+//! The traits describe construction, table-frame management, and cursor-based mutation for
 //! single-root and dual-root multi-level page tables.
 
 use expalloc_trait::PageAllocator;
 use memory_addr::PhysAddr;
 use page_table_entry::MappingFlags;
 
-use crate::{error::PagingResult, meta::VirtAddr};
+use crate::{error::PagingResult, meta::VirtAddr, pt::cleanup::TlbFlusher};
 
+pub mod cleanup;
 pub mod dual;
 pub mod single;
 
+use cleanup::PendingCleanup;
 pub use dual::{DualPageTable, DualPageTableCursor, DualPageTableRoot};
 pub use single::{PageTable, PageTableCursor};
 
@@ -27,18 +29,27 @@ pub trait PageTableLike: Sized {
     type VirtAddr: VirtAddr;
     /// The value identifying one or more page table roots.
     ///
-    /// Copying this value does not change the table frames' lifetime.
+    /// Copying this value does not change the table frames' lifetime. Therefore,
+    /// the user must not use this value after dropping the page table hierarchy.
     type Root: Copy;
-    /// The cursor used to mutate this page table hierarchy.
-    ///
-    /// The cursor borrows the multi-level page table mutably during mutation.
-    type Cursor<'a>: PageTableCursorLike<VirtAddr = Self::VirtAddr, Allocator = Self::Allocator>
-    where
-        Self: 'a;
     /// The allocator for table frames.
     ///
     /// Allocations, physical-address translation, and deallocation use this type.
     type Allocator: PageAllocator;
+    /// The TLB flusher for this page table hierarchy.
+    ///
+    /// TLB invalidations are performed using this type.
+    type TlbFlusher: TlbFlusher<Self::VirtAddr>;
+    /// The cursor used to mutate this page table hierarchy.
+    ///
+    /// The cursor borrows the multi-level page table mutably during mutation.
+    type Cursor<'a>: PageTableCursorLike<
+            VirtAddr = Self::VirtAddr,
+            Allocator = Self::Allocator,
+            PageTable = Self,
+        >
+    where
+        Self: 'a;
 
     /// Constructs a multi-level page table from an existing page table hierarchy.
     ///
@@ -57,7 +68,7 @@ pub trait PageTableLike: Sized {
     /// Returns the root identifier without changing the table frames' lifetime.
     ///
     /// The returned physical address (or pair of physical addresses for dual-root
-    /// multi-level page tables) must not be used after dropping the owning value.
+    /// multi-level page tables) must not be used after dropping this value.
     fn root(&self) -> Self::Root;
 
     /// Consumes the multi-level page table without deallocating its table frames.
@@ -69,8 +80,7 @@ pub trait PageTableLike: Sized {
 
     /// Creates a cursor for batched mutations.
     ///
-    /// The cursor borrows this value mutably and flushes pending local TLB invalidations
-    /// when explicitly flushed or dropped.
+    /// See [PageTableCursorLike] for batching and cleanup behavior.
     fn cursor(&mut self) -> Self::Cursor<'_>;
 }
 
@@ -80,6 +90,15 @@ pub trait PageTableLike: Sized {
 /// [`dual::DualPageTableCursor`]. A cursor's mutable borrow excludes other Rust
 /// mutations through the borrowed multi-level page table but does not synchronize
 /// hardware page walks.
+///
+/// Map and unmap round ranges outward to base-page boundaries. A successful return means the PTE
+/// mutations are complete, with cleanup still pending. Errors retain earlier mutations, including
+/// any intermediate tables already installed. Unattached allocations from failed preparation are
+/// deallocated. Operations are not transactional.
+///
+/// Cleanup remains pending until [`Self::clean_up`] processes it or [`Self::take_cleanup`]
+/// transfers it to the caller. Implementations also process any remaining cleanup automatically
+/// when the cursor leaves scope.
 pub trait PageTableCursorLike {
     /// The semantic virtual-address type accepted by this cursor.
     ///
@@ -90,12 +109,16 @@ pub trait PageTableCursorLike {
     /// Intermediate page tables are allocated through the borrowed multi-level page table's
     /// allocator.
     type Allocator: PageAllocator;
+    /// The multi-level page table type being mutated by this cursor.
+    ///
+    /// The cursor borrows the multi-level page table mutably during mutation.
+    type PageTable: PageTableLike;
 
     /// Maps a virtual range to physical memory.
     ///
     /// This operation changes page table entries while mapped data frames remain
-    /// caller-managed. An error can leave earlier changes applied, with
-    /// local invalidations retained until the cursor is flushed or dropped.
+    /// caller-managed. Replacing a child-table descriptor records its table-frame allocations for
+    /// deferred deallocation. See the trait-level contract for partial failure and cleanup.
     fn map(
         &mut self,
         vaddr: Self::VirtAddr,
@@ -107,13 +130,22 @@ pub trait PageTableCursorLike {
     /// Removes mappings from a virtual address range.
     ///
     /// This operation clears mappings but does not deallocate their data frames.
-    /// An error can leave earlier changes applied, with local invalidations
-    /// retained until the cursor is flushed or dropped.
+    /// Intermediate tables remain allocated. See the trait-level contract for partial failure
+    /// and cleanup.
     fn unmap(&mut self, vaddr: Self::VirtAddr, size: usize) -> PagingResult<Self::VirtAddr>;
 
-    /// Flushes invalidations accumulated by this cursor on the local processor.
+    /// Processes pending cleanup using the selected TLB flushing strategy and allocator.
     ///
-    /// Remote TLB invalidation and hardware page-walk synchronization remain the
-    /// caller's responsibility.
-    fn flush(&mut self);
+    /// See [`PendingCleanup`] for synchronization requirements.
+    fn clean_up(&mut self);
+
+    /// Transfers all pending cleanup out of the cursor without processing it.
+    ///
+    /// # Safety
+    ///
+    /// The caller must handle the returned cleanup properly after calling this
+    /// function, and before any other operations on the cursor.
+    ///
+    /// See [`PendingCleanup`] for synchronization requirements.
+    unsafe fn take_cleanup(&mut self) -> PendingCleanup<Self::VirtAddr>;
 }

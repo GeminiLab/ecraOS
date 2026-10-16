@@ -213,7 +213,7 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
 /// Returns the page-table descriptor for a RISC-V mode and allocator.
 ///
 /// The selected Sv39, Sv48, or Sv57 format captures `AL` for all operations that access,
-/// allocate, or release page-table pages. Selecting a descriptor does not allocate memory.
+/// allocate, or deallocate page-table frames. Selecting a descriptor does not allocate memory.
 pub fn get_page_table_type<AL: PageAllocator>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {
