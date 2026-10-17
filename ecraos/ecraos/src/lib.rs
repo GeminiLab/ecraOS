@@ -15,13 +15,15 @@
 /// available in the kernel.
 extern crate alloc;
 
-use log::{error, info};
+pub use expanic::{bug, kpanic};
+use log::info;
 
 mod device;
 mod kernel_if;
 mod logging;
 mod mem;
 pub mod mp;
+pub mod panic;
 mod percpu;
 pub mod task;
 mod test_guard;
@@ -255,19 +257,4 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     app_main_ap();
 
     task::run_idle()
-}
-
-/// Minimal panic handler: spin forever with interrupts possibly still disabled.
-#[cfg(not(feature = "host-test"))]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    use exarch::power::{ShutdownReason, shutdown};
-
-    if logging::is_inited() {
-        error!("Kernel panic: {}", info);
-    } else {
-        kprintln!("Kernel panic: {}", info);
-    }
-
-    shutdown(ShutdownReason::Panicked)
 }

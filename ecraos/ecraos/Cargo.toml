@@ -15,6 +15,7 @@ ecraldr_base.workspace = true
 exbuddy = { path = "../exbuddy" }
 exarch = { path = "../exarch" }
 expalloc_trait = { path = "../expalloc_trait" }
+expanic = { path = "../expanic" }
 expercpu = { path = "../expercpu/expercpu", features = ["early-slot", "remote-access"] }
 expt = { path = "../expt" }
 exslab = { path = "../exslab" }

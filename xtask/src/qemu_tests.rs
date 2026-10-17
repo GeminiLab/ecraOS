@@ -10,7 +10,9 @@ use crate::qemu::fatal;
 #[test]
 fn detects_guest_fatal_messages() {
     for text in [
-        "Kernel panic: test",
+        "Panic at ",
+        "Kernel panic at ",
+        "Bug at ",
         "FATAL: error",
         "triple fault",
         "unhandled supervisor instruction access fault",

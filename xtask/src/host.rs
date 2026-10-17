@@ -27,6 +27,7 @@ pub fn test(root: &Path) -> TaskResult<()> {
         "size_disp",
         "dyn_static_traits",
         "expalloc_trait",
+        "expanic",
     ] {
         kernel.args(["-p", package]);
     }

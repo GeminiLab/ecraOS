@@ -5,6 +5,7 @@ members = [
     "exarch",
     "exbuddy",
     "expalloc_trait",
+    "expanic",
     "expercpu/expercpu",
     "expercpu/expercpu_macros",
     "expt",

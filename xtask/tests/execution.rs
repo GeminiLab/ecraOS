@@ -76,7 +76,7 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 printf '%s\n' "$cpus" >> "$CPU_RECORD"
-if [ "$cpus" = 1 ]; then echo 'Kernel panic: fixture failure' >&2; else echo 'fixture success'; fi
+if [ "$cpus" = 1 ]; then echo 'Kernel panic at fixture.rs:1:1: fixture failure' >&2; else echo 'fixture success'; fi
 exit 0
 "#,
         );

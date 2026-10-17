@@ -140,6 +140,7 @@ dependencies = [
  "exarch",
  "exbuddy",
  "expalloc_trait",
+ "expanic",
  "expercpu",
  "expt",
  "exslab",
@@ -214,6 +215,10 @@ dependencies = [
  "dyn_static_traits",
  "memory_addr",
 ]
+
+[[package]]
+name = "expanic"
+version = "0.1.0"
 
 [[package]]
 name = "expercpu"

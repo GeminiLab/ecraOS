@@ -119,7 +119,9 @@ fn fatal(output: &[u8]) -> bool {
         .to_lowercase()
         .lines()
         .any(|line| {
-            line.contains("kernel panic:")
+            line.contains("kernel panic at ")
+                || line.contains("panic at ")
+                || line.contains("bug at ")
                 || line.contains("fatal:")
                 || line.contains("triple fault")
                 || (line.contains("unhandled supervisor ") && line.contains("fault"))
