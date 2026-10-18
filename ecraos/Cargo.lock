@@ -242,6 +242,7 @@ dependencies = [
  "cfg-if",
  "dyn_static_traits",
  "expalloc_trait",
+ "expanic",
  "heapless",
  "maybe_non_generic",
  "memory_addr",

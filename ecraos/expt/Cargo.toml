@@ -7,6 +7,7 @@ edition = "2024"
 cfg-if.workspace = true
 dyn_static_traits = { path = "../utils/dyn_static_traits" }
 expalloc_trait = { path = "../expalloc_trait" }
+expanic = { path = "../expanic" }
 heapless = "0.9"
 maybe_non_generic = { path = "../utils/maybe_non_generic" }
 memory_addr.workspace = true

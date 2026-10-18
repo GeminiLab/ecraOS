@@ -6,6 +6,7 @@
 use core::{marker::PhantomData, mem::ManuallyDrop};
 
 use expalloc_trait::PageAllocator;
+use expanic::UnwrapOrBug;
 use maybe_non_generic::maybe_non_generic;
 use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr, PhysAddr};
 use page_table_entry::{GenericPTE, MappingFlags};
@@ -625,9 +626,8 @@ where
         let end = vaddr
             .checked_add(size)
             .ok_or(PagingError::NonCanonical { vaddr })?;
-        let max_page_level = max_page_level_for_offset::<M>(offset).unwrap_or_else(|| {
-            unreachable!("offset must be a multiple of some page size");
-        });
+        let max_page_level = max_page_level_for_offset::<M>(offset)
+            .expect_or_bug("offset must be a multiple of some page size");
         self.iter_pages_in_range::<_>(
             AddrRange::new(vaddr, end),
             Some(max_page_level),

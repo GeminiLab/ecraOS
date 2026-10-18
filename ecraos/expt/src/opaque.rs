@@ -8,6 +8,7 @@
 use core::mem::ManuallyDrop;
 
 use expalloc_trait::PageAllocator;
+use expanic::bug;
 use memory_addr::{PhysAddr, pa};
 use page_table_entry::{GenericPTE, MappingFlags};
 
@@ -101,20 +102,20 @@ struct PageTableMethods<A: VirtAddr> {
 ///
 /// Each method table retains the concrete format and allocator in its function pointers.
 impl<A: VirtAddr> PageTableMethods<A> {
-    /// Creates a method table that rejects allocation and mutation by panicking.
+    /// Creates a method table that rejects allocation and mutation by reporting bugs.
     ///
     /// Destruction is a no-op so a constant-initialization sentinel can be dropped.
     pub const fn dummy() -> Self {
-        /// Panics when an operation is attempted through a dummy method table.
+        /// Reports a bug when an operation is attempted through a dummy method table.
         ///
         /// Allocation and mutation both call this helper.
-        fn panic_im_dummy() -> ! {
-            panic!("dummy page table type does not support any actual operations")
+        fn bug_im_dummy() -> ! {
+            bug!("dummy page table type does not support any actual operations")
         }
 
         Self {
-            new_alloc: || panic_im_dummy(),
-            apply_actions: |_, _| panic_im_dummy(),
+            new_alloc: || bug_im_dummy(),
+            apply_actions: |_, _| bug_im_dummy(),
             destroy: |_| {},
         }
     }
@@ -142,7 +143,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
                 let OpaquePageTableRoot::Single(root) = root;
                 #[cfg(any(test, target_arch = "aarch64"))]
                 let OpaquePageTableRoot::Single(root) = root else {
-                    panic!("passing dual-root page table to single-root page table operation")
+                    bug!("passing dual-root page table to single-root page table operation")
                 };
                 // Use `ManuallyDrop` to avoid dropping the hierarchy on error.
                 let mut pt = ManuallyDrop::new(unsafe { PageTable::<M, PTE, AL, F>::new_at(root) });
@@ -178,7 +179,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
                 }
                 #[cfg(any(test, target_arch = "aarch64"))]
                 OpaquePageTableRoot::Dual(_) => {
-                    panic!("passing dual-root page table to single-root page table destruction")
+                    bug!("passing dual-root page table to single-root page table destruction")
                 }
             },
         }
@@ -206,7 +207,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
             },
             apply_actions: |root, actions| {
                 let OpaquePageTableRoot::Dual(root) = root else {
-                    panic!("passing single-root page table to dual-root page table operation")
+                    bug!("passing single-root page table to dual-root page table operation")
                 };
 
                 // Suppress hierarchy destruction on errors or panics while transferring cleanup.
@@ -240,7 +241,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
             },
             destroy: |root| {
                 let OpaquePageTableRoot::Dual(root) = root else {
-                    panic!("passing single-root page table to dual-root page table destruction")
+                    bug!("passing single-root page table to dual-root page table destruction")
                 };
                 drop(unsafe {
                     crate::pt::DualPageTable::<A, ML, PTEL, MU, PTEU, AL, F>::new_at(root)
@@ -317,7 +318,7 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
         }
     }
 
-    /// Creates a descriptor whose allocation and mutation operations panic.
+    /// Creates a descriptor whose allocation and mutation operations report bugs.
     ///
     /// This sentinel is suitable for constant initialization but must be
     /// replaced before use. Its destruction operation is a no-op.
@@ -378,8 +379,8 @@ pub struct OpaquePageTable<A: VirtAddr> {
 impl<A: VirtAddr> OpaquePageTable<A> {
     /// Creates a sentinel multi-level page table.
     ///
-    /// Allocation and mutation panic, while destruction is a no-op. The zero-root sentinel is
-    /// suitable for constant initialization before replacement with a concrete value.
+    /// Allocation and mutation report bugs, while destruction is a no-op. The zero-root sentinel
+    /// is suitable for constant initialization before replacement with a concrete value.
     pub const fn dummy() -> Self {
         Self {
             root: OpaquePageTableRoot::Single(pa!(0)),
@@ -490,6 +491,7 @@ impl<A: VirtAddr> Drop for OpaquePageTable<A> {
 #[cfg(test)]
 mod tests {
     use memory_addr::{VirtAddr, pa};
+    use std::{panic::catch_unwind, string::String};
 
     use super::{OpaquePageTable, OpaquePageTableRoot, PageTableMethods};
 
@@ -510,5 +512,26 @@ mod tests {
         };
 
         assert_eq!(page_table.leak(), root);
+    }
+
+    /// Verifies that dummy operations report an internal bug before terminating.
+    ///
+    /// Dummy descriptors are initialization sentinels and must never be used as live tables.
+    #[test]
+    fn dummy_operation_reports_bug() {
+        let payload = catch_unwind(|| {
+            let methods = PageTableMethods::<VirtAddr>::dummy();
+            let _ = (methods.new_alloc)();
+        })
+        .expect_err("dummy operation must terminate");
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .expect("default termination must carry a string message");
+        assert!(
+            message.contains("Bug at"),
+            "unexpected bug report: {message}"
+        );
     }
 }

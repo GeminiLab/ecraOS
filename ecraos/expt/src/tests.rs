@@ -3395,11 +3395,11 @@ mod dual_and_opaque {
         assert_unmapped::<Upper>(roots.upper, va(UPPER_BASE + PAGE));
     }
 
-    /// Verifies dummy allocation and mutation panic while access and destruction are inert.
+    /// Verifies dummy allocation and mutation report bugs while access and destruction are inert.
     ///
     /// The zero-root sentinel never translates a physical address or allocates table memory.
     #[test]
-    fn opaque_dummy_panics_for_operations_and_keeps_sentinel_inert() {
+    fn opaque_dummy_reports_bugs_for_operations_and_keeps_sentinel_inert() {
         let _context = TestContext::new();
         let descriptor = OpaquePageTableType::<VirtAddr>::dummy();
         let allocation = catch_unwind(AssertUnwindSafe(|| descriptor.new_pagetable_alloc()));
