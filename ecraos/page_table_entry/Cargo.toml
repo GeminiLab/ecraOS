@@ -1,0 +1,33 @@
+[package]
+# Source: https://github.com/arceos-org/page_table_multiarch/tree/main/page_table_entry
+# This copy is maintained locally to use memory_addr 0.5.0-alpha.const-addr-and-ranges.0.
+name = "page_table_entry"
+description = "Page table entry definition for various hardware architectures"
+documentation = "https://docs.rs/page_table_entry"
+version = "0.6.2"
+edition = "2024"
+authors = ["Yuekai Jia <equation618@gmail.com>"]
+license = "GPL-3.0-or-later OR Apache-2.0 OR MulanPSL-2.0"
+homepage = "https://github.com/arceos-org/arceos"
+repository = "https://github.com/arceos-org/page_table_multiarch"
+keywords = ["arceos", "paging", "page-table", "virtual-memory"]
+categories = ["os", "hardware-support", "memory-management", "no-std"]
+rust-version = "1.85"
+
+[features]
+arm-el2 = []
+xuantie-c9xx = []
+
+[dependencies]
+bitflags = "2.9"
+memory_addr = "0.5.0-alpha.const-addr-and-ranges.0"
+
+[target.'cfg(any(target_arch = "aarch64", docsrs))'.dependencies]
+aarch64-cpu = "11.0"
+
+[target.'cfg(any(target_arch = "x86_64", docsrs))'.dependencies]
+x86_64 = { version = "0.15", default-features = false }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "docsrs"]
+all-features = true

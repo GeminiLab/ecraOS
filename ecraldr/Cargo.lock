@@ -78,8 +78,9 @@ version = "0.1.0"
 
 [[package]]
 name = "memory_addr"
-version = "0.4.1"
-source = "git+https://github.com/arceos-org/axmm_crates/?rev=d4fc64141cb6544d41d43810e96008edb6560fff#d4fc64141cb6544d41d43810e96008edb6560fff"
+version = "0.5.0-alpha.const-addr-and-ranges.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "061eebd3df65ac8adfd4cdcb58b2db171e52c0dfb0028a50677c9182eba2a57e"
 
 [[package]]
 name = "proc-macro2"

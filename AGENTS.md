@@ -148,8 +148,8 @@ cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr-aarch64-linux \
 Each loader binary must be checked for its own architecture. A loader workspace
 check with `--workspace` and one target also selects incompatible loader binaries.
 
-The smoke applications must repeat the workspace's `memory_addr` patch because
-Cargo only applies patches from the root manifest of the current build.
+The kernel workspace pins the shared `memory_addr` dependency used by its crates.
+Smoke applications inherit it through their `ecraos` dependency.
 
 ## Code Format
 
