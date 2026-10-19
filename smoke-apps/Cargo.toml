@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "default",
+    "ipi",
+    "sleep-join",
+    "sync-preemption",
+]
+resolver = "3"
+
+[workspace.dependencies]
+ecraos = { path = "../ecraos/ecraos" }
+log = "0.4"
+
+[patch.crates-io]
+memory_addr = { git = "https://github.com/arceos-org/axmm_crates/", rev = "d4fc64141cb6544d41d43810e96008edb6560fff" }

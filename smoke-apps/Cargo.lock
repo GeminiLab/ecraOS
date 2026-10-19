@@ -97,6 +97,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "default"
+version = "0.1.0"
+dependencies = [
+ "ecraos",
+]
+
+[[package]]
 name = "dyn_static_traits"
 version = "0.1.0"
 dependencies = [
@@ -297,6 +304,13 @@ checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
 dependencies = [
  "hash32",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "ipi"
+version = "0.1.0"
+dependencies = [
+ "ecraos",
 ]
 
 [[package]]
@@ -581,6 +595,14 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 [[package]]
 name = "size_disp"
 version = "0.1.0"
+
+[[package]]
+name = "sleep-join"
+version = "0.1.0"
+dependencies = [
+ "ecraos",
+ "log",
+]
 
 [[package]]
 name = "spinning_top"

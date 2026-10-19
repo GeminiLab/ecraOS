@@ -21,8 +21,9 @@ There is no root Cargo manifest.
   - `ecraldr/ecraldr-riscv64-none` - The current RISC-V 64 loader.
   - `ecraldr/ecraldr-aarch64-linux` - The current AArch64 Linux-image loader.
   - `ecraldr/ecraldr_build_rs` - An excluded standalone loader build helper.
-- `smoke-apps/` - Independent kernel binaries: `default`, `sync-preemption`,
-  and `sleep-join`. Each application has its own manifest and lockfile.
+- `smoke-apps/` - A Cargo workspace for the independent kernel binaries:
+  `default`, `ipi`, `sync-preemption`, and `sleep-join`. Shared dependencies,
+  and the lockfile are defined at the workspace root.
 - `xtask/` - A standalone host-side Cargo task runner for building and testing.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
@@ -46,10 +47,10 @@ The current build procedure is:
    linker script, and `KERNEL_BIN=<path-to-stripped-kernel>`.
 4. Strip the loader and run it in QEMU.
 
-The application and loader have separate Cargo artifact directories. Build
-tasks obtain each directory from `cargo metadata`, including when
-`CARGO_TARGET_DIR` overrides the default locations. QEMU logs are collected in
-the repository's `target/qemu-logs/` directory.
+The smoke applications share one Cargo artifact directory, separate from the
+loader's directory. Build tasks obtain each directory from `cargo metadata`,
+including when `CARGO_TARGET_DIR` overrides the default locations. QEMU logs
+are collected in the repository's `target/qemu-logs/` directory.
 
 ### Build and Test Tasks
 
@@ -131,9 +132,7 @@ cargo fmt --manifest-path ecraos/Cargo.toml --all
 cargo fmt --manifest-path ecraldr/Cargo.toml --all
 cargo fmt --manifest-path ecraldr/ecraldr_build_rs/Cargo.toml
 cargo fmt --manifest-path xtask/Cargo.toml
-for app in smoke-apps/*; do
-    cargo fmt --manifest-path "$app/Cargo.toml"
-done
+cargo fmt --manifest-path smoke-apps/Cargo.toml --all
 
 cargo clippy --manifest-path ecraos/Cargo.toml --workspace --target x86_64-unknown-none
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets
