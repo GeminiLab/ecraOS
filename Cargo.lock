@@ -68,6 +68,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "cartesian_product"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -168,6 +177,7 @@ version = "0.1.0"
 dependencies = [
  "aarch64-cpu",
  "bitflags 2.11.1",
+ "cartesian_product",
  "crate_interface",
  "ecraldr_base",
  "expalloc_trait",
@@ -182,7 +192,6 @@ dependencies = [
  "memory_addr",
  "multiboot",
  "page_table_entry",
- "product",
  "raw-cpuid 11.6.0",
  "riscv",
  "sbi-rt",
@@ -456,15 +465,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "product"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

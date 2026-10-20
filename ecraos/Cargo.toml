@@ -14,16 +14,16 @@ foundation-test = []
 bitmaps = { version = "3.2.1", default-features = false }
 crate_interface = { version = "0.3", features = ["weak_default"] }
 ecraldr_base.workspace = true
-exbuddy = { path = "../exbuddy" }
 exarch = { path = "../exarch" }
+exbuddy = { path = "../exbuddy" }
 expalloc_trait = { path = "../expalloc_trait" }
 expanic = { path = "../expanic" }
 expercpu = { path = "../expercpu/expercpu", features = ["early-slot", "remote-access"] }
 expt = { path = "../expt" }
 exslab = { path = "../exslab" }
 heapless = "0.9"
-kspin = { version = "0.2", features = ["smp"] }
 kernel_guard = { version = "0.2", features = ["preempt"] }
+kspin = { version = "0.2", features = ["smp"] }
 lazyinit.workspace = true
 log.workspace = true
 memory_addr.workspace = true

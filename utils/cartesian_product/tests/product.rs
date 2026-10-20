@@ -1,4 +1,4 @@
-use product::product;
+use cartesian_product::product;
 
 macro_rules! wrap {
     ($first:tt, $second:tt, $label:ident) => {

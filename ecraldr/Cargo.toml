@@ -2,8 +2,8 @@
 resolver = "3"
 members = [
     "ecraldr",
-    "ecraldr-riscv64-none",
     "ecraldr-aarch64-linux",
+    "ecraldr-riscv64-none",
     "ecraldr-x86_64-multiboot",
     "ecraldr_base",
     "ecraldr_base_macros",

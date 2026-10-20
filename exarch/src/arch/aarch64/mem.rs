@@ -485,12 +485,12 @@ pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
         panic!("Unsupported AArch64 virtual address-space mode: {mode:?}");
     }
 
+    use cartesian_product::product;
     use expt::{
         arch::aarch64::AArch64PageTableMeta as A,
         meta::{LowerCoverage as L, UpperCoverage as U},
         pte::aarch64::A64PTE,
     };
-    use product::product;
 
     use crate::mem::VirtAddrSpaceProps as P;
 

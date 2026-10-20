@@ -5,10 +5,11 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.11"
+cartesian_product = { path = "../utils/cartesian_product" }
 crate_interface = { version = "0.3", features = ["weak_default"] }
 ecraldr_base.workspace = true
-expercpu = { path = "../expercpu/expercpu" }
 expalloc_trait = { path = "../expalloc_trait" }
+expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
 heapless = "0.9"
 kspin.workspace = true
@@ -17,7 +18,6 @@ log.workspace = true
 look_at = { path = "../utils/look_at" }
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
-product = { path = "../utils/product" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 multiboot = "0.8"
