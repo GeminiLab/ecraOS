@@ -1,7 +1,15 @@
 [package]
 name = "dyn_static_traits"
+description = "Generates function-pointer tables for static traits with an attribute macro."
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/dyn_static_traits"
+readme = "README.md"
+keywords = ["static-trait", "function-pointer", "dispatch", "vtable", "procedural-macro"]
+categories = ["development-tools::procedural-macro-helpers", "rust-patterns"]
 
 [lib]
 proc-macro = true
