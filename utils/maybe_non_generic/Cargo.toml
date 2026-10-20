@@ -1,7 +1,15 @@
 [package]
 name = "maybe_non_generic"
+description = "Generates copies of generic functions with selected generic parameters as arguments."
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/maybe_non_generic"
+readme = "README.md"
+keywords = ["generics", "const-generics", "monomorphization", "code-generation", "procedural-macro"]
+categories = ["development-tools::procedural-macro-helpers", "rust-patterns"]
 
 [lib]
 proc-macro = true
@@ -9,4 +17,7 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "2.0", features = ["full", "visit", "visit-mut", "extra-traits"] }
+syn = { version = "2.0", features = ["extra-traits", "full", "visit", "visit-mut"] }
+
+[dev-dependencies]
+dyn_static_traits = { path = "../dyn_static_traits" }

@@ -1,60 +1,367 @@
+#![doc = include_str!("../README.md")]
+
 use proc_macro::TokenStream as TokenStream1;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use syn::parse::{Parse, ParseStream, Parser};
-use syn::visit::{self, Visit};
-use syn::visit_mut::{self, VisitMut};
 use syn::{
-    AngleBracketedGenericArguments, Attribute, Block, Constraint, Expr, ExprCall, ExprMethodCall,
-    FnArg, GenericArgument, GenericParam, Generics, Ident, ImplItemFn, ItemFn, Pat, Path,
-    PathArguments, PredicateLifetime, PredicateType, Result, ReturnType, Signature, Token,
-    TraitBound, Type, TypeParamBound, WherePredicate, parenthesized, parse_quote,
-    punctuated::Punctuated, token::Comma, token::Plus,
+    AngleBracketedGenericArguments, Attribute, Block, Constraint, Expr, ExprCall, ExprField,
+    ExprMethodCall, FnArg, GenericArgument, GenericParam, Generics, Ident, ImplItemFn, Item,
+    ItemFn, Member, Pat, Path, PathArguments, PredicateType, Result, ReturnType, Signature, Token,
+    TraitBound, Type, TypeParamBound, WherePredicate, parenthesized,
+    parse::{Parse, ParseStream, Parser},
+    parse_quote,
+    punctuated::Punctuated,
+    token::{Comma, Plus},
+    visit::{self, Visit},
+    visit_mut::{self, VisitMut},
 };
 
+/// Unit tests for argument parsing, signature generation, and body rewriting.
+///
+/// The tests call the expansion functions directly and inspect the generated tokens and errors.
+#[cfg(test)]
+mod tests;
+
+/// The kind of a replaced generic parameter.
+///
+/// The kind decides how uses of the parameter are rewritten in the generated copy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReplacementKind {
+    /// A const generic parameter.
+    ///
+    /// Its uses become the generated argument value.
     Const,
+    /// A type generic parameter.
+    ///
+    /// Its associated items become fields of the generated argument.
     Type,
 }
 
+/// A generic parameter replaced by a trailing function parameter.
+///
+/// It is parsed from a `const(...)` or `type(...)` macro argument.
 #[derive(Debug)]
 struct Replacement {
+    /// The kind of the replaced generic parameter.
+    ///
+    /// It must match the kind of the parameter in the function signature.
     kind: ReplacementKind,
+    /// The replaced generic parameter.
+    ///
+    /// It is removed from the generics of the generated copy.
     param: Ident,
+    /// The name of the generated function parameter.
+    ///
+    /// Rewritten uses of the replaced parameter refer to this name.
     arg_name: Ident,
+    /// The type of the generated function parameter.
+    ///
+    /// Type replacements pass clones of a value of this type to rewritten calls.
     arg_type: Type,
 }
 
+/// A call target in a function replacement.
+///
+/// The source and target of one replacement always have the same form.
 #[derive(Debug)]
 enum FnTarget {
+    /// A function path such as `Self::table_of`.
+    ///
+    /// Paths are matched by their segment names.
     Path(Path),
-    Method { receiver: Expr, method: Ident },
+    /// A method on a receiver such as `self.clear`.
+    ///
+    /// Methods are matched by receiver tokens and method name.
+    Method {
+        /// The receiver expression of the method call.
+        ///
+        /// It is compared with call receivers by its token text.
+        receiver: Expr,
+        /// The method name.
+        ///
+        /// It is compared with the method name of each call.
+        method: Ident,
+    },
 }
 
+/// A rename of calls inside the generated copy.
+///
+/// It is parsed from a `fn(...)` macro argument.
 #[derive(Debug)]
 struct FnReplacement {
+    /// The call target to match.
+    ///
+    /// Matching calls in the copied body are renamed.
     from: FnTarget,
+    /// The call target to use instead.
+    ///
+    /// Only its names are used, and a renamed call keeps its other tokens.
     to: FnTarget,
 }
 
+/// The validated arguments of one macro invocation.
+///
+/// They describe the name, signature changes, body rewrites, and attributes of the generated copy.
 #[derive(Debug)]
 struct MacroArgs {
+    /// The name of the generated copy.
+    ///
+    /// It replaces the original function name in the copied signature.
     output: Ident,
+    /// The generic parameter replacements in signature order.
+    ///
+    /// Their generated parameters are appended to the copy in this order.
     replacements: Vec<Replacement>,
+    /// The call renames applied to the copied body.
+    ///
+    /// Calls are compared with the renames in argument order.
     fn_replacements: Vec<FnReplacement>,
+    /// Whether the original attributes are copied.
+    ///
+    /// The `dont_copy_attr` argument clears this flag.
     copy_attrs: bool,
+    /// The attributes added to the copy.
+    ///
+    /// They follow any copied attributes.
     extra_attrs: Vec<Attribute>,
 }
 
+/// One parsed macro argument before validation.
+///
+/// Arguments are collected into [`MacroArgs`] after duplicate checks.
 #[derive(Debug)]
 enum MacroArg {
+    /// A `const(...)` or `type(...)` argument.
+    ///
+    /// It replaces one generic parameter with a function parameter.
     Replacement(Replacement),
+    /// A `fn(...)` argument.
+    ///
+    /// It renames matching calls in the copied body.
     FnReplacement(FnReplacement),
+    /// The `dont_copy_attr` argument.
+    ///
+    /// It stops the original attributes from being copied.
     DontCopyAttr,
+    /// An `attr(...)` argument.
+    ///
+    /// It adds one attribute to the copy.
     Attr(Attribute),
 }
 
+/// Generates a copy of a generic function with selected generic parameters replaced.
+///
+/// The attribute applies to a generic function with a body, which may be a free function, a
+/// function in an `impl` block, or a default method of a trait. The original function is emitted
+/// unchanged. The copy uses the name given by the first attribute argument, and each replaced
+/// generic parameter becomes a trailing function parameter. A const generic becomes a runtime
+/// value, and a type generic becomes a value that stands in for the type, such as a table of
+/// function pointers.
+///
+/// For example, the following copy takes the number of summed values as its last argument:
+///
+/// ```
+/// use maybe_non_generic::maybe_non_generic;
+///
+/// #[maybe_non_generic(sum_dyn, const(N => count: usize))]
+/// fn sum<const N: usize>(values: &[u32]) -> u32 {
+///     values.iter().take(N).sum()
+/// }
+///
+/// assert_eq!(sum::<2>(&[1, 2, 3]), 3);
+/// assert_eq!(sum_dyn(&[1, 2, 3], 2), 3);
+/// ```
+///
+/// # Syntax
+///
+/// The first argument names the copy:
+///
+/// ```text
+/// #[maybe_non_generic(copy_name, argument, ...)]
+/// ```
+///
+/// The name can be followed by any number of comma-separated arguments, and a trailing comma is
+/// allowed. Each argument has one of the following forms:
+///
+/// - `const(N => n: T)` replaces the const generic `N` with the trailing parameter `n: T`.
+/// - `type(H => h: T)` replaces the type generic `H` with the trailing parameter `h: T`.
+/// - `fn(path::f => path::g)` renames calls to the function path `path::f` in the copied body.
+/// - `fn(receiver.f => receiver.g)` renames method calls `receiver.f(...)` in the copied body.
+/// - `attr(...)` adds the attribute `#[...]` to the copy.
+/// - `dont_copy_attr` stops the attributes of the original function from being copied.
+///
+/// # Generic parameter replacement
+///
+/// Each `const(...)` or `type(...)` argument names one generic parameter of the function and the
+/// parameter that replaces it. The arguments must follow the order of the generic parameters in
+/// the function signature, and the new parameters are appended in that order. Generic parameters
+/// that are not replaced, including lifetimes, stay on the copy. Bounds and `where` predicates that
+/// mention a replaced parameter are removed.
+///
+/// ## Body rewrites
+///
+/// The body of the copy is rewritten as follows:
+///
+/// - A const parameter `N` used as an expression becomes `n`.
+/// - A call `H::f(args)` becomes `(h.f)(args)`, and an expression `H::ITEM` becomes `h.ITEM`. The
+///   function-pointer tables generated by `dyn_static_traits` have this shape.
+/// - In a call with a turbofish, such as `f::<N, H>(args)`, replaced generic arguments are removed
+///   from the last path segment and appended to the call arguments. A const argument passes `n`,
+///   and a type argument passes `::core::clone::Clone::clone(&h)`, so the type of `h` must
+///   implement `Clone`. References and `dyn_static_traits` tables do.
+///
+/// Nested items, such as functions declared inside the body, are left unchanged, because they
+/// cannot use the generic parameters of the outer function.
+///
+/// The original callee still expects its generic arguments, so a call that passes replaced
+/// arguments usually also needs a `fn(...)` rename to the callee's own copy. The following example
+/// replaces a clock type with a table generated by `dyn_static_traits` and renames the inner call:
+///
+/// ```
+/// use dyn_static_traits::dyn_static_traits;
+/// use maybe_non_generic::maybe_non_generic;
+///
+/// #[dyn_static_traits(DynClock)]
+/// trait Clock {
+///     fn now() -> u64;
+/// }
+///
+/// struct BootClock;
+///
+/// impl Clock for BootClock {
+///     fn now() -> u64 {
+///         100
+///     }
+/// }
+///
+/// #[maybe_non_generic(elapsed_dyn, type(C => clock: &DynClock))]
+/// fn elapsed<C: Clock>(start: u64) -> u64 {
+///     C::now() - start
+/// }
+///
+/// #[maybe_non_generic(
+///     scaled_elapsed_dyn,
+///     const(N => factor: u64),
+///     type(C => clock: &DynClock),
+///     fn(elapsed => elapsed_dyn),
+/// )]
+/// fn scaled_elapsed<const N: u64, C: Clock>(start: u64) -> u64 {
+///     elapsed::<C>(start) * N
+/// }
+///
+/// let clock = DynClock::new::<BootClock>();
+/// assert_eq!(scaled_elapsed::<2, BootClock>(40), 120);
+/// assert_eq!(scaled_elapsed_dyn(40, 2, &clock), 120);
+/// ```
+///
+/// In `scaled_elapsed_dyn`, the call `elapsed::<C>(start)` becomes
+/// `elapsed_dyn(start, ::core::clone::Clone::clone(&clock))`, and `N` becomes `factor`.
+///
+/// # Call renaming
+///
+/// A `fn(path => path)` argument renames calls whose function path has the same segment names as
+/// the source path. Generic arguments are ignored while matching, and arguments that are not
+/// replaced are kept, so `fn(Table::size => Table::size_dyn)` also matches
+/// `Table::<M>::size::<L>(...)`. Both paths must have the same number of segments.
+///
+/// A `fn(receiver.method => receiver.method)` argument renames method calls whose receiver has the
+/// same tokens as the given receiver, such as `self.clear(...)`. The source and target receivers
+/// must be the same. Replaced generic arguments in the method turbofish are appended to the call
+/// arguments.
+///
+/// The following example renames an associated function call and a method call in an `impl`
+/// block:
+///
+/// ```
+/// use maybe_non_generic::maybe_non_generic;
+///
+/// struct Table {
+///     entries: usize,
+/// }
+///
+/// impl Table {
+///     #[maybe_non_generic(entry_size_dyn, const(LEVEL => level: usize))]
+///     fn entry_size<const LEVEL: usize>() -> usize {
+///         8 << LEVEL
+///     }
+///
+///     #[maybe_non_generic(
+///         bytes_dyn,
+///         const(LEVEL => level: usize),
+///         fn(Self::entry_size => Self::entry_size_dyn),
+///     )]
+///     fn bytes<const LEVEL: usize>(&self) -> usize {
+///         Self::entry_size::<LEVEL>() * self.entries
+///     }
+///
+///     #[maybe_non_generic(
+///         double_bytes_dyn,
+///         const(LEVEL => level: usize),
+///         fn(self.bytes => self.bytes_dyn),
+///     )]
+///     fn double_bytes<const LEVEL: usize>(&self) -> usize {
+///         self.bytes::<LEVEL>() * 2
+///     }
+/// }
+///
+/// let table = Table { entries: 4 };
+/// assert_eq!(table.bytes::<1>(), 64);
+/// assert_eq!(table.bytes_dyn(1), 64);
+/// assert_eq!(table.double_bytes::<1>(), 128);
+/// assert_eq!(table.double_bytes_dyn(1), 128);
+/// ```
+///
+/// # Attributes
+///
+/// The copy receives the attributes of the original function, including doc comments, followed by
+/// the attributes from `attr(...)` arguments. `#[maybe_non_generic]` attributes are never copied,
+/// so stacking several of them on one function generates one copy per attribute. With
+/// `dont_copy_attr`, only the `attr(...)` attributes are applied.
+///
+/// The following example generates two copies of one function with different doc comments:
+///
+/// ```
+/// use maybe_non_generic::maybe_non_generic;
+///
+/// /// Sums the first `N` values.
+/// #[maybe_non_generic(sum_dyn, const(N => count: usize))]
+/// #[maybe_non_generic(
+///     sum_counted,
+///     const(N => count: usize),
+///     dont_copy_attr,
+///     attr(doc = "Sums the first `count` values."),
+/// )]
+/// fn sum<const N: usize>(values: &[u32]) -> u32 {
+///     values.iter().take(N).sum()
+/// }
+///
+/// assert_eq!(sum_dyn(&[1, 2, 3], 2), 3);
+/// assert_eq!(sum_counted(&[1, 2, 3], 2), 3);
+/// ```
+///
+/// `sum_dyn` receives the doc comment of `sum`, while `sum_counted` receives only the doc comment
+/// from `attr(...)`.
+///
+/// # Limitations
+///
+/// The macro reports a compile error instead of generating a copy that might still depend on a
+/// replaced parameter. It rejects:
+///
+/// - items other than functions with a body,
+/// - functions without generic parameters,
+/// - replacements that name a missing generic parameter, a parameter of the other kind, or the
+///   same parameter twice,
+/// - generated parameter names that are already bound by a function parameter or in the body,
+/// - function parameter types or a return type that still mention a replaced parameter,
+/// - generic arguments on an associated function of a replaced type, such as `H::f::<T>()`,
+/// - replaced parameters that remain in the body after rewriting, for example in a type
+///   annotation, in a generic argument expression such as `{ N - 1 }`, or in a qualified path such
+///   as `<H as Trait>::f()`.
+///
+/// The macro cannot see inside some syntax, so it treats that syntax as a remaining use of a
+/// replaced parameter. The body of the copy therefore cannot contain macro invocations, or
+/// patterns with literals, ranges, or paths, such as `0`, `1..=9`, or `Ordering::Less`. This
+/// applies even when the syntax does not mention a replaced parameter.
 #[proc_macro_attribute]
 pub fn maybe_non_generic(attrs: TokenStream1, input: TokenStream1) -> TokenStream1 {
     maybe_non_generic_impl(attrs.into(), input.into())
@@ -62,6 +369,9 @@ pub fn maybe_non_generic(attrs: TokenStream1, input: TokenStream1) -> TokenStrea
         .into()
 }
 
+/// Expands the attribute arguments and annotated function into the original and its copy.
+///
+/// Free functions are tried before functions in `impl` blocks. Any other item is rejected.
 fn maybe_non_generic_impl(attrs: TokenStream, input: TokenStream) -> Result<TokenStream> {
     let args = syn::parse2::<MacroArgs>(attrs)?;
 
@@ -79,6 +389,10 @@ fn maybe_non_generic_impl(attrs: TokenStream, input: TokenStream) -> Result<Toke
     ))
 }
 
+/// Returns whether an original attribute is copied to the generated copy.
+///
+/// Every attribute except `maybe_non_generic` is copied, so stacked invocations do not produce
+/// copies of copies.
 fn should_copy_attr(attr: &Attribute) -> bool {
     attr.path()
         .segments
@@ -86,6 +400,9 @@ fn should_copy_attr(attr: &Attribute) -> bool {
         .is_none_or(|segment| segment.ident != "maybe_non_generic")
 }
 
+/// Builds the attribute list of the generated copy.
+///
+/// The copied original attributes come first, followed by the attributes from `attr(...)`.
 fn attrs_for_copy(original: &[Attribute], args: &MacroArgs) -> Vec<Attribute> {
     let mut attrs = Vec::new();
 
@@ -102,6 +419,9 @@ fn attrs_for_copy(original: &[Attribute], args: &MacroArgs) -> Vec<Attribute> {
     attrs
 }
 
+/// Expands a free function into the original and its copy.
+///
+/// The copy receives the generated attributes, signature, and rewritten body.
 fn expand_item_fn(args: &MacroArgs, item: ItemFn) -> Result<TokenStream> {
     let mut copy = item.clone();
     copy.attrs = attrs_for_copy(&item.attrs, args);
@@ -114,6 +434,9 @@ fn expand_item_fn(args: &MacroArgs, item: ItemFn) -> Result<TokenStream> {
     })
 }
 
+/// Expands a function in an `impl` block into the original and its copy.
+///
+/// The copy receives the generated attributes, signature, and rewritten body.
 fn expand_impl_item_fn(args: &MacroArgs, item: ImplItemFn) -> Result<TokenStream> {
     let mut copy = item.clone();
     copy.attrs = attrs_for_copy(&item.attrs, args);
@@ -126,7 +449,13 @@ fn expand_impl_item_fn(args: &MacroArgs, item: ImplItemFn) -> Result<TokenStream
     })
 }
 
+/// The parsing implementation for the macro arguments.
+///
+/// It reads the copy name followed by comma-separated arguments.
 impl Parse for MacroArgs {
+    /// Parses and validates all macro arguments.
+    ///
+    /// A trailing comma after the last argument is accepted.
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let output = input.parse::<Ident>()?;
         let mut args = Vec::new();
@@ -143,7 +472,13 @@ impl Parse for MacroArgs {
     }
 }
 
+/// The parsing implementation for one macro argument.
+///
+/// It selects the argument form from its leading keyword or identifier.
 impl Parse for MacroArg {
+    /// Parses one `const`, `type`, `fn`, `attr`, or `dont_copy_attr` argument.
+    ///
+    /// Unknown identifiers are rejected.
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         if input.peek(Token![const]) {
             input.parse::<Token![const]>()?;
@@ -170,6 +505,9 @@ impl Parse for MacroArg {
     }
 }
 
+/// Parses the parenthesized body of a `const(...)` or `type(...)` argument.
+///
+/// The body must contain exactly one `Param => name: Type` replacement.
 fn parse_replacement(input: ParseStream<'_>, kind: ReplacementKind) -> Result<Replacement> {
     let content;
     parenthesized!(content in input);
@@ -192,6 +530,9 @@ fn parse_replacement(input: ParseStream<'_>, kind: ReplacementKind) -> Result<Re
     })
 }
 
+/// Parses the parenthesized body of a `fn(...)` argument.
+///
+/// The body must contain exactly one `source => target` replacement.
 fn parse_fn_replacement(input: ParseStream<'_>) -> Result<FnReplacement> {
     let content;
     parenthesized!(content in input);
@@ -207,6 +548,10 @@ fn parse_fn_replacement(input: ParseStream<'_>) -> Result<FnReplacement> {
     Ok(FnReplacement { from, to })
 }
 
+/// Parses one side of a function replacement.
+///
+/// Tokens are read up to the next `=>`. A field expression such as `self.clear` is a method
+/// target, and anything else must be a path.
 fn parse_fn_target(input: ParseStream<'_>) -> Result<FnTarget> {
     let target = input.step(|cursor| {
         let mut rest = *cursor;
@@ -229,11 +574,14 @@ fn parse_fn_target(input: ParseStream<'_>) -> Result<FnTarget> {
         Ok((tokens, rest))
     })?;
 
-    if let Ok(Expr::Field(field)) = syn::parse2::<Expr>(target.clone())
-        && let syn::Member::Named(method) = field.member
+    if let Ok(Expr::Field(ExprField {
+        base,
+        member: Member::Named(method),
+        ..
+    })) = syn::parse2::<Expr>(target.clone())
     {
         return Ok(FnTarget::Method {
-            receiver: *field.base,
+            receiver: *base,
             method,
         });
     }
@@ -241,6 +589,9 @@ fn parse_fn_target(input: ParseStream<'_>) -> Result<FnTarget> {
     syn::parse2::<Path>(target).map(FnTarget::Path)
 }
 
+/// Parses the parenthesized body of an `attr(...)` argument.
+///
+/// The body is the content of an outer attribute, such as `allow(dead_code)`.
 fn parse_attr(input: ParseStream<'_>) -> Result<Attribute> {
     let content;
     parenthesized!(content in input);
@@ -252,6 +603,10 @@ fn parse_attr(input: ParseStream<'_>) -> Result<Attribute> {
         .ok_or_else(|| content.error("expected attribute contents"))
 }
 
+/// Collects parsed arguments into validated macro arguments.
+///
+/// Duplicate replaced parameters, duplicate generated names, and invalid function replacements
+/// are rejected.
 fn validate_args(output: Ident, args: Vec<MacroArg>) -> Result<MacroArgs> {
     let mut replacements = Vec::new();
     let mut fn_replacements = Vec::new();
@@ -301,6 +656,9 @@ fn validate_args(output: Ident, args: Vec<MacroArg>) -> Result<MacroArgs> {
     })
 }
 
+/// Checks that the source and target of a function replacement are compatible.
+///
+/// Both sides must be paths or methods, and method replacements must keep the same receiver.
 fn validate_fn_replacement(replacement: &FnReplacement) -> Result<()> {
     match (&replacement.from, &replacement.to) {
         (
@@ -334,12 +692,18 @@ fn validate_fn_replacement(replacement: &FnReplacement) -> Result<()> {
     }
 }
 
+/// Finds the replacement for a parameter name.
+///
+/// The kind of the replacement is not checked.
 fn replacement_for<'a>(ident: &Ident, replacements: &'a [Replacement]) -> Option<&'a Replacement> {
     replacements
         .iter()
         .find(|replacement| replacement.param == *ident)
 }
 
+/// Finds the replacement for a generic parameter.
+///
+/// Both the name and the parameter kind must match.
 fn replacement_for_generic_param<'a>(
     param: &GenericParam,
     replacements: &'a [Replacement],
@@ -349,6 +713,9 @@ fn replacement_for_generic_param<'a>(
         .find(|replacement| generic_param_matches_replacement(param, replacement))
 }
 
+/// Returns the name of a generic parameter.
+///
+/// Lifetime names are returned without the leading apostrophe.
 fn generic_param_ident(param: &GenericParam) -> &Ident {
     match param {
         GenericParam::Lifetime(param) => &param.lifetime.ident,
@@ -357,6 +724,10 @@ fn generic_param_ident(param: &GenericParam) -> &Ident {
     }
 }
 
+/// Checks the replacements against the generic parameters of a signature.
+///
+/// The signature must be generic, and each replacement must name an existing parameter of its kind
+/// in signature order.
 fn validate_replacements_against_signature(sig: &Signature, args: &MacroArgs) -> Result<()> {
     if sig.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
@@ -406,6 +777,9 @@ fn validate_replacements_against_signature(sig: &Signature, args: &MacroArgs) ->
     validate_replacement_order_matches_signature(sig, &args.replacements)
 }
 
+/// Checks that replacements are listed in signature order.
+///
+/// The order determines the order of the appended parameters.
 fn validate_replacement_order_matches_signature(
     sig: &Signature,
     replacements: &[Replacement],
@@ -431,6 +805,9 @@ fn validate_replacement_order_matches_signature(
     Ok(())
 }
 
+/// Returns whether a generic parameter is the target of a replacement.
+///
+/// Const replacements match const parameters, and type replacements match type parameters.
 fn generic_param_matches_replacement(param: &GenericParam, replacement: &Replacement) -> bool {
     match (replacement.kind, param) {
         (ReplacementKind::Const, GenericParam::Const(param)) => param.ident == replacement.param,
@@ -439,6 +816,10 @@ fn generic_param_matches_replacement(param: &GenericParam, replacement: &Replace
     }
 }
 
+/// Builds the signature of the generated copy.
+///
+/// The copy is renamed, replaced generic parameters and the predicates that mention them are
+/// removed, and the generated parameters are appended.
 fn signature_for_copy(original: &Signature, args: &MacroArgs) -> Result<Signature> {
     validate_replacements_against_signature(original, args)?;
     validate_generated_arg_names_against_inputs(original, &args.replacements)?;
@@ -458,6 +839,9 @@ fn signature_for_copy(original: &Signature, args: &MacroArgs) -> Result<Signatur
     Ok(sig)
 }
 
+/// Checks that the existing signature types do not mention replaced parameters.
+///
+/// Such types would refer to a parameter that the copy no longer declares.
 fn validate_existing_signature_types_do_not_use_replacements(
     sig: &Signature,
     replacements: &[Replacement],
@@ -485,6 +869,9 @@ fn validate_existing_signature_types_do_not_use_replacements(
     Ok(())
 }
 
+/// Returns the segment names of a path.
+///
+/// Generic arguments are omitted.
 fn path_segment_idents(path: &Path) -> Vec<String> {
     path.segments
         .iter()
@@ -492,14 +879,23 @@ fn path_segment_idents(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Returns whether two paths have the same segment names.
+///
+/// Generic arguments on any segment are ignored.
 fn paths_match_ignoring_turbofish(actual: &Path, expected: &Path) -> bool {
     path_segment_idents(actual) == path_segment_idents(expected)
 }
 
+/// Returns whether two receiver expressions have the same tokens.
+///
+/// The comparison is textual, so equivalent expressions written differently do not match.
 fn method_receiver_matches(actual: &Expr, expected: &Expr) -> bool {
     actual.to_token_stream().to_string() == expected.to_token_stream().to_string()
 }
 
+/// Returns whether a type is a single-segment path with the given name.
+///
+/// Qualified paths and paths with more segments do not match.
 fn is_type_ident(ty: &Type, ident: &Ident) -> bool {
     let Type::Path(type_path) = ty else {
         return false;
@@ -510,6 +906,9 @@ fn is_type_ident(ty: &Type, ident: &Ident) -> bool {
         && type_path.path.segments[0].ident == *ident
 }
 
+/// Returns whether an expression is a single-segment path with the given name.
+///
+/// Qualified paths and paths with more segments do not match.
 fn expr_is_const_ident(expr: &Expr, ident: &Ident) -> bool {
     let Expr::Path(expr_path) = expr else {
         return false;
@@ -520,14 +919,21 @@ fn expr_is_const_ident(expr: &Expr, ident: &Ident) -> bool {
         && expr_path.path.segments[0].ident == *ident
 }
 
+/// Returns the call argument that replaces a generic argument.
+///
+/// Const replacements pass the generated argument, and type replacements pass a clone of it.
 fn replacement_expr(replacement: &Replacement) -> Expr {
     let arg_name = &replacement.arg_name;
     match replacement.kind {
         ReplacementKind::Const => parse_quote!(#arg_name),
-        ReplacementKind::Type => parse_quote!(Clone::clone(&#arg_name)),
+        ReplacementKind::Type => parse_quote!(::core::clone::Clone::clone(&#arg_name)),
     }
 }
 
+/// Removes replaced generic arguments from an argument list.
+///
+/// Returns the call arguments that replace them, in order. Replaced parameters nested inside
+/// other generic arguments are rejected.
 fn remove_replaced_generic_args(
     args: &mut AngleBracketedGenericArguments,
     replacements: &[Replacement],
@@ -565,6 +971,10 @@ fn remove_replaced_generic_args(
     Ok(appended)
 }
 
+/// Removes replaced generic arguments from the last segment of a call path.
+///
+/// Returns the call arguments that replace them. Replaced parameters in the generic arguments of
+/// earlier segments are rejected.
 fn process_path_generic_args(path: &mut Path, replacements: &[Replacement]) -> Result<Vec<Expr>> {
     let final_index = path.segments.len().saturating_sub(1);
     let mut appended = Vec::new();
@@ -588,10 +998,16 @@ fn process_path_generic_args(path: &mut Path, replacements: &[Replacement]) -> R
     Ok(appended)
 }
 
+/// Reports a replaced parameter that remains in a rewritten body.
+///
+/// Returns `None` when no statement mentions a replaced parameter.
 fn residual_replaced_param_error(
     block: &Block,
     replacements: &[Replacement],
 ) -> Option<syn::Error> {
+    // TODO: analyze literal, range, and path patterns precisely, scan macro invocations for the
+    // names of replaced parameters instead of rejecting every invocation, and report the offending
+    // statement with a message that does not imply a parameter use.
     block
         .stmts
         .iter()
@@ -604,6 +1020,9 @@ fn residual_replaced_param_error(
         })
 }
 
+/// Renames a call path according to the path replacements.
+///
+/// Segment names are replaced one by one, and generic arguments on the segments are kept.
 fn rewrite_path_call(path: &mut Path, mappings: &[FnReplacement]) -> Result<()> {
     for mapping in mappings {
         let (FnTarget::Path(from), FnTarget::Path(to)) = (&mapping.from, &mapping.to) else {
@@ -629,13 +1048,31 @@ fn rewrite_path_call(path: &mut Path, mappings: &[FnReplacement]) -> Result<()> 
     Ok(())
 }
 
+/// A visitor that rewrites the body of the generated copy.
+///
+/// It collects errors while visiting, so several problems can be reported together.
 struct BodyTransformer<'a> {
+    /// The generic parameter replacements.
+    ///
+    /// They decide how parameter uses and generic arguments are rewritten.
     replacements: &'a [Replacement],
+    /// The call renames.
+    ///
+    /// They are applied to function and method calls.
     fn_replacements: &'a [FnReplacement],
+    /// The errors found while visiting.
+    ///
+    /// They are combined into one error after the visit.
     errors: Vec<syn::Error>,
 }
 
+/// Rewrites copied bodies and the calls inside them.
+///
+/// Each transformer is consumed by one body rewrite.
 impl<'a> BodyTransformer<'a> {
+    /// Creates a body transformer for the macro arguments.
+    ///
+    /// The transformer starts without errors.
     fn new(args: &'a MacroArgs) -> Self {
         Self {
             replacements: &args.replacements,
@@ -644,6 +1081,10 @@ impl<'a> BodyTransformer<'a> {
         }
     }
 
+    /// Rewrites a block and validates the result.
+    ///
+    /// Binding conflicts are checked before rewriting, and remaining uses of replaced parameters
+    /// are checked after it.
     fn transform_block(mut self, block: &mut Block) -> Result<()> {
         if let Some(error) = body_binding_conflict_error(block, self.replacements) {
             self.errors.push(error);
@@ -666,6 +1107,9 @@ impl<'a> BodyTransformer<'a> {
         }
     }
 
+    /// Finds the type replacement for an associated item path such as `H::f`.
+    ///
+    /// Returns the replacement and the item name. Generic arguments on the item are rejected.
     fn type_replacement_for_path(&self, path: &Path) -> Result<Option<(&Replacement, Ident)>> {
         if path.leading_colon.is_some() || path.segments.len() != 2 {
             return Ok(None);
@@ -695,6 +1139,9 @@ impl<'a> BodyTransformer<'a> {
         Ok(Some((replacement, second.ident.clone())))
     }
 
+    /// Renames a method call according to the method replacements.
+    ///
+    /// Replaced generic arguments in the method turbofish are moved to the call arguments.
     fn rewrite_method_call(&mut self, node: &mut ExprMethodCall) {
         for mapping in self.fn_replacements {
             let (
@@ -731,7 +1178,14 @@ impl<'a> BodyTransformer<'a> {
     }
 }
 
+/// The mutable visiting implementation for body rewrites.
+///
+/// It rewrites calls, method calls, and paths, and visits other expressions normally.
 impl VisitMut for BodyTransformer<'_> {
+    /// Rewrites a function call expression.
+    ///
+    /// Arguments are visited first. A call through a replaced type parameter becomes a call of a
+    /// field, and other path calls are renamed before their replaced generic arguments are moved.
     fn visit_expr_call_mut(&mut self, node: &mut ExprCall) {
         for arg in &mut node.args {
             self.visit_expr_mut(arg);
@@ -769,6 +1223,9 @@ impl VisitMut for BodyTransformer<'_> {
         }
     }
 
+    /// Rewrites a method call expression.
+    ///
+    /// The receiver and arguments are visited before the method is renamed.
     fn visit_expr_method_call_mut(&mut self, node: &mut ExprMethodCall) {
         self.visit_expr_mut(&mut node.receiver);
         for arg in &mut node.args {
@@ -777,6 +1234,10 @@ impl VisitMut for BodyTransformer<'_> {
         self.rewrite_method_call(node);
     }
 
+    /// Rewrites an expression.
+    ///
+    /// Const parameters become their generated arguments, and associated items of replaced type
+    /// parameters become fields of their generated arguments.
     fn visit_expr_mut(&mut self, node: &mut Expr) {
         match node {
             Expr::Call(call) => self.visit_expr_call_mut(call),
@@ -812,18 +1273,42 @@ impl VisitMut for BodyTransformer<'_> {
             _ => visit_mut::visit_expr_mut(self, node),
         }
     }
+
+    /// Leaves a nested item unchanged.
+    ///
+    /// Nested items cannot use the generic parameters of the outer function, so names inside
+    /// them refer to their own parameters or to other items.
+    fn visit_item_mut(&mut self, _node: &mut Item) {}
 }
 
+/// Rewrites the body of the generated copy.
+///
+/// Errors from the rewrite and its validation are combined into one error.
 fn transform_body(block: &mut Block, args: &MacroArgs) -> Result<()> {
     BodyTransformer::new(args).transform_block(block)
 }
 
+/// A visitor that finds body bindings with the same name as a generated parameter.
+///
+/// Such a binding would shadow the generated parameter in rewritten expressions.
 struct BindingConflictVisitor<'a> {
+    /// The generic parameter replacements.
+    ///
+    /// Their generated parameter names are compared with body bindings.
     replacements: &'a [Replacement],
+    /// The first conflict found.
+    ///
+    /// Later conflicts are not recorded.
     error: Option<syn::Error>,
 }
 
+/// Checks blocks and patterns for conflicting bindings.
+///
+/// Only the first conflict is reported.
 impl<'a> BindingConflictVisitor<'a> {
+    /// Returns the first binding conflict in a block.
+    ///
+    /// Returns `None` when no pattern binds a generated parameter name.
     fn check(block: &'a Block, replacements: &'a [Replacement]) -> Option<syn::Error> {
         let mut visitor = Self {
             replacements,
@@ -833,6 +1318,9 @@ impl<'a> BindingConflictVisitor<'a> {
         visitor.error
     }
 
+    /// Records a conflict for a pattern that binds a generated parameter name.
+    ///
+    /// Nothing is recorded after the first conflict.
     fn check_pat(&mut self, pat: &'a Pat) {
         if self.error.is_some() {
             return;
@@ -847,17 +1335,34 @@ impl<'a> BindingConflictVisitor<'a> {
     }
 }
 
+/// The visiting implementation for binding conflict checks.
+///
+/// It checks every pattern in the body, including nested patterns.
 impl<'ast> Visit<'ast> for BindingConflictVisitor<'ast> {
+    /// Checks a pattern and then visits its subpatterns.
+    ///
+    /// Each nested identifier pattern is checked when it is visited.
     fn visit_pat(&mut self, node: &'ast Pat) {
         self.check_pat(node);
         visit::visit_pat(self, node);
     }
+
+    /// Skips a nested item.
+    ///
+    /// Bindings inside nested items cannot shadow the parameters of the outer function.
+    fn visit_item(&mut self, _node: &'ast Item) {}
 }
 
+/// Reports a body binding with the same name as a generated parameter.
+///
+/// Returns `None` when there is no conflict.
 fn body_binding_conflict_error(block: &Block, replacements: &[Replacement]) -> Option<syn::Error> {
     BindingConflictVisitor::check(block, replacements)
 }
 
+/// Returns the binding of an identifier pattern that conflicts with a generated parameter.
+///
+/// Other patterns return `None`, because the visitor checks their subpatterns separately.
 fn conflicting_pat_binding<'a>(pat: &'a Pat, replacements: &[Replacement]) -> Option<&'a Ident> {
     match pat {
         Pat::Ident(pat) => replacements
@@ -868,6 +1373,9 @@ fn conflicting_pat_binding<'a>(pat: &'a Pat, replacements: &[Replacement]) -> Op
     }
 }
 
+/// Checks that generated parameter names are not already bound by function parameters.
+///
+/// Nested bindings in parameter patterns are included.
 fn validate_generated_arg_names_against_inputs(
     sig: &Signature,
     replacements: &[Replacement],
@@ -896,6 +1404,9 @@ fn validate_generated_arg_names_against_inputs(
     Ok(())
 }
 
+/// Collects the identifiers bound by a pattern.
+///
+/// Nested patterns are searched recursively.
 fn collect_pat_bindings<'a>(pat: &'a Pat, bindings: &mut Vec<&'a Ident>) {
     match pat {
         Pat::Ident(pat) => {
@@ -911,7 +1422,6 @@ fn collect_pat_bindings<'a>(pat: &'a Pat, bindings: &mut Vec<&'a Ident>) {
         }
         Pat::Paren(pat) => collect_pat_bindings(&pat.pat, bindings),
         Pat::Reference(pat) => collect_pat_bindings(&pat.pat, bindings),
-        Pat::Rest(_) => {}
         Pat::Slice(pat) => {
             for elem in &pat.elems {
                 collect_pat_bindings(elem, bindings);
@@ -933,11 +1443,14 @@ fn collect_pat_bindings<'a>(pat: &'a Pat, bindings: &mut Vec<&'a Ident>) {
             }
         }
         Pat::Type(pat) => collect_pat_bindings(&pat.pat, bindings),
-        Pat::Wild(_) => {}
         _ => {}
     }
 }
 
+/// Builds the generics of the generated copy.
+///
+/// Replaced parameters are removed, together with bounds and `where` predicates that mention
+/// them.
 fn generics_for_copy(generics: &Generics, replacements: &[Replacement]) -> Generics {
     let mut result = generics.clone();
     result.params = generics
@@ -965,6 +1478,9 @@ fn generics_for_copy(generics: &Generics, replacements: &[Replacement]) -> Gener
     result
 }
 
+/// Returns the bounds of a retained type parameter that do not mention replaced parameters.
+///
+/// Bounds that the macro cannot analyze are removed.
 fn retained_type_param_bounds(
     bounds: &Punctuated<TypeParamBound, Plus>,
     replacements: &[Replacement],
@@ -976,14 +1492,14 @@ fn retained_type_param_bounds(
         .collect()
 }
 
+/// Returns whether a `where` predicate mentions a replaced parameter.
+///
+/// Predicate forms that the macro does not recognize are kept.
 fn predicate_mentions_replaced_param(
     predicate: &WherePredicate,
     replacements: &[Replacement],
 ) -> bool {
     match predicate {
-        WherePredicate::Lifetime(predicate) => {
-            lifetime_predicate_mentions_replaced_param(predicate, replacements)
-        }
         WherePredicate::Type(predicate) => {
             type_predicate_mentions_replaced_param(predicate, replacements)
         }
@@ -991,13 +1507,9 @@ fn predicate_mentions_replaced_param(
     }
 }
 
-fn lifetime_predicate_mentions_replaced_param(
-    _predicate: &PredicateLifetime,
-    _replacements: &[Replacement],
-) -> bool {
-    false
-}
-
+/// Returns whether a type predicate mentions a replaced parameter.
+///
+/// Both the bounded type and its bounds are checked.
 fn type_predicate_mentions_replaced_param(
     predicate: &PredicateType,
     replacements: &[Replacement],
@@ -1009,6 +1521,9 @@ fn type_predicate_mentions_replaced_param(
             .any(|bound| type_param_bound_mentions_replaced_param(bound, replacements))
 }
 
+/// Returns whether a type parameter bound mentions a replaced parameter.
+///
+/// Lifetime bounds never do, and bounds that the macro cannot analyze are treated as mentions.
 fn type_param_bound_mentions_replaced_param(
     bound: &TypeParamBound,
     replacements: &[Replacement],
@@ -1016,15 +1531,20 @@ fn type_param_bound_mentions_replaced_param(
     match bound {
         TypeParamBound::Trait(bound) => trait_bound_mentions_replaced_param(bound, replacements),
         TypeParamBound::Lifetime(_) => false,
-        TypeParamBound::Verbatim(_) => true,
         _ => true,
     }
 }
 
+/// Returns whether a trait bound mentions a replaced parameter.
+///
+/// The trait path and its generic arguments are checked.
 fn trait_bound_mentions_replaced_param(bound: &TraitBound, replacements: &[Replacement]) -> bool {
     type_path_mentions_replaced_param(&bound.path, replacements)
 }
 
+/// Returns whether a type mentions a replaced parameter.
+///
+/// Types that the macro cannot analyze, such as macro invocations, are treated as mentions.
 fn type_mentions_replaced_param(ty: &Type, replacements: &[Replacement]) -> bool {
     match ty {
         Type::Array(ty) => {
@@ -1063,11 +1583,13 @@ fn type_mentions_replaced_param(ty: &Type, replacements: &[Replacement]) -> bool
             .elems
             .iter()
             .any(|elem| type_mentions_replaced_param(elem, replacements)),
-        Type::Verbatim(_) => true,
         _ => true,
     }
 }
 
+/// Returns whether a return type mentions a replaced parameter.
+///
+/// The default unit return type never does.
 fn return_type_mentions_replaced_param(
     return_type: &ReturnType,
     replacements: &[Replacement],
@@ -1078,6 +1600,9 @@ fn return_type_mentions_replaced_param(
     }
 }
 
+/// Returns whether an expression mentions a replaced parameter.
+///
+/// Expressions that the macro cannot analyze, such as macro invocations, are treated as mentions.
 fn expr_mentions_replaced_param(expr: &Expr, replacements: &[Replacement]) -> bool {
     match expr {
         Expr::Array(expr) => expr
@@ -1213,7 +1738,6 @@ fn expr_mentions_replaced_param(expr: &Expr, replacements: &[Replacement]) -> bo
         Expr::TryBlock(expr) => block_mentions_replaced_param(&expr.block, replacements),
         Expr::Unary(expr) => expr_mentions_replaced_param(&expr.expr, replacements),
         Expr::Unsafe(expr) => block_mentions_replaced_param(&expr.block, replacements),
-        Expr::Verbatim(_) => true,
         Expr::While(expr) => {
             expr_mentions_replaced_param(&expr.cond, replacements)
                 || block_mentions_replaced_param(&expr.body, replacements)
@@ -1226,6 +1750,9 @@ fn expr_mentions_replaced_param(expr: &Expr, replacements: &[Replacement]) -> bo
     }
 }
 
+/// Returns whether a block mentions a replaced parameter.
+///
+/// Every statement in the block is checked.
 fn block_mentions_replaced_param(block: &syn::Block, replacements: &[Replacement]) -> bool {
     block
         .stmts
@@ -1233,6 +1760,10 @@ fn block_mentions_replaced_param(block: &syn::Block, replacements: &[Replacement
         .any(|stmt| stmt_mentions_replaced_param(stmt, replacements))
 }
 
+/// Returns whether a statement mentions a replaced parameter.
+///
+/// Nested items are skipped because they cannot use outer generic parameters, and macro
+/// statements are treated as mentions.
 fn stmt_mentions_replaced_param(stmt: &syn::Stmt, replacements: &[Replacement]) -> bool {
     match stmt {
         syn::Stmt::Local(stmt) => {
@@ -1248,6 +1779,10 @@ fn stmt_mentions_replaced_param(stmt: &syn::Stmt, replacements: &[Replacement]) 
     }
 }
 
+/// Returns whether a pattern mentions a replaced parameter.
+///
+/// Patterns that the macro does not analyze, such as literals, ranges, and paths, are treated as
+/// mentions.
 fn pat_mentions_replaced_param(pat: &Pat, replacements: &[Replacement]) -> bool {
     match pat {
         Pat::Ident(pat) => pat
@@ -1286,6 +1821,10 @@ fn pat_mentions_replaced_param(pat: &Pat, replacements: &[Replacement]) -> bool 
     }
 }
 
+/// Returns whether a path in type position mentions a replaced parameter.
+///
+/// A path that starts with a replaced type parameter matches, as does a path with a generic
+/// argument that mentions a replaced parameter.
 fn type_path_mentions_replaced_param(path: &Path, replacements: &[Replacement]) -> bool {
     let directly_mentions_replaced_param = path.segments.first().is_some_and(|segment| {
         replacement_for(&segment.ident, replacements)
@@ -1299,6 +1838,10 @@ fn type_path_mentions_replaced_param(path: &Path, replacements: &[Replacement]) 
             .any(|segment| path_arguments_mention_replaced_param(&segment.arguments, replacements))
 }
 
+/// Returns whether a path in expression position mentions a replaced parameter.
+///
+/// A path that starts with any replaced parameter matches, as does a path with a generic argument
+/// that mentions a replaced parameter.
 fn expr_path_mentions_replaced_param(path: &Path, replacements: &[Replacement]) -> bool {
     let directly_mentions_replaced_param = path.segments.first().is_some_and(|segment| {
         replacement_for(&segment.ident, replacements).is_some_and(|replacement| {
@@ -1313,6 +1856,9 @@ fn expr_path_mentions_replaced_param(path: &Path, replacements: &[Replacement]) 
             .any(|segment| path_arguments_mention_replaced_param(&segment.arguments, replacements))
 }
 
+/// Returns whether the arguments of a path segment mention a replaced parameter.
+///
+/// Both angle-bracketed and parenthesized arguments are checked.
 fn path_arguments_mention_replaced_param(
     arguments: &PathArguments,
     replacements: &[Replacement],
@@ -1331,6 +1877,9 @@ fn path_arguments_mention_replaced_param(
     }
 }
 
+/// Returns whether angle-bracketed generic arguments mention a replaced parameter.
+///
+/// Each argument is checked independently.
 fn angle_bracketed_args_mention_replaced_param(
     args: &AngleBracketedGenericArguments,
     replacements: &[Replacement],
@@ -1340,6 +1889,10 @@ fn angle_bracketed_args_mention_replaced_param(
         .any(|arg| generic_argument_mentions_replaced_param(arg, replacements))
 }
 
+/// Returns whether a generic argument mentions a replaced parameter.
+///
+/// Associated type, associated const, and constraint arguments are checked together with their
+/// own generic arguments.
 fn generic_argument_mentions_replaced_param(
     arg: &GenericArgument,
     replacements: &[Replacement],
@@ -1369,6 +1922,9 @@ fn generic_argument_mentions_replaced_param(
     }
 }
 
+/// Returns whether an associated type constraint mentions a replaced parameter.
+///
+/// The generic arguments and bounds of the constraint are checked.
 fn constraint_mentions_replaced_param(
     constraint: &Constraint,
     replacements: &[Replacement],
@@ -1382,6 +1938,3 @@ fn constraint_mentions_replaced_param(
             .iter()
             .any(|bound| type_param_bound_mentions_replaced_param(bound, replacements))
 }
-
-#[cfg(test)]
-mod tests;

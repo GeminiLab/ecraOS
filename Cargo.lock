@@ -363,6 +363,7 @@ dependencies = [
 name = "maybe_non_generic"
 version = "0.1.0"
 dependencies = [
+ "dyn_static_traits",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
