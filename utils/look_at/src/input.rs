@@ -14,12 +14,22 @@ pub type TypeParamBounds = syn::punctuated::Punctuated<TypeParamBound, Token![+]
 #[derive(Clone)]
 pub struct LookAtInput {
     /// The path to the target module containing the forwarded items.
+    ///
+    /// Every declaration in the invocation resolves below this path.
     pub target_path: Path,
     /// The forwarding declarations accepted by `look_at`.
+    ///
+    /// The declarations are expanded in input order and the list is never empty.
     pub items: Vec<LookAtItem>,
 }
 
+/// The parsing implementation for a complete invocation.
+///
+/// It reads the `@path:` header followed by forwarding declarations until the input ends.
 impl Parse for LookAtInput {
+    /// Parses the target path and every forwarding declaration.
+    ///
+    /// An invocation without declarations is rejected.
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         input.parse::<Token![@]>()?;
         let target_path = input.parse()?;
@@ -42,14 +52,26 @@ impl Parse for LookAtInput {
 #[derive(Clone)]
 pub struct LookAtItem {
     /// The attributes attached to the forwarded item.
+    ///
+    /// They are copied to the generated wrapper, re-export, or constant.
     pub attrs: Vec<Attribute>,
     /// The visibility of the forwarded item.
+    ///
+    /// It applies to the generated item and does not affect the target definition.
     pub vis: Visibility,
     /// The kind of the forwarded item.
+    ///
+    /// The kind determines how the declaration is expanded.
     pub kind: LookAtItemKind,
 }
 
+/// The parsing implementation for one forwarding declaration.
+///
+/// It reads outer attributes and visibility before the declaration itself.
 impl Parse for LookAtItem {
+    /// Parses the attributes, visibility, and kind of one declaration.
+    ///
+    /// The declaration kind consumes the terminating semicolon.
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let attrs = Attribute::parse_outer(input)?;
         let vis = input.parse()?;
@@ -60,6 +82,9 @@ impl Parse for LookAtItem {
 }
 
 /// The kinds of items supported by `look_at`.
+///
+/// Each kind describes a declaration without an implementation, which is resolved in the target
+/// module.
 #[derive(Clone)]
 pub enum LookAtItemKind {
     /// A function declaration.
@@ -69,7 +94,16 @@ pub enum LookAtItemKind {
     /// A const declaration.
     ///
     /// Forwarded consts contain a name and a type followed by a semicolon and no value.
-    Const { name: Ident, declared_type: Type },
+    Const {
+        /// The name of the forwarded constant.
+        ///
+        /// The same name is used for the generated constant and the target constant.
+        name: Ident,
+        /// The type declared for the forwarded constant.
+        ///
+        /// The target constant must have a value of this type.
+        declared_type: Type,
+    },
     /// A use statement.
     ///
     /// The use tree is resolved relative to the selected target module.
@@ -80,12 +114,24 @@ pub enum LookAtItemKind {
     /// definition. It can point to a type alias, struct, enum, or union. Generic parameters are
     /// accepted for re-exports, but cannot be combined with trait bounds.
     Type {
+        /// The name of the forwarded type.
+        ///
+        /// The same name is used for the re-export and the target type.
         name: Ident,
+        /// The trait bounds that the target type must satisfy.
+        ///
+        /// Bounds are checked at compile time and are absent for generic placeholders.
         bounds: Option<TypeParamBounds>,
     },
 }
 
+/// The parsing implementation for a declaration kind.
+///
+/// It selects the kind from the leading keywords without consuming them during lookahead.
 impl Parse for LookAtItemKind {
+    /// Parses one function, const, use, or type declaration.
+    ///
+    /// Function bodies, const values, and bounds on generic type placeholders are rejected.
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let lookahead = input.fork();
 

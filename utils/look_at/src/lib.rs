@@ -1,8 +1,4 @@
-//! Architecture-selected item forwarding.
-//!
-//! The crate provides the [`look_at!`] macro for exposing one implementation module as a common
-//! API. Function declarations become forwarding wrappers. Type, constant, and use declarations
-//! become re-exports or checked aliases.
+#![doc = include_str!("../README.md")]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -14,6 +10,9 @@ use syn::{
 
 use crate::input::{LookAtInput, LookAtItem, LookAtItemKind, TypeParamBounds};
 
+/// Macro input syntax.
+///
+/// Defines the parsed invocation, its forwarding declarations, and their parsing rules.
 mod input;
 
 /// Collects identifiers declared by a function parameter pattern.
@@ -179,6 +178,9 @@ fn expand_function(
 }
 
 /// Expands one constant declaration.
+///
+/// The generated constant has the declared type and takes its value from the target constant, so
+/// the compiler checks the target constant against the declared type.
 fn expand_const(
     target_path: &Path,
     attrs: Vec<Attribute>,
@@ -190,6 +192,9 @@ fn expand_const(
 }
 
 /// Expands one use tree declaration.
+///
+/// The tree is prefixed with the target path, so nested groups and renames resolve inside the
+/// selected module.
 fn expand_use(
     target_path: &Path,
     attrs: Vec<Attribute>,
@@ -200,6 +205,9 @@ fn expand_use(
 }
 
 /// Expands one type declaration with optional trait bounds.
+///
+/// The type is re-exported from the target module. Bounds produce an anonymous constant that
+/// checks the target type, and that check keeps only the conditional attributes of the declaration.
 fn expand_type(
     target_path: &Path,
     attrs: Vec<Attribute>,
@@ -229,6 +237,8 @@ fn expand_type(
 }
 
 /// Expands one placeholder item.
+///
+/// The item's attributes and visibility are passed to the expansion for its declaration kind.
 fn expand_item(item: LookAtItem, target_path: &Path) -> Result<TokenStream2> {
     let attrs = item.attrs;
     let vis = item.vis;
@@ -267,8 +277,10 @@ fn expand(input: LookAtInput) -> Result<TokenStream2> {
 ///
 /// The target path is resolved once and is used for every item in the invocation. Functions are
 /// emitted as wrappers that call the target function. Types and `use` trees are re-exported, while
-/// constants are emitted as typed forwarding constants. This lets the rest of the crate use one
-/// stable interface without conditional imports at every call site.
+/// constants are emitted as typed forwarding constants. The macro does not select the
+/// implementation module. A conditional import, such as the `#[cfg]` imports of `current` below,
+/// still selects it, and `look_at!` states and checks the interface that the selected module must
+/// provide.
 ///
 /// ```
 /// # use look_at::look_at;
@@ -319,11 +331,14 @@ fn expand(input: LookAtInput) -> Result<TokenStream2> {
 /// The invocation must contain at least one item. A function declaration has no body, and all
 /// other declarations are placeholders without a definition or value.
 ///
-/// # Functions
+/// ## Functions
 ///
-/// Function declarations keep their name, visibility, generics, `where` clause, ABI, and unsafe
-/// marker. Their parameter patterns are replaced with readable local names so the generated wrapper
-/// can forward each argument positionally.
+/// Function declarations keep their name, visibility, generics, `where` clause, ABI, and `const`
+/// and `unsafe` qualifiers. Their parameter patterns are replaced with readable local names so the
+/// generated wrapper can forward each argument positionally. A single binding keeps its name,
+/// several bindings are joined with `_and_`, and a pattern without bindings becomes `argument_N`
+/// for its one-based position. A repeated name receives an `_argument_N` suffix. Wrappers are
+/// marked `#[inline(always)]`.
 ///
 /// ```ignore
 /// look_at! {
@@ -335,11 +350,17 @@ fn expand(input: LookAtInput) -> Result<TokenStream2> {
 /// ```
 ///
 /// Ordinary functions receive a generated function-pointer assignment that checks the declared
-/// signature against the selected target. `async` and variadic functions are rejected. Functions
-/// containing `impl Trait` in an input or output remain callable wrappers, but skip that generated
-/// function-pointer check because opaque types cannot appear in it.
+/// signature against the selected target. Functions containing `impl Trait` in an input or output
+/// remain callable wrappers, but skip that generated function-pointer check because opaque types
+/// cannot appear in it. `const` functions also skip it, and their wrappers can only call `const`
+/// targets. The forwarding call still checks the arguments and the return value of these
+/// functions, but it permits coercions.
 ///
-/// # Type declarations
+/// An `unsafe` wrapper calls its target in an `unsafe` block, so callers take on the safety
+/// requirements of the declaration. `async` functions, variadic functions, functions with a `self`
+/// receiver, and declarations with a body are rejected.
+///
+/// ## Type declarations
 ///
 /// A `type` declaration is a placeholder for a target type alias, struct, enum, or union. It emits
 /// a `use` re-export, so the target's complete type definition and generic interface remain intact.
@@ -357,12 +378,14 @@ fn expand(input: LookAtInput) -> Result<TokenStream2> {
 ///
 /// A bound is allowed only on a non-generic placeholder. The macro checks it inside an anonymous
 /// constant, for example `pub type Context: Send;` verifies that the selected `Context` implements
-/// `Send` at compile time.
+/// `Send` at compile time. Without a bound, the declaration only checks that the target type
+/// exists.
 ///
-/// # Constants and use trees
+/// ## Constants and use trees
 ///
 /// A constant placeholder contains the name and expected type, but no value. The expansion reads
-/// the value from the selected module and assigns it to the declared type.
+/// the value from the selected module and assigns it to the declared type. A target constant of
+/// another type is rejected unless its value coerces to the declared type.
 ///
 /// ```ignore
 /// look_at! {
@@ -373,21 +396,211 @@ fn expand(input: LookAtInput) -> Result<TokenStream2> {
 /// ```
 ///
 /// A `use` declaration is resolved below the target path, so aliases and nested use trees can be
-/// forwarded without repeating the architecture path at each use site.
+/// forwarded without repeating the architecture path at each use site. It only checks that the
+/// named items exist.
+///
+/// # Compared with conditional re-exports
+///
+/// The conditional import in the overview example already keeps target selection in one place, so
+/// the selected items could also be re-exported directly:
+///
+/// ```
+/// # mod x86_64 {
+/// #     pub fn halt() {}
+/// # }
+/// # mod riscv64 {
+/// #     pub fn halt() {}
+/// # }
+/// #[cfg(target_arch = "x86_64")]
+/// use x86_64 as current;
+/// #[cfg(target_arch = "riscv64")]
+/// use riscv64 as current;
+/// # #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+/// # use x86_64 as current;
+///
+/// pub use current::halt;
+/// # fn main() {}
+/// ```
+///
+/// Both forms give callers one set of names without their own `#[cfg]` attributes, and both
+/// forward only the listed items. `look_at!` differs in how the interface is checked, which
+/// visibility its items can have, and what it generates. The remaining examples in this section
+/// define `current` directly and omit the `#[cfg]` selection.
+///
+/// ## Interface checks
+///
+/// A re-export exposes whatever the selected module defines. When one implementation diverges from
+/// the intended interface, the crate that owns the interface still compiles. The mismatch surfaces
+/// only where a caller uses the item on that target, or not at all when nothing uses it. If the
+/// interface requires `page_shift` to return `u32`, this re-export of an implementation that
+/// returns `u64` still compiles:
+///
+/// ```
+/// mod current {
+///     pub fn page_shift() -> u64 {
+///         12
+///     }
+/// }
+///
+/// pub use current::page_shift;
+/// # fn main() {}
+/// ```
+///
+/// `look_at!` checks each declaration against the selected module at the invocation site.
+///
+/// - An ordinary function is assigned to a function pointer with the declared signature, so its
+///   parameter types, return type, and ABI must match exactly.
+/// - A constant is assigned to the declared type.
+/// - A type placeholder with bounds asserts that the target type implements them.
+///
+/// Declaring the same interface with `look_at!` rejects that implementation with a type mismatch:
+///
+/// ```compile_fail,E0308
+/// # use look_at::look_at;
+/// mod current {
+///     pub fn page_shift() -> u64 {
+///         12
+///     }
+/// }
+///
+/// look_at! {
+///     @current:
+///     pub fn page_shift() -> u32;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// As with a re-export, a declaration also fails to compile when the selected module lacks the
+/// item. The checks cover only the module selected for the current build, so each implementation
+/// is checked when building for its own target.
+///
+/// ## Visibility
+///
+/// A re-export cannot be more visible than its target, so `pub use` rejects a crate-private
+/// function:
+///
+/// ```compile_fail,E0364
+/// mod current {
+///     pub(crate) fn halt() {}
+/// }
+///
+/// pub use current::halt;
+/// # fn main() {}
+/// ```
+///
+/// Function wrappers and forwarding constants are new items, and their targets only need to be
+/// accessible from the invocation site. An implementation module can therefore keep its items
+/// crate-private while the declarations form the public interface:
+///
+/// ```
+/// # use look_at::look_at;
+/// mod current {
+///     pub(crate) fn halt() {}
+///     pub(crate) const PAGE_SIZE: usize = 4096;
+/// }
+///
+/// look_at! {
+///     @current:
+///     pub fn halt();
+///     pub const PAGE_SIZE: usize;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// Type and `use` declarations expand to re-exports and follow the ordinary re-export rules.
+///
+/// ## Costs
+///
+/// - A function wrapper is a distinct function. Its address differs from the target's, and
+///   attributes on the target, such as `#[must_use]` or `#[track_caller]`, do not apply to the
+///   wrapper unless the declaration repeats them.
+/// - Each signature is written once more in the declaration and changes together with the
+///   implementations.
+/// - Some declarations are checked only partially. Type placeholders without bounds and `use`
+///   declarations only check that the item exists, and generic parameters on type placeholders
+///   are not checked. `const` functions and functions with `impl Trait` skip the function-pointer
+///   check and rely on the forwarding call, which permits coercions.
+/// - Some items cannot be declared, as listed in [Unsupported items](#unsupported-items).
+///
+/// An attribute that callers of the wrapper should observe is therefore written on the declaration
+/// as well as on the implementation:
+///
+/// ```
+/// # use look_at::look_at;
+/// mod current {
+///     #[must_use]
+///     pub fn read_counter() -> u64 {
+///         0
+///     }
+/// }
+///
+/// look_at! {
+///     @current:
+///     #[must_use]
+///     pub fn read_counter() -> u64;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// A conditional re-export remains the simpler choice when callers need the target item itself,
+/// such as its function address or its attributes, when the items cannot be declared here, or when
+/// the interface needs no checks beyond those its callers already perform.
 ///
 /// # Attributes and visibility
 ///
-/// Outer attributes attached to an item are copied to its generated wrapper or re-export. In
-/// particular, `#[cfg(...)]` can remove an item for architectures where it is unavailable. The
-/// visibility written in the invocation is used for the generated item and does not increase the
-/// visibility of the target definition itself.
+/// Outer attributes attached to an item, including doc comments, are copied to its generated
+/// wrapper, re-export, or constant. In particular, `#[cfg(...)]` can remove an item for
+/// architectures where it is unavailable. A bound check copies only the `cfg` and `cfg_attr`
+/// attributes of its declaration, so it is removed together with its re-export.
+///
+/// The visibility written in the invocation is used for the generated item and does not increase
+/// the visibility of the target definition itself. Function wrappers and constants may be more
+/// visible than their targets, while type and `use` re-exports may not, as described in
+/// [Visibility](#visibility).
+///
+/// # Documentation
+///
+/// Function wrappers and forwarding constants are new items, so their documentation consists only
+/// of the doc comments on the declaration. Type and `use` declarations expand to re-exports. When
+/// rustdoc inlines such a re-export, for example because the target module is private, it shows
+/// the doc comments on the declaration followed by those on the target item. That part of the page
+/// therefore depends on the target selected for the documentation build.
+///
+/// Doc comments on a declaration are shared by every implementation. They describe one interface
+/// regardless of the target, but they must hold for every architecture and cannot document the
+/// details of one implementation. A practical split is to describe the architecture-neutral
+/// contract on the declaration and to keep architecture-specific details on each implementation:
+///
+/// ```
+/// # use look_at::look_at;
+/// mod x86_64 {
+///     /// Returns 12 because x86-64 uses 4 KiB base pages.
+///     pub fn page_shift() -> u32 {
+///         12
+///     }
+/// }
+///
+/// use x86_64 as current;
+///
+/// look_at! {
+///     @current:
+///     /// Returns the base-2 logarithm of the base page size.
+///     pub fn page_shift() -> u32;
+/// }
+/// # fn main() {}
+/// ```
+///
+/// The documentation of the generated `page_shift` contains only the declaration's sentence, while
+/// the x86-64 detail stays with the implementation.
 ///
 /// # Unsupported items
 ///
 /// The current syntax supports functions, `type` placeholders, `const` placeholders, and `use`
 /// trees. Trait declarations, structs with inline fields, enum definitions, union definitions, and
 /// constants with values must remain in the selected implementation module and are not accepted as
-/// declarations here.
+/// declarations here. Their definitions can still be forwarded with a `type`, `const`, or `use`
+/// declaration. Among functions, `async` functions, variadic functions, and functions with a
+/// `self` receiver are rejected, as described in [Functions](#functions).
 #[proc_macro]
 pub fn look_at(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as LookAtInput);
