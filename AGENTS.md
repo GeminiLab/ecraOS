@@ -6,12 +6,12 @@ targets are x86-64, RISC-V 64, and AArch64.
 
 ## Structure
 
-The repository has two Cargo workspaces and independent smoke applications.
-There is no root Cargo manifest.
+The repository has three independent Cargo workspaces: the root kernel workspace,
+`ecraldr/`, and `smoke-apps/`.
 
-- `ecraos/` - The kernel workspace.
-  - `ecraos/ecraos` - The PIE-enabled kernel library.
-  - `ecraos/exarch` - Architecture-specific support code and architecture-kernel
+- `./` - The kernel workspace.
+  - `ecraos/` - The PIE-enabled kernel library.
+  - `exarch/` - Architecture-specific support code and architecture-kernel
     interfaces for x86-64, RISC-V 64, and AArch64.
 - `ecraldr/` - The loader workspace.
   - `ecraldr/ecraldr` - Shared loader code that embeds the stripped kernel.
@@ -24,12 +24,13 @@ There is no root Cargo manifest.
 - `smoke-apps/` - A Cargo workspace for the independent kernel binaries:
   `default`, `ipi`, `sync-preemption`, and `sleep-join`. Shared dependencies,
   and the lockfile are defined at the workspace root.
-- `xtask/` - A standalone host-side Cargo task runner for building and testing.
+- `xtask/` - A standalone host-side Cargo task runner excluded from the kernel
+  workspace.
 
 Supporting crates include `expt` for page tables, `exbuddy`/`exslab` for memory
 allocation, `expalloc_trait` for page allocation traits, and small utility
-crates such as `size_disp` and `memory_range_set`. There may be more crates in
-the repository. These supporting crates live under `ecraos/`.
+crates such as `size_disp` and `memory_range_set`. These supporting crates live
+at the repository root beside `ecraos/`.
 
 ## Build & Run Commands
 
@@ -41,7 +42,7 @@ so the kernel and architecture support code are compiled in one Cargo graph.
 
 The current build procedure is:
 
-1. Build a smoke application with PIE relocation and `ecraos/ecraos/link.ld`.
+1. Build a smoke application with PIE relocation and `ecraos/link.ld`.
 2. Strip the kernel to a flat binary.
 3. Build the target-specific `ecraldr-*` loader with static relocation, the loader
    linker script, and `KERNEL_BIN=<path-to-stripped-kernel>`.
@@ -128,13 +129,13 @@ There is no test-matrix xtask command.
 Run Cargo commands with an explicit manifest path from the repository root:
 
 ```bash
-cargo fmt --manifest-path ecraos/Cargo.toml --all
+cargo fmt --manifest-path Cargo.toml --all
 cargo fmt --manifest-path ecraldr/Cargo.toml --all
 cargo fmt --manifest-path ecraldr/ecraldr_build_rs/Cargo.toml
 cargo fmt --manifest-path xtask/Cargo.toml
 cargo fmt --manifest-path smoke-apps/Cargo.toml --all
 
-cargo clippy --manifest-path ecraos/Cargo.toml --workspace --target x86_64-unknown-none
+cargo clippy --manifest-path Cargo.toml --workspace --target x86_64-unknown-none
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets
 cargo test --manifest-path xtask/Cargo.toml --locked
 cargo clippy --manifest-path ecraldr/Cargo.toml -p ecraldr -p ecraldr_base \

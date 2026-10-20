@@ -8,10 +8,10 @@ members = [
 resolver = "3"
 
 [workspace.dependencies]
-ecraos = { path = "../ecraos/ecraos" }
+ecraos = { path = "../ecraos" }
 log = "0.4"
 
 [patch.crates-io]
-page_table_entry = { path = "../ecraos/page_table_entry" }
+page_table_entry = { path = "../page_table_entry" }
 # Temporary until the doc_cfg fix is released by spinning_top.
 spinning_top = { git = "https://github.com/rust-osdev/spinning_top", branch = "master" }

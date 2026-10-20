@@ -8,7 +8,7 @@ use crate::{TaskResult, process};
 
 /// Runs the existing host test suites.
 ///
-/// Selects explicit manifests because the repository root is not a Cargo workspace.
+/// Selects explicit manifests to keep kernel and loader tests tied to their own workspaces.
 pub fn test(root: &Path) -> TaskResult<()> {
     for executable in ["rustc", "cargo"] {
         process::run(Command::new(executable).arg("--version"), None)?;
@@ -16,7 +16,7 @@ pub fn test(root: &Path) -> TaskResult<()> {
     let mut kernel = process::cargo(root);
     kernel
         .args(["test", "--locked", "--manifest-path"])
-        .arg(root.join("ecraos/Cargo.toml"));
+        .arg(root.join("Cargo.toml"));
     for package in [
         "exbuddy",
         "exslab",
@@ -43,7 +43,7 @@ pub fn test(root: &Path) -> TaskResult<()> {
     process::run(
         process::cargo(root)
             .args(["test", "--locked", "--manifest-path"])
-            .arg(root.join("ecraos/Cargo.toml"))
+            .arg(root.join("Cargo.toml"))
             .args(["-p", "ecraos", "--lib", "--features", "host-test"]),
         None,
     )?;

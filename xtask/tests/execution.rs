@@ -235,7 +235,7 @@ fn builds_with_separate_manifest_and_artifact_paths() {
     assert!(loader.is_file());
     let flags = fs::read_to_string(fixture.dir.join("flags")).unwrap();
     assert!(flags.contains("relocation-model=pie"));
-    assert!(flags.contains("ecraos/ecraos/link.ld"));
+    assert!(flags.contains("ecraos/link.ld"));
     assert!(flags.contains("relocation-model=static"));
 }
 

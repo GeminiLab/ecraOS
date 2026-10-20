@@ -345,7 +345,7 @@ expt 的 crate 文档明确记录了映射覆盖断开 child tables 后丢失其
 git status --short --branch
 git rev-parse HEAD
 git log --oneline -8
-git diff cb6617ba02a74b8f3c0a78fcc6b249ea16afdb86 -- ecraos/expt ecraos/exarch ecraos/ecraos/src/mem
+git diff cb6617ba02a74b8f3c0a78fcc6b249ea16afdb86 -- expt exarch ecraos/src/mem
 ```
 
 如果历史已重写或基线不存在，应依据下列模块及 API 重新定位，不要求恢复旧分支。
@@ -353,20 +353,20 @@ git diff cb6617ba02a74b8f3c0a78fcc6b249ea16afdb86 -- ecraos/expt ecraos/exarch e
 
 ### 8.3 源码阅读入口
 
-- [`mem/vmm.rs`](../../ecraos/ecraos/src/mem/vmm.rs)：`VirtualAddressSpace`、内核布局、
+- [`mem/vmm.rs`](../../ecraos/src/mem/vmm.rs)：`VirtualAddressSpace`、内核布局、
   `with_page_table` 和 allocator handoff，观察全局映射管理现状。
-- [`mem/allocs/vmalloc.rs`](../../ecraos/ecraos/src/mem/allocs/vmalloc.rs)：动态虚拟区间和
+- [`mem/allocs/vmalloc.rs`](../../ecraos/src/mem/allocs/vmalloc.rs)：动态虚拟区间和
   backing 状态，观察现有区域管理职责。
-- [`expt/src/lib.rs`](../../ecraos/expt/src/lib.rs)：crate 契约、术语及已知实现限制。
-- [`expt/src/pt/single.rs`](../../ecraos/expt/src/pt/single.rs)：静态 allocator、构造、leak、
+- [`expt/src/lib.rs`](../../expt/src/lib.rs)：crate 契约、术语及已知实现限制。
+- [`expt/src/pt/single.rs`](../../expt/src/pt/single.rs)：静态 allocator、构造、leak、
   Drop 和 cursor 操作。
-- [`expt/src/pt/dual.rs`](../../ecraos/expt/src/pt/dual.rs)：lower/upper roots 的具体组合。
-- [`expt/src/opaque.rs`](../../ecraos/expt/src/opaque.rs)：格式和 allocator 能力的类型擦除。
-- [`exarch/src/parts/mem.rs`](../../ecraos/exarch/src/parts/mem.rs)：模式选择、
+- [`expt/src/pt/dual.rs`](../../expt/src/pt/dual.rs)：lower/upper roots 的具体组合。
+- [`expt/src/opaque.rs`](../../expt/src/opaque.rs)：格式和 allocator 能力的类型擦除。
+- [`exarch/src/parts/mem.rs`](../../exarch/src/parts/mem.rs)：模式选择、
   `get_page_table_type` 和 `set_page_table_root` 接口。
-- [`x86_64/mem.rs`](../../ecraos/exarch/src/arch/x86_64/mem.rs)、
-  [`riscv64/mem.rs`](../../ecraos/exarch/src/arch/riscv64/mem.rs)、
-  [`aarch64/mem.rs`](../../ecraos/exarch/src/arch/aarch64/mem.rs)：各架构的 root 安装方式。
+- [`x86_64/mem.rs`](../../exarch/src/arch/x86_64/mem.rs)、
+  [`riscv64/mem.rs`](../../exarch/src/arch/riscv64/mem.rs)、
+  [`aarch64/mem.rs`](../../exarch/src/arch/aarch64/mem.rs)：各架构的 root 安装方式。
 
 这些链接用于定位职责和符号，后续路径变化时按符号搜索即可。
 

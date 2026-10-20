@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "ecraos",
+    "exarch",
+    "exbuddy",
+    "expalloc_trait",
+    "expanic",
+    "expercpu/expercpu",
+    "expercpu/expercpu_macros",
+    "expt",
+    "exslab",
+    "utils/dyn_static_traits",
+    "utils/look_at",
+    "utils/maybe_non_generic",
+    "utils/memory_range_set",
+    "utils/size_disp",
+    "utils/product",
+    "page_table_entry",
+]
+exclude = [
+    "ecraldr",
+    "smoke-apps",
+    "xtask",
+]
+
+[workspace.dependencies]
+cfg-if = "1.0"
+# TODO: move it out of ecraldr, rename it, add version number when passing arguments to kernel
+ecraldr_base = { path = "ecraldr/ecraldr_base" }
+kspin = "0.2"
+lazyinit = "0.2"
+log = "0.4"
+memory_addr = "0.5.0-alpha.const-addr-and-ranges.0"
+thiserror = { version = "2.0", default-features = false }
+
+[patch.crates-io]
+page_table_entry = { path = "page_table_entry" }
+# Temporary until the doc_cfg fix is released by spinning_top.
+spinning_top = { git = "https://github.com/rust-osdev/spinning_top", branch = "master" }

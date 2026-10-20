@@ -76,7 +76,7 @@ Clean would also permit access. Dirty conservatively marks the inherited
 floating-point state as modified.
 
 FS is per-hart state, so initializing the BSP does not cover harts started
-through HSM. The AP entry in `ecraos/exarch/src/arch/riscv64/mp.S` performs the
+through HSM. The AP entry in `exarch/src/arch/riscv64/mp.S` performs the
 same initialization before entering Rust. Each hart must satisfy the target's
 execution requirements, including access to floating-point state.
 

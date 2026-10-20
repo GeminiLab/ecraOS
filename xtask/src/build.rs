@@ -181,7 +181,7 @@ pub fn image(root: &Path, options: &BuildOptions, log: Option<&File>) -> TaskRes
     let loader_binary = loader_dir.join(format!("{}.bin", options.target.loader()));
 
     let mut linker = OsString::from("link-arg=-T");
-    linker.push(root.join("ecraos/ecraos/link.ld"));
+    linker.push(root.join("ecraos/link.ld"));
     let flags = encoded_flags(&[
         "-C".into(),
         "relocation-model=pie".into(),

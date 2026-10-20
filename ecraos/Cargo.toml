@@ -1,35 +1,45 @@
-[workspace]
-resolver = "3"
-members = [
-    "ecraos",
-    "exarch",
-    "exbuddy",
-    "expalloc_trait",
-    "expanic",
-    "expercpu/expercpu",
-    "expercpu/expercpu_macros",
-    "expt",
-    "exslab",
-    "utils/dyn_static_traits",
-    "utils/look_at",
-    "utils/maybe_non_generic",
-    "utils/memory_range_set",
-    "utils/size_disp",
-    "utils/product",
-    "page_table_entry",
-]
+[package]
+name = "ecraos"
+version = "0.1.0"
+edition = "2024"
 
-[workspace.dependencies]
-cfg-if = "1.0"
-# TODO: move it out of ecraldr, rename it, add version number when passing arguments to kernel
-ecraldr_base = { path = "../ecraldr/ecraldr_base" }
-kspin = "0.2"
-lazyinit = "0.2"
-log = "0.4"
-memory_addr = "0.5.0-alpha.const-addr-and-ranges.0"
-thiserror = { version = "2.0", default-features = false }
+[features]
+default = []
+# ecraOS is being tested on a host machine.
+host-test = ["expercpu/host-test"]
+# Deterministic hardware foundation tests without production fault injection.
+foundation-test = []
 
-[patch.crates-io]
-page_table_entry = { path = "page_table_entry" }
-# Temporary until the doc_cfg fix is released by spinning_top.
-spinning_top = { git = "https://github.com/rust-osdev/spinning_top", branch = "master" }
+[dependencies]
+bitmaps = { version = "3.2.1", default-features = false }
+crate_interface = { version = "0.3", features = ["weak_default"] }
+ecraldr_base.workspace = true
+exbuddy = { path = "../exbuddy" }
+exarch = { path = "../exarch" }
+expalloc_trait = { path = "../expalloc_trait" }
+expanic = { path = "../expanic" }
+expercpu = { path = "../expercpu/expercpu", features = ["early-slot", "remote-access"] }
+expt = { path = "../expt" }
+exslab = { path = "../exslab" }
+heapless = "0.9"
+kspin = { version = "0.2", features = ["smp"] }
+kernel_guard = { version = "0.2", features = ["preempt"] }
+lazyinit.workspace = true
+log.workspace = true
+memory_addr.workspace = true
+memory_range_set = { path = "../utils/memory_range_set" }
+size_disp = { path = "../utils/size_disp" }
+target-triple = "1.0.1"
+thiserror.workspace = true
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+acpi = "6"
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+fdt-rs = { version = "0.4", default-features = false }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+fdt-rs = { version = "0.4", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
