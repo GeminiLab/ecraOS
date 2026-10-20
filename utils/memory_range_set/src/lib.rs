@@ -1,12 +1,8 @@
-//! Non-overlapping memory range sets.
-//!
-//! This crate provides [`RangeSet`], a small data structure for tracking occupied address ranges
-//! inside a fixed limit. Each occupied range carries a caller-defined payload, while the set also
-//! keeps indexes of the remaining free ranges.
-
+#![doc = include_str!("../README.md")]
 #![no_std]
 #![feature(allocator_api)]
 #![feature(btree_cursors)]
+#![feature(btreemap_alloc)]
 
 extern crate alloc;
 
@@ -16,7 +12,8 @@ use alloc::{
 };
 use core::{
     cmp::Ordering,
-    ops::{Bound, Deref, DerefMut},
+    fmt,
+    ops::{Bound, Deref},
 };
 
 use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr};
@@ -25,218 +22,20 @@ use memory_addr::{AddrRange, AddrRangeBounds, MemoryAddr};
 ///
 /// Defines behavior specifications for range insertion, removal, lookup, and free-range queries.
 #[cfg(test)]
-mod test;
-
-#[cfg(false)]
-mod arena {
-    use core::{mem::ManuallyDrop, ptr::NonNull};
-
-    use alloc::boxed::Box;
-    use nonmax::NonMaxU32;
-
-    /// The number of chunks in the arena.
-    const CHUNKS_COUNT: usize = 16;
-    /// The size of the first chunk in the arena.
-    const FIRST_CHUNK_SIZE: usize = 16;
-
-    const fn chunk_size(chunk: usize) -> Option<usize> {
-        if chunk >= CHUNKS_COUNT {
-            None
-        } else {
-            Some(FIRST_CHUNK_SIZE << chunk)
-        }
-    }
-
-    #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    struct ArenaIndex(NonMaxU32);
-
-    impl ArenaIndex {
-        const OFFSET_BITS: usize = 24;
-
-        const unsafe fn chunk(self) -> usize {
-            self.0.get() as usize >> Self::OFFSET_BITS
-        }
-
-        const unsafe fn offset(self) -> usize {
-            self.0.get() as usize & ((1 << Self::OFFSET_BITS) - 1)
-        }
-
-        const fn chunk_offset(self) -> Option<(usize, usize)> {
-            let chunk = unsafe { self.chunk() };
-            let Some(chunk_size) = chunk_size(chunk) else {
-                return None;
-            };
-            let offset = unsafe { self.offset() };
-            if offset >= chunk_size {
-                None
-            } else {
-                Some((chunk, offset))
-            }
-        }
-
-        const unsafe fn new_unchecked(chunk: usize, offset: usize) -> Self {
-            Self(NonMaxU32::new(((chunk as u32) << Self::OFFSET_BITS) | offset as u32).unwrap())
-        }
-    }
-
-    const _: () =
-        assert!(core::mem::size_of::<Option<ArenaIndex>>() == core::mem::size_of::<NonMaxU32>());
-
-    union ArenaSlot<T> {
-        free_next: Option<ArenaIndex>,
-        data: ManuallyDrop<T>,
-    }
-
-    struct RangeArena<T> {
-        chunks: [Option<NonNull<ArenaSlot<T>>>; CHUNKS_COUNT],
-        occupied: [Option<NonNull<u8>>; CHUNKS_COUNT],
-        free_list_head: Option<ArenaIndex>,
-        chunks_allocated: u32,
-    }
-
-    impl<T> RangeArena<T> {
-        const fn new() -> Self {
-            Self {
-                chunks: [None; CHUNKS_COUNT],
-                occupied: [None; CHUNKS_COUNT],
-                free_list_head: None,
-                chunks_allocated: 0,
-            }
-        }
-
-        const fn slot(&self, index: ArenaIndex) -> Option<&ArenaSlot<T>> {
-            let Some((chunk, offset)) = index.chunk_offset() else {
-                return None;
-            };
-
-            match self.chunks[chunk] {
-                Some(chunk) => {
-                    // SAFETY: `index.chunk_offset()` has already checked that the offset is within the
-                    // chunk.
-                    unsafe { Some(chunk.as_ptr().add(offset).as_ref_unchecked()) }
-                }
-                None => None,
-            }
-        }
-
-        const fn slot_mut(&mut self, index: ArenaIndex) -> Option<&mut ArenaSlot<T>> {
-            let Some((chunk, offset)) = index.chunk_offset() else {
-                return None;
-            };
-            match self.chunks[chunk] {
-                Some(chunk) => {
-                    // SAFETY: `index.chunk_offset()` has already checked that the offset is within the
-                    // chunk.
-                    unsafe { Some(chunk.as_ptr().add(offset).as_mut_unchecked()) }
-                }
-                None => None,
-            }
-        }
-
-        const fn is_occupied(&self, index: ArenaIndex) -> Option<bool> {
-            let Some((chunk, offset)) = index.chunk_offset() else {
-                return None;
-            };
-            let Some(occupied_arr) = self.occupied[chunk] else {
-                return None;
-            };
-            let byte_offset = offset / u8::BITS as usize;
-            let byte_mask = 1 << (offset % u8::BITS as usize);
-            // SAFETY: We know that the offset is within the chunk.
-            Some(unsafe { *occupied_arr.as_ptr().add(byte_offset) & byte_mask != 0 })
-        }
-
-        const fn set_occupied(&mut self, index: ArenaIndex, occupied: bool) {
-            let Some((chunk, offset)) = index.chunk_offset() else {
-                return;
-            };
-            let Some(occupied_arr) = self.occupied[chunk] else {
-                return;
-            };
-
-            let byte_offset = offset / u8::BITS as usize;
-            let byte_mask = 1 << (offset % u8::BITS as usize);
-
-            // SAFETY: We know that the offset is within the chunk.
-            unsafe {
-                let occupied_byte = occupied_arr.as_ptr().add(byte_offset);
-
-                if occupied {
-                    *occupied_byte |= byte_mask;
-                } else {
-                    *occupied_byte &= !byte_mask;
-                }
-            }
-        }
-
-        fn alloc(&mut self) -> Option<ArenaIndex> {
-            match self.free_list_head {
-                Some(index) => {
-                    self.free_list_head = unsafe { self.slot(index).unwrap_unchecked().free_next };
-                    self.set_occupied(index, true);
-                    Some(index)
-                }
-                None => {
-                    let chunk_index = self.chunks_allocated as _;
-                    let chunk_size = chunk_size(chunk_index)?;
-                    self.chunks_allocated += 1;
-
-                    let mut chunk = Box::<[ArenaSlot<T>]>::new_uninit_slice(chunk_size);
-                    for index in 0..(chunk_size - 1) {
-                        // SAFETY: We know that the offset is within the chunk.
-                        chunk[index].write(ArenaSlot {
-                            free_next: Some(unsafe {
-                                ArenaIndex::new_unchecked(chunk_index, (index + 1) as _)
-                            }),
-                        });
-                    }
-                    chunk[chunk_size - 1].write(ArenaSlot { free_next: None });
-
-                    // SAFETY: We have just initialized the chunk.
-                    let chunk = unsafe { chunk.assume_init() };
-                    // SAFETY: This bitfield can be zeroed safely.
-                    let occupied = unsafe {
-                        Box::<[u8]>::new_zeroed_slice(chunk_size / u8::BITS as usize).assume_init()
-                    };
-
-                    self.chunks[chunk_index] =
-                        Some(unsafe { NonNull::new_unchecked(Box::into_raw(chunk) as *mut _) });
-                    self.occupied[chunk_index] =
-                        Some(unsafe { NonNull::new_unchecked(Box::into_raw(occupied) as *mut _) });
-
-                    // SAFETY: We know that the offset is within the chunk.
-                    self.free_list_head =
-                        Some(unsafe { ArenaIndex::new_unchecked(chunk_index, 0) });
-                    self.alloc()
-                }
-            }
-        }
-
-        fn free(&mut self, index: ArenaIndex) -> Option<T> {
-            if !self.is_occupied(index)? {
-                return None;
-            }
-
-            self.set_occupied(index, false);
-            let free_list_head = self.free_list_head;
-            let slot = self.slot_mut(index)?;
-            unsafe {
-                let data = ManuallyDrop::take(&mut slot.data);
-                slot.free_next = free_list_head;
-                self.free_list_head = Some(index);
-                Some(data)
-            }
-        }
-    }
-}
+mod tests;
 
 /// An occupied range stored in a range set.
 ///
 /// This entry keeps the occupied address range together with the payload associated with that
 /// range.
-struct RangeInSet<M: MemoryAddr, P = ()> {
+struct RangeInSet<M: MemoryAddr, P> {
+    /// The occupied address range.
+    ///
+    /// Its start address is also the key of this entry in the occupied-range map.
     range: AddrRange<M>,
+    /// The payload associated with the range.
+    ///
+    /// It is returned to the caller when the range is removed.
     payload: P,
 }
 
@@ -248,6 +47,9 @@ struct RangeInSet<M: MemoryAddr, P = ()> {
 #[repr(transparent)]
 struct AddrRangeBySize<M: MemoryAddr>(pub AddrRange<M>);
 
+/// Constructs size-ordered address ranges.
+///
+/// The constructors create stored index entries and lookup sentinels.
 impl<M: MemoryAddr> AddrRangeBySize<M> {
     /// Creates a size-ordered address range.
     ///
@@ -266,26 +68,27 @@ impl<M: MemoryAddr> AddrRangeBySize<M> {
     }
 }
 
+/// Provides immutable access to the wrapped range of a size-ordered entry.
+///
+/// Range accessors such as `size` and `contains` can be called on the wrapper directly.
 impl<M: MemoryAddr> Deref for AddrRangeBySize<M> {
+    /// The wrapped address range type.
+    ///
+    /// The wrapper changes only the ordering of this range.
     type Target = AddrRange<M>;
 
     /// Dereferences to the wrapped address range.
     ///
-    /// Allows size-ordered range wrappers to be used where immutable address range access is needed.
+    /// Allows size-ordered range wrappers to be used where immutable address range access is
+    /// needed.
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<M: MemoryAddr> DerefMut for AddrRangeBySize<M> {
-    /// Mutably dereferences to the wrapped address range.
-    ///
-    /// Allows size-ordered range wrappers to be used where mutable address range access is needed.
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
+/// Partially orders size-ordered address ranges.
+///
+/// The ordering is total and delegates to [`Ord`].
 impl<M: MemoryAddr> PartialOrd for AddrRangeBySize<M> {
     /// Partially compares ranges by size, then start address.
     ///
@@ -295,6 +98,9 @@ impl<M: MemoryAddr> PartialOrd for AddrRangeBySize<M> {
     }
 }
 
+/// Orders address ranges by size, then start address.
+///
+/// The smallest suitable range is therefore the first entry at or above a size sentinel.
 impl<M: MemoryAddr> Ord for AddrRangeBySize<M> {
     /// Compares ranges by size, then start address.
     ///
@@ -315,6 +121,9 @@ impl<M: MemoryAddr> Ord for AddrRangeBySize<M> {
 #[repr(transparent)]
 struct AddrRangeByStart<M: MemoryAddr>(pub AddrRange<M>);
 
+/// Constructs start-ordered address ranges.
+///
+/// The constructors create stored index entries and lookup sentinels.
 impl<M: MemoryAddr> AddrRangeByStart<M> {
     /// Creates a start-ordered address range.
     ///
@@ -333,26 +142,27 @@ impl<M: MemoryAddr> AddrRangeByStart<M> {
     }
 }
 
+/// Provides immutable access to the wrapped range of a start-ordered entry.
+///
+/// Range accessors such as `start` and `contains` can be called on the wrapper directly.
 impl<M: MemoryAddr> Deref for AddrRangeByStart<M> {
+    /// The wrapped address range type.
+    ///
+    /// The wrapper changes only the ordering of this range.
     type Target = AddrRange<M>;
 
     /// Dereferences to the wrapped address range.
     ///
-    /// Allows start-ordered range wrappers to be used where immutable address range access is needed.
+    /// Allows start-ordered range wrappers to be used where immutable address range access is
+    /// needed.
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<M: MemoryAddr> DerefMut for AddrRangeByStart<M> {
-    /// Mutably dereferences to the wrapped address range.
-    ///
-    /// Allows start-ordered range wrappers to be used where mutable address range access is needed.
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
+/// Partially orders start-ordered address ranges.
+///
+/// The ordering is total and delegates to [`Ord`].
 impl<M: MemoryAddr> PartialOrd for AddrRangeByStart<M> {
     /// Partially compares ranges by start address, then end address.
     ///
@@ -362,6 +172,9 @@ impl<M: MemoryAddr> PartialOrd for AddrRangeByStart<M> {
     }
 }
 
+/// Orders address ranges by start address, then end address.
+///
+/// The free range containing an address is therefore the last entry that starts at or below it.
 impl<M: MemoryAddr> Ord for AddrRangeByStart<M> {
     /// Compares ranges by start address, then end address.
     ///
@@ -381,17 +194,17 @@ impl<M: MemoryAddr> Ord for AddrRangeByStart<M> {
 /// # Examples
 ///
 /// ```
-/// use memory_addr::{AddrRange, VirtAddr};
+/// use memory_addr::{VirtAddr, va_range};
 /// use memory_range_set::{RangeSet, TryInsertError};
 ///
-/// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-/// set.try_insert(AddrRange::new(20.into(), 40.into()), "kernel")?;
+/// let mut set = RangeSet::new(va_range!(0..100));
+/// set.try_insert(va_range!(20..40), "kernel")?;
 ///
 /// assert_eq!(
-///     set.try_insert(AddrRange::new(30.into(), 50.into()), "driver"),
+///     set.try_insert(va_range!(30..50), "driver"),
 ///     Err(TryInsertError::Overlap {
 ///         payload: "driver",
-///         existing: AddrRange::new(20.into(), 40.into()),
+///         existing: va_range!(20..40),
 ///     })
 /// );
 /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, &str>>(())
@@ -432,19 +245,77 @@ pub enum TryInsertError<M: MemoryAddr, P> {
         /// Identifies the containing limit required for all inserted ranges.
         limit: AddrRange<M>,
     },
+
+    /// An empty range.
+    ///
+    /// Indicates that the requested insertion contains no address. An empty range would split a
+    /// free range without occupying any of it, so it is rejected before any other check.
+    Empty {
+        /// The insertion payload.
+        ///
+        /// Returns the payload supplied for the failed insertion.
+        payload: P,
+
+        /// The requested insertion range.
+        ///
+        /// Its start and end addresses are equal.
+        range: AddrRange<M>,
+    },
 }
+
+/// Formats insertion errors as messages.
+///
+/// The messages describe the rejected or conflicting ranges and omit the payload.
+impl<M: MemoryAddr + fmt::Debug, P> fmt::Display for TryInsertError<M, P> {
+    /// Writes the error message.
+    ///
+    /// Ranges are written with their debug representation.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Overlap { existing, .. } => {
+                write!(f, "range overlaps the existing range {existing:?}")
+            }
+            Self::OutOfLimit { range, limit, .. } => {
+                write!(f, "range {range:?} is outside the limit {limit:?}")
+            }
+            Self::Empty { range, .. } => write!(f, "range {range:?} is empty"),
+        }
+    }
+}
+
+/// Reports insertion errors through the standard error trait.
+///
+/// The errors have no source.
+impl<M: MemoryAddr + fmt::Debug, P: fmt::Debug> core::error::Error for TryInsertError<M, P> {}
 
 /// A set of non-overlapping occupied memory ranges.
 ///
 /// The set manages a fixed address limit. Inserted ranges are treated as occupied and are
 /// associated with a payload, while the remaining portions of the limit are tracked as free ranges.
+/// Occupied and free ranges are never empty.
+///
+/// `M` is the address type and `P` is the payload type. `A` is the allocator of the internal
+/// B-tree nodes. [`RangeSet::new`] uses the global allocator, and [`RangeSet::new_in`] accepts
+/// any cloneable allocator.
 pub struct RangeSet<M: MemoryAddr, P = (), A: Allocator = Global>
 where
     A: Clone,
 {
+    /// The address range that contains every occupied and free range.
+    ///
+    /// The limit is fixed when the set is created.
     limit: AddrRange<M>,
+    /// The occupied ranges keyed by start address.
+    ///
+    /// Each entry stores the complete range and its payload.
     map: BTreeMap<M, RangeInSet<M, P>, A>,
+    /// The free ranges ordered by size, then start address.
+    ///
+    /// This index serves best-fit lookup and contains the same ranges as `free_ranges_by_addr`.
     free_ranges_by_size: BTreeSet<AddrRangeBySize<M>, A>,
+    /// The free ranges ordered by start address.
+    ///
+    /// This index serves address lookup and contains the same ranges as `free_ranges_by_size`.
     free_ranges_by_addr: BTreeSet<AddrRangeByStart<M>, A>,
 }
 
@@ -458,31 +329,63 @@ macro_rules! unreachable_inconsistency {
     };
 }
 
-impl<A: MemoryAddr, P> RangeSet<A, P> {
+/// Creates range sets that use the global allocator.
+///
+/// Sets that use another allocator are created with [`RangeSet::new_in`].
+impl<M: MemoryAddr, P> RangeSet<M, P> {
     /// Creates a range set with the given address limit.
     ///
     /// The new set starts with no occupied ranges and with the whole limit available as a free
-    /// range.
+    /// range. An empty limit has no free range.
     ///
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let set = RangeSet::<VirtAddr>::new(AddrRange::new(0.into(), 100.into()));
-    /// assert_eq!(set.limit(), AddrRange::new(0.into(), 100.into()));
-    /// assert_eq!(set.find_free_range(100), Some(AddrRange::new(0.into(), 100.into())));
+    /// let set = RangeSet::<VirtAddr>::new(va_range!(0..100));
+    /// assert_eq!(set.limit(), va_range!(0..100));
+    /// assert_eq!(set.find_free_range(100), Some(va_range!(0..100)));
     /// ```
-    pub fn new(limit: AddrRange<A>) -> Self {
+    pub fn new(limit: AddrRange<M>) -> Self {
+        Self::new_in(limit, Global)
+    }
+}
+
+/// Creates, queries, and updates range sets.
+///
+/// Every update keeps the occupied-range map and both free-range indexes consistent.
+impl<M: MemoryAddr, P, A: Allocator + Clone> RangeSet<M, P, A> {
+    /// Creates a range set with the given address limit and allocator.
+    ///
+    /// The internal B-tree nodes are allocated with clones of `alloc`. Apart from the allocator,
+    /// the new set is the same as one created by [`RangeSet::new`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::System;
+    ///
+    /// use memory_addr::{VirtAddr, va_range};
+    /// use memory_range_set::RangeSet;
+    ///
+    /// let set = RangeSet::<VirtAddr, (), _>::new_in(va_range!(0..100), System);
+    /// assert_eq!(set.find_free_range(100), Some(va_range!(0..100)));
+    /// ```
+    pub fn new_in(limit: AddrRange<M>, alloc: A) -> Self {
         let mut result = Self {
             limit,
-            map: BTreeMap::new(),
-            free_ranges_by_size: BTreeSet::new(),
-            free_ranges_by_addr: BTreeSet::new(),
+            map: BTreeMap::new_in(alloc.clone()),
+            free_ranges_by_size: BTreeSet::new_in(alloc.clone()),
+            free_ranges_by_addr: BTreeSet::new_in(alloc),
         };
 
-        result.insert_free_range(limit);
+        if !limit.is_empty() {
+            result.insert_free_range(limit);
+        }
 
         result
     }
@@ -495,57 +398,48 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), "kernel")?;
-    /// assert_eq!(set.find(30.into()).map(|(_, payload)| *payload), Some("kernel"));
-    /// assert_eq!(set.find(50.into()), None);
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), "kernel")?;
+    /// assert_eq!(set.find(va!(30)).map(|(_, payload)| *payload), Some("kernel"));
+    /// assert_eq!(set.find(va!(50)), None);
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, &str>>(())
     /// ```
-    pub fn find(&self, addr: A) -> Option<(AddrRange<A>, &P)> {
-        let cursor = self.map.lower_bound(Bound::Excluded(&addr));
-        let (start, candidate) = cursor.peek_prev()?;
-
-        if candidate.range.contains(addr) {
-            let value = self.map.get(start)?;
-            Some((value.range, &value.payload))
-        } else {
-            None
-        }
+    pub fn find(&self, addr: M) -> Option<(AddrRange<M>, &P)> {
+        let (_, candidate) = self.map.range(..=addr).next_back()?;
+        candidate
+            .range
+            .contains(addr)
+            .then_some((candidate.range, &candidate.payload))
     }
 
     /// Finds the range containing the given address mutably.
     ///
-    /// Returns the occupied range and a mutable reference to its payload, or `None` when the address
-    /// is free or outside the set limit.
+    /// Returns the occupied range and a mutable reference to its payload, or `None` when the
+    /// address is free or outside the set limit.
     ///
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), 1)?;
-    /// if let Some((_, payload)) = set.find_mut(30.into()) {
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), 1)?;
+    /// if let Some((_, payload)) = set.find_mut(va!(30)) {
     ///     *payload = 2;
     /// }
-    /// assert_eq!(set.find(30.into()).map(|(_, payload)| *payload), Some(2));
+    /// assert_eq!(set.find(va!(30)).map(|(_, payload)| *payload), Some(2));
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, i32>>(())
     /// ```
-    pub fn find_mut(&mut self, addr: A) -> Option<(AddrRange<A>, &mut P)> {
-        let cursor = self.map.lower_bound(Bound::Excluded(&addr));
-        let (start, candidate) = cursor.peek_prev()?;
-
-        if candidate.range.contains(addr) {
-            let start = *start;
-            let value = self.map.get_mut(&start)?;
-            Some((value.range, &mut value.payload))
-        } else {
-            None
-        }
+    pub fn find_mut(&mut self, addr: M) -> Option<(AddrRange<M>, &mut P)> {
+        let (_, candidate) = self.map.range_mut(..=addr).next_back()?;
+        candidate
+            .range
+            .contains(addr)
+            .then_some((candidate.range, &mut candidate.payload))
     }
 
     /// Removes the range containing the given address.
@@ -556,27 +450,25 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), "kernel")?;
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), "kernel")?;
     /// assert_eq!(
-    ///     set.remove(30.into()),
-    ///     Some((AddrRange::new(20.into(), 40.into()), "kernel"))
+    ///     set.remove(va!(30)),
+    ///     Some((va_range!(20..40), "kernel"))
     /// );
-    /// assert_eq!(set.find_free_range_at(30.into()), Some(AddrRange::new(0.into(), 100.into())));
+    /// assert_eq!(set.find_free_range_at(va!(30)), Some(va_range!(0..100)));
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, &str>>(())
     /// ```
-    pub fn remove(&mut self, addr: A) -> Option<(AddrRange<A>, P)> {
-        let cursor = self.map.lower_bound(Bound::Excluded(&addr));
-        let (start, candidate) = cursor.peek_prev()?;
+    pub fn remove(&mut self, addr: M) -> Option<(AddrRange<M>, P)> {
+        let (&start, candidate) = self.map.range(..=addr).next_back()?;
 
         if !candidate.range.contains(addr) {
             return None;
         }
 
-        let start = *start;
         let value = self.map.remove(&start)?;
         let mut merged = value.range;
 
@@ -597,7 +489,7 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// Removes a free range from both free-range indexes.
     ///
     /// Panics with an internal inconsistency if either index does not contain the range.
-    fn remove_free_range(&mut self, range: AddrRange<A>) {
+    fn remove_free_range(&mut self, range: AddrRange<M>) {
         if !self
             .free_ranges_by_addr
             .remove(&AddrRangeByStart::new(range))
@@ -615,7 +507,7 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// Inserts a free range into both free-range indexes.
     ///
     /// Keeps the address-ordered and size-ordered free-range indexes synchronized.
-    fn insert_free_range(&mut self, range: AddrRange<A>) {
+    fn insert_free_range(&mut self, range: AddrRange<M>) {
         self.free_ranges_by_addr
             .insert(AddrRangeByStart::new(range));
         self.free_ranges_by_size.insert(AddrRangeBySize::new(range));
@@ -624,24 +516,29 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// Tries to insert a range into the set.
     ///
     /// Inserts the range as occupied and associates it with the payload. Returns an error with the
-    /// payload when the range overlaps an existing occupied range or falls outside the set limit.
+    /// payload when the range is empty, falls outside the set limit, or overlaps an existing
+    /// occupied range. The checks run in that order.
     ///
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), "kernel")?;
-    /// assert_eq!(set.find(30.into()).map(|(_, payload)| *payload), Some("kernel"));
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), "kernel")?;
+    /// assert_eq!(set.find(va!(30)).map(|(_, payload)| *payload), Some("kernel"));
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, &str>>(())
     /// ```
     pub fn try_insert(
         &mut self,
-        range: AddrRange<A>,
+        range: AddrRange<M>,
         payload: P,
-    ) -> Result<(), TryInsertError<A, P>> {
+    ) -> Result<(), TryInsertError<M, P>> {
+        if range.is_empty() {
+            return Err(TryInsertError::Empty { payload, range });
+        }
+
         if !self.limit.contains_range(range) {
             return Err(TryInsertError::OutOfLimit {
                 payload,
@@ -696,26 +593,27 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
 
     /// Finds a free range of at least the given size.
     ///
-    /// Returns the smallest known free range that can satisfy the requested size, or `None` when no
-    /// suitable free range exists.
+    /// Returns the smallest free range whose size is at least `size`, or `None` when no free range
+    /// is large enough. Among free ranges of the same size, the one with the lowest start address
+    /// is returned.
     ///
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), ())?;
-    /// assert_eq!(set.find_free_range(30), Some(AddrRange::new(40.into(), 100.into())));
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), ())?;
+    /// assert_eq!(set.find_free_range(30), Some(va_range!(40..100)));
     /// assert_eq!(set.find_free_range(70), None);
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, ()>>(())
     /// ```
-    pub fn find_free_range(&self, size: usize) -> Option<AddrRange<A>> {
-        let mut cursor = self
+    pub fn find_free_range(&self, size: usize) -> Option<AddrRange<M>> {
+        let cursor = self
             .free_ranges_by_size
             .lower_bound(Bound::Included(&AddrRangeBySize::dummy_lower(size)));
-        Some(cursor.next()?.0)
+        Some(cursor.peek_next()?.0)
     }
 
     /// Finds the free range containing the given address.
@@ -726,68 +624,52 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let mut set = RangeSet::new(AddrRange::new(0.into(), 100.into()));
-    /// set.try_insert(AddrRange::new(20.into(), 40.into()), ())?;
-    /// assert_eq!(set.find_free_range_at(10.into()), Some(AddrRange::new(0.into(), 20.into())));
-    /// assert_eq!(set.find_free_range_at(30.into()), None);
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..40), ())?;
+    /// assert_eq!(set.find_free_range_at(va!(10)), Some(va_range!(0..20)));
+    /// assert_eq!(set.find_free_range_at(va!(30)), None);
     /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, ()>>(())
     /// ```
-    pub fn find_free_range_at(&self, addr: A) -> Option<AddrRange<A>> {
-        let mut cursor = self
+    pub fn find_free_range_at(&self, addr: M) -> Option<AddrRange<M>> {
+        let cursor = self
             .free_ranges_by_addr
             .lower_bound(Bound::Included(&AddrRangeByStart::dummy_lower(addr)));
 
-        if let Some(candidate) = cursor.next()
+        if let Some(candidate) = cursor.peek_next()
             && candidate.start == addr
         {
             return Some(candidate.0);
         }
 
-        let cursor = self
-            .free_ranges_by_addr
-            .lower_bound(Bound::Included(&AddrRangeByStart::dummy_lower(addr)));
         let candidate = cursor.peek_prev()?;
-
-        if candidate.contains(addr) {
-            Some(candidate.0)
-        } else {
-            None
-        }
+        candidate.contains(addr).then_some(candidate.0)
     }
 
     /// Finds the free range ending at the given address.
     ///
     /// Returns `None` when the previous free range does not end exactly at the address.
-    fn find_free_range_ending_at(&self, addr: A) -> Option<AddrRange<A>> {
+    fn find_free_range_ending_at(&self, addr: M) -> Option<AddrRange<M>> {
         let cursor = self
             .free_ranges_by_addr
             .lower_bound(Bound::Included(&AddrRangeByStart::dummy_lower(addr)));
         let candidate = cursor.peek_prev()?;
 
-        if candidate.end == addr {
-            Some(candidate.0)
-        } else {
-            None
-        }
+        (candidate.end == addr).then_some(candidate.0)
     }
 
     /// Finds the free range starting at the given address.
     ///
     /// Returns `None` when the next free range does not start exactly at the address.
-    fn find_free_range_starting_at(&self, addr: A) -> Option<AddrRange<A>> {
-        let mut cursor = self
+    fn find_free_range_starting_at(&self, addr: M) -> Option<AddrRange<M>> {
+        let cursor = self
             .free_ranges_by_addr
             .lower_bound(Bound::Included(&AddrRangeByStart::dummy_lower(addr)));
-        let candidate = cursor.next()?;
+        let candidate = cursor.peek_next()?;
 
-        if candidate.start == addr {
-            Some(candidate.0)
-        } else {
-            None
-        }
+        (candidate.start == addr).then_some(candidate.0)
     }
 
     /// Gets the address limit of the range set.
@@ -797,23 +679,141 @@ impl<A: MemoryAddr, P> RangeSet<A, P> {
     /// # Examples
     ///
     /// ```
-    /// use memory_addr::{AddrRange, VirtAddr};
+    /// use memory_addr::{VirtAddr, va_range};
     /// use memory_range_set::RangeSet;
     ///
-    /// let set = RangeSet::<VirtAddr>::new(AddrRange::new(0.into(), 100.into()));
-    /// assert_eq!(set.limit(), AddrRange::new(0.into(), 100.into()));
+    /// let set = RangeSet::<VirtAddr>::new(va_range!(0..100));
+    /// assert_eq!(set.limit(), va_range!(0..100));
     /// ```
-    pub const fn limit(&self) -> AddrRange<A> {
+    pub const fn limit(&self) -> AddrRange<M> {
         self.limit
     }
 
+    /// Returns an iterator over the occupied ranges.
+    ///
+    /// The ranges are yielded in increasing start-address order, each with a reference to its
+    /// payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use memory_addr::{VirtAddr, va_range};
+    /// use memory_range_set::RangeSet;
+    ///
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(60..80), "stack")?;
+    /// set.try_insert(va_range!(20..40), "kernel")?;
+    /// let payloads: Vec<&str> = set.iter().map(|(_, payload)| *payload).collect();
+    /// assert_eq!(payloads, ["kernel", "stack"]);
+    /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, &str>>(())
+    /// ```
+    pub fn iter(&self) -> impl Iterator<Item = (AddrRange<M>, &P)> {
+        self.map.values().map(|entry| (entry.range, &entry.payload))
+    }
+
     /// Returns an iterator over the free ranges by address.
-    pub fn free_ranges_by_addr(&self) -> impl Iterator<Item = AddrRange<A>> {
+    ///
+    /// The ranges are yielded in increasing start-address order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use memory_addr::{AddrRange, VirtAddr, va_range};
+    /// use memory_range_set::RangeSet;
+    ///
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..90), ())?;
+    /// let free: Vec<AddrRange<VirtAddr>> = set.free_ranges_by_addr().collect();
+    /// assert_eq!(
+    ///     free,
+    ///     [va_range!(0..20), va_range!(90..100)]
+    /// );
+    /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, ()>>(())
+    /// ```
+    pub fn free_ranges_by_addr(&self) -> impl Iterator<Item = AddrRange<M>> {
         self.free_ranges_by_addr.iter().map(|range| range.0)
     }
 
     /// Returns an iterator over the free ranges by size.
-    pub fn free_ranges_by_size(&self) -> impl Iterator<Item = AddrRange<A>> {
+    ///
+    /// The ranges are yielded in increasing size order, and ranges of the same size are yielded in
+    /// increasing start-address order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use memory_addr::{AddrRange, VirtAddr, va_range};
+    /// use memory_range_set::RangeSet;
+    ///
+    /// let mut set = RangeSet::new(va_range!(0..100));
+    /// set.try_insert(va_range!(20..90), ())?;
+    /// let free: Vec<AddrRange<VirtAddr>> = set.free_ranges_by_size().collect();
+    /// assert_eq!(
+    ///     free,
+    ///     [va_range!(90..100), va_range!(0..20)]
+    /// );
+    /// # Ok::<(), memory_range_set::TryInsertError<VirtAddr, ()>>(())
+    /// ```
+    pub fn free_ranges_by_size(&self) -> impl Iterator<Item = AddrRange<M>> {
         self.free_ranges_by_size.iter().map(|range| range.0)
+    }
+}
+
+/// A debug view of the occupied ranges in a range set.
+///
+/// It formats the ranges as a map from each range to its payload.
+struct OccupiedRangesDebug<'a, M: MemoryAddr, P, A: Allocator + Clone>(&'a RangeSet<M, P, A>);
+
+/// Formats occupied ranges for debugging.
+///
+/// The ranges are written in increasing start-address order.
+impl<M: MemoryAddr + fmt::Debug, P: fmt::Debug, A: Allocator + Clone> fmt::Debug
+    for OccupiedRangesDebug<'_, M, P, A>
+{
+    /// Writes the occupied ranges as a map.
+    ///
+    /// Each entry maps a range to its payload.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.0.iter()).finish()
+    }
+}
+
+/// A debug view of the free ranges in a range set.
+///
+/// It formats the ranges as a list.
+struct FreeRangesDebug<'a, M: MemoryAddr, P, A: Allocator + Clone>(&'a RangeSet<M, P, A>);
+
+/// Formats free ranges for debugging.
+///
+/// The ranges are written in increasing start-address order.
+impl<M: MemoryAddr + fmt::Debug, P, A: Allocator + Clone> fmt::Debug
+    for FreeRangesDebug<'_, M, P, A>
+{
+    /// Writes the free ranges as a list.
+    ///
+    /// The size-ordered index contains the same ranges and is not written.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.free_ranges_by_addr())
+            .finish()
+    }
+}
+
+/// Formats range sets for debugging.
+///
+/// The output lists the limit, the occupied ranges with their payloads, and the free ranges by
+/// address.
+impl<M: MemoryAddr + fmt::Debug, P: fmt::Debug, A: Allocator + Clone> fmt::Debug
+    for RangeSet<M, P, A>
+{
+    /// Writes the limit, occupied ranges, and free ranges.
+    ///
+    /// The allocator is not written.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RangeSet")
+            .field("limit", &self.limit)
+            .field("occupied", &OccupiedRangesDebug(self))
+            .field("free", &FreeRangesDebug(self))
+            .finish()
     }
 }

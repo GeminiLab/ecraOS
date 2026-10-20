@@ -352,6 +352,7 @@ impl<A: MemoryAddr, P> From<TryInsertError<A, P>> for VMAllocError {
         match error {
             TryInsertError::Overlap { .. } => Self::Overlap,
             TryInsertError::OutOfLimit { .. } => Self::OutOfRange,
+            TryInsertError::Empty { .. } => Self::EmptyRange,
         }
     }
 }

@@ -1,8 +1,14 @@
 [package]
 name = "memory_range_set"
+description = "Tracks non-overlapping memory ranges with payloads and best-fit free-range lookup."
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/memory_range_set"
+readme = "README.md"
+keywords = ["memory", "address-range", "interval", "allocator", "no-std"]
+categories = ["data-structures", "memory-management", "no-std"]
 
 [dependencies]
 memory_addr.workspace = true
-nonmax = { version = "0.5", default-features = false }

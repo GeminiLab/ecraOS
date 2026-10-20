@@ -389,7 +389,6 @@ name = "memory_range_set"
 version = "0.1.0"
 dependencies = [
  "memory_addr",
- "nonmax",
 ]
 
 [[package]]
@@ -400,12 +399,6 @@ checksum = "f87ad3b7b7bcf5da525c22221e3eb3a020cd68b2d55ae62f629c15e8bc3bd56e"
 dependencies = [
  "paste",
 ]
-
-[[package]]
-name = "nonmax"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
 
 [[package]]
 name = "num-derive"
