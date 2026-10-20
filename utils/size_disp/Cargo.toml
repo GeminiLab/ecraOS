@@ -1,6 +1,14 @@
 [package]
 name = "size_disp"
+description = "Formats byte sizes as human-readable IEC units."
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/size_disp"
+readme = "README.md"
+keywords = ["bytes", "formatting", "iec", "size", "no-std"]
+categories = ["no-std", "value-formatting"]
 
 [dependencies]
