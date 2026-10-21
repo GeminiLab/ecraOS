@@ -32,6 +32,28 @@ allocation, `expalloc_trait` for page allocation traits, and small utility
 crates such as `size_disp` and `memory_range_set`. These supporting crates live
 at the repository root beside `ecraos/`.
 
+## Working agreements
+
+- Understand the goal and existing implementation before changing code. Keep changes
+  focused and use the existing abstractions where they fit.
+- Use semantic address types for memory addresses and document every Rust item.
+- Base verification claims on checks that were actually run.
+
+## Load instructions for the current work
+
+Read the relevant skill before the action below. Skills may apply together, and
+the applicable set can change during a task. Load their references only as directed.
+
+| Before this action | Read and follow |
+| --- | --- |
+| Writing, modifying, or reviewing code | [ecra-code](.agents/skills/ecra-code/SKILL.md) |
+| Writing, modifying, or reviewing documentation | [ecra-docs](.agents/skills/ecra-docs/SKILL.md) |
+| Planning tests, running checks, or reporting work complete | [ecra-verify](.agents/skills/ecra-verify/SKILL.md) |
+
+Code changes that add or change documented behavior also require ecra-docs.
+Behavior changes require ecra-verify when choosing checks, before implementation.
+Documentation-only work uses ecra-docs and ecra-verify without loading code rules.
+
 ## Build & Run Commands
 
 ### Build Procedure
@@ -154,49 +176,13 @@ Smoke applications inherit it through their `ecraos` dependency.
 
 ## Code Format
 
-We use the following code format conventions, beyond common Rust conventions:
+Follow address-type, documentation, and Rust item-ordering rules in
+[ecra-code](.agents/skills/ecra-code/SKILL.md), its style reference, and
+[ecra-docs](.agents/skills/ecra-docs/SKILL.md). Run lint checks as described by
+[ecra-verify](.agents/skills/ecra-verify/SKILL.md).
 
-- Memory addresses should use semantic address types such as `VirtAddr`,
-  `PhysAddr`, `VirtAddrRange`, and `PhysAddrRange` whenever possible.
-  - Raw `usize` should be used for sizes, counts, indices, offsets, alignment
-    values, bit patterns, and unavoidable pointer or atomic storage boundaries.
-  - Public APIs should not accept or return `usize` when the value is a virtual
-    or physical address.
-  - Prefer `va!` and `pa!` for integer-to-address conversions, and prefer
-    `VirtAddr` pointer conversion helpers over raw pointer/integer casts.
-  - Conversions between semantic address types and `usize` should stay close to
-    raw pointer dereferences, inline assembly, atomic pointer storage, or other
-    low-level boundaries that require an integer representation.
-- All items (types, type aliases, functions, modules, etc.) should have doc
-  comments, regardless of their visibility.
-  - All doc comments should have a one-line summary, followed by a blank line,
-    followed by a detailed description.
-  - Function summaries should use a third-person singular present-tense verb
-    phrase. For example: "Initializes the VMM layout ...".
-  - Type summaries should use a noun phrase. For example: "The VMM layout.",
-    "Virtual address space modes.", "A memory region.".
-  - Module summaries should use a noun phrase describing contents or role. For
-    example: "Virtual memory management.", "Information about the kernel binary
-    sections.".
-  - Headings in doc comments start at level 1 (`# Heading`), with lower levels
-    used for subheadings.
-  - Semicolons should be avoided in doc comments.
-  - Comments wrap at 100 characters.
-- Items in Rust source files should be ordered in the following order, with a
-  blank line between each group:
-  - Doc comments.
-  - Other outer attributes.
-  - Extern crate definitions.
-  - Uses from `core` and `alloc`.
-  - Uses from other crates.
-  - Uses from the current crate (a single use statement starting with
-    `use crate::...`).
-  - Module definitions (`pub` and private together).
-  - Uses from self or submodules (one use statement per submodule, starting
-    with `use submodule_name::...;` or `use self::*`).
-  - Other items.
-- One exception to the ordering rule: if a use statement resolves macro
-  visibility, it should be placed immediately after the macro definition.
-- Uses from the same crate should be merged into a single use statement.
+Paths in this file are relative to the repository root. Links are reading
+instructions, not automatic includes. Read applicable directory-level AGENTS.md
+files before modifying files in those directories.
 
-Any violation of these rules should be fixed when checking for lint errors.
+See [the maintenance guide](docs/ai/README.md) when changing these instructions.

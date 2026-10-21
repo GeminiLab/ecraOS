@@ -1,6 +1,11 @@
 target/
 /.worktrees
-/.agents
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/ecra-code/
+!/.agents/skills/ecra-docs/
+!/.agents/skills/ecra-verify/
 skills-lock.json
 
 *.asm
@@ -11,3 +16,5 @@ skills-lock.json
 /docs/*
 !/docs/analysis/
 !/docs/analysis/**
+!/docs/ai/
+!/docs/ai/**
