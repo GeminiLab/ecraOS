@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["allocate_external_vector","disable_local","enable_local","gsi_for_vector","init_external_controller","local_enabled","mask_source","prepare_irq","set_irq_enabled"],"static":["EXTERNAL_CONTROLLER","VECTOR_TO_GSI"],"struct":["ExternalController","Gsi","X86ExternalIrqConfig","X86IrqOverride"],"type":["ArchIrq"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bsp_stack_range","call_fn_new_stack_arg2","init_after_enable_vmm","init_and_enable_vmm","init_ap","phys_addr_is_known","phys_to_virt","print_kernel_location","print_mem_regions","region_flags_to_mapping","remove_identical_mappings","try_virt_to_phys","virt_to_phys"],"mod":["allocs","early","pmm","reloc","sections","vmm"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COMPACT_UNIT_THRESHOLD","EIB","GIB","KIB","MIB","PIB","TIB"],"enum":["Unit"],"macro":[["impl_size_display",1]],"struct":["SizeDisplayCompact","SizeDisplayNatural","SizeDisplayWide","SizeInUnit"],"trait":["SizeDisplay"]};

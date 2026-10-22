@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PSCI_CPU_ON","PSCI_SYSTEM_OFF"],"fn":["_start_ap","cpu_up","invoke_psci","set_psci_method","shutdown"],"macro":[["psci_with",1]],"static":["PSCI_USES_HVC"],"struct":["ApBootArgs"]};

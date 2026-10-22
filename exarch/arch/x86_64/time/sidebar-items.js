@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TSC_FREQ_KHZ_BLIND"],"fn":["calibrate_lapic_timer","current_ticks","init_early","monotonic_ticks","nanos_to_lapic_ticks","nanos_to_ticks","set_oneshot_timer","ticks_to_nanos"],"mod":["calibration"],"static":["INIT_TICK","TSC_FREQ_KHZ"]};

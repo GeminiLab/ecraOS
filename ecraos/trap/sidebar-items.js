@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["default_exception_handler","default_global_irq_handler","handle","handle_local_interrupt","init","register"],"mod":["irq"],"static":["HANDLERS"],"struct":["TrapHandlerImpl"]};

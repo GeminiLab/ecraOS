@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TAM"],"mod":["TAM"],"struct":["Register"]};

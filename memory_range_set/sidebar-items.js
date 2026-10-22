@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TryInsertError"],"macro":[["unreachable_inconsistency",1]],"struct":["AddrRangeBySize","AddrRangeByStart","FreeRangesDebug","OccupiedRangesDebug","RangeInSet","RangeSet"]};

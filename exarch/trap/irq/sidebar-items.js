@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IrqError","UnhandledReason"],"fn":["external_irq_valid_sources","init_external_controller","prepare_irq","set_irq_enabled"],"struct":["Registry"],"type":["IrqHandler"]};

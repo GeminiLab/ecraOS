@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PERIODIC_INTERVAL_NANOS","TIMER_EVENT_HZ"],"fn":["init_ap","init_bsp","program_next_timer","timer_tick"],"mod":["deadline"],"static":["NEXT_DEADLINE_NANOS","__PERCPU_NEXT_DEADLINE_NANOS"],"struct":["NEXT_DEADLINE_NANOS_WRAPPER"]};

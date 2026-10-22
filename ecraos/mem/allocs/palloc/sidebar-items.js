@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["alloc_frame","alloc_frames","alloc_frames_at","dealloc_frame","dealloc_frames","dealloc_frames_at","init_palloc","is_allocated","print_buddy_stats","stats","with_allocator"],"static":["BUDDY"]};

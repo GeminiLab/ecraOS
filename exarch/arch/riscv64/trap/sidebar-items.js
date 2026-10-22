@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONTEXT_BASE","CONTEXT_STRIDE","ENABLE_BASE","ENABLE_STRIDE","PRIORITY_STRIDE"],"fn":["disable_local","enable_local","handle_external","init_external_controller","init_percpu","local_enabled","prepare_irq","set_irq_enabled"],"static":["PLIC"],"struct":["Plic","PlicSourceId","RiscvExternalIrqConfig","RiscvPlicContext"],"type":["ArchIrq"]};

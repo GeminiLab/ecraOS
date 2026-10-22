@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IpiError"],"fn":["init_percpu","send"]};

@@ -1,0 +1,666 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `exarch/src/arch/aarch64/mem.rs`."><title>mem.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="exarch" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">exarch/arch/aarch64/</div>mem.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! AArch64 translation-table metadata and early memory discovery.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! Selects translation geometry and page-table descriptors specialized with the caller's page
+<a href=#4 id=4 data-nosnippet>4</a>//! allocator and TLB flusher, including independent lower and upper translation roots.
+<a href=#5 id=5 data-nosnippet>5</a>
+<a href=#6 id=6 data-nosnippet>6</a></span><span class="kw">use </span>core::arch::asm;
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>aarch64_cpu::{
+<a href=#9 id=9 data-nosnippet>9</a>    asm::barrier::{ISH, SY, dsb, isb},
+<a href=#10 id=10 data-nosnippet>10</a>    registers::{ID_AA64MMFR0_EL1, ID_AA64MMFR2_EL1, Readable, TCR_EL1, TTBR0_EL1, TTBR1_EL1},
+<a href=#11 id=11 data-nosnippet>11</a>};
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>cfg_or_dummy::cfg_or_dummy;
+<a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>ecraldr_base::PlatformBootArg;
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>expalloc_trait::PageAllocator;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span>expt::{
+<a href=#16 id=16 data-nosnippet>16</a>    opaque::{OpaquePageTableRoot, OpaquePageTableType},
+<a href=#17 id=17 data-nosnippet>17</a>    pt::cleanup::TlbFlusher,
+<a href=#18 id=18 data-nosnippet>18</a>};
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>fdt_rs::{
+<a href=#20 id=20 data-nosnippet>20</a>    base::DevTree,
+<a href=#21 id=21 data-nosnippet>21</a>    prelude::{FallibleIterator, PropReader},
+<a href=#22 id=22 data-nosnippet>22</a>};
+<a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span>heapless::Vec <span class="kw">as </span>HeaplessVec;
+<a href=#24 id=24 data-nosnippet>24</a><span class="kw">use </span>memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
+<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span>tock_registers::LocalRegisterCopy;
+<a href=#26 id=26 data-nosnippet>26</a>
+<a href=#27 id=27 data-nosnippet>27</a><span class="kw">use crate</span>::{
+<a href=#28 id=28 data-nosnippet>28</a>    dbcn_println,
+<a href=#29 id=29 data-nosnippet>29</a>    mem::{
+<a href=#30 id=30 data-nosnippet>30</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+<a href=#31 id=31 data-nosnippet>31</a>        VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
+<a href=#32 id=32 data-nosnippet>32</a>    },
+<a href=#33 id=33 data-nosnippet>33</a>};
+<a href=#34 id=34 data-nosnippet>34</a>
+<a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// Temporary identity-mapped translation tables.
+<a href=#36 id=36 data-nosnippet>36</a>///
+<a href=#37 id=37 data-nosnippet>37</a>/// This child module owns the short-lived roots used while changing AArch64
+<a href=#38 id=38 data-nosnippet>38</a>/// translation geometry.
+<a href=#39 id=39 data-nosnippet>39</a></span><span class="kw">mod </span>temp_pt;
+<a href=#40 id=40 data-nosnippet>40</a>
+<a href=#41 id=41 data-nosnippet>41</a><span class="doccomment">/// The AArch64 local TLB flushing strategy.
+<a href=#42 id=42 data-nosnippet>42</a>///
+<a href=#43 id=43 data-nosnippet>43</a>/// See [`expt::arch::aarch64::AArch64LocalTlbFlusher`] for its stage-one invalidation scope.
+<a href=#44 id=44 data-nosnippet>44</a></span><span class="kw">pub type </span>LocalTlbFlusher = expt::arch::aarch64::AArch64LocalTlbFlusher;
+<a href=#45 id=45 data-nosnippet>45</a>
+<a href=#46 id=46 data-nosnippet>46</a><span class="doccomment">/// The description attached to the device tree memory range.
+<a href=#47 id=47 data-nosnippet>47</a>///
+<a href=#48 id=48 data-nosnippet>48</a>/// Identifies the reserved device-tree blob rather than MMIO described by its nodes.
+<a href=#49 id=49 data-nosnippet>49</a></span><span class="kw">const </span>DEVICE_TREE_DESC: <span class="kw-2">&amp;</span>str = <span class="string">"device tree"</span>;
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a><span class="doccomment">/// The alignment used for the device tree memory reservation.
+<a href=#52 id=52 data-nosnippet>52</a>///
+<a href=#53 id=53 data-nosnippet>53</a>/// Covers whole pages for all supported AArch64 granules, including 64 KiB, so RAM and
+<a href=#54 id=54 data-nosnippet>54</a>/// device mappings never share a page at either boundary of the blob.
+<a href=#55 id=55 data-nosnippet>55</a></span><span class="kw">const </span>DEVICE_TREE_ALIGN: usize = <span class="number">64 </span>* <span class="number">1024</span>;
+<a href=#56 id=56 data-nosnippet>56</a>
+<a href=#57 id=57 data-nosnippet>57</a><span class="doccomment">/// The TCR bit selecting the 52-bit address-size format used by FEAT_LPA2.
+<a href=#58 id=58 data-nosnippet>58</a></span><span class="comment">// `aarch64-cpu` 11.2.0 does not expose TCR_EL1.DS as a bitfield.
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="kw">const </span>TCR_DS: u64 = <span class="number">1 </span>&lt;&lt; <span class="number">59</span>;
+<a href=#60 id=60 data-nosnippet>60</a>
+<a href=#61 id=61 data-nosnippet>61</a><span class="macro">macro_rules!</span> props_tcr_conv_fn {
+<a href=#62 id=62 data-nosnippet>62</a>    (
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="macro-nonterminal">$props_from_tcr_doc</span>:literal,
+<a href=#64 id=64 data-nosnippet>64</a>        <span class="macro-nonterminal">$props_from_tcr_name</span>:ident,
+<a href=#65 id=65 data-nosnippet>65</a>        <span class="macro-nonterminal">$tcr_from_props_doc</span>:literal,
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="macro-nonterminal">$tcr_from_props_name</span>:ident,
+<a href=#67 id=67 data-nosnippet>67</a>        <span class="macro-nonterminal">$epdx</span>:ident,
+<a href=#68 id=68 data-nosnippet>68</a>        <span class="macro-nonterminal">$enable_ttbrx_walks</span>:ident,
+<a href=#69 id=69 data-nosnippet>69</a>        <span class="macro-nonterminal">$disable_ttbrx_walks</span>:ident,
+<a href=#70 id=70 data-nosnippet>70</a>        <span class="macro-nonterminal">$tgx</span>:ident,
+<a href=#71 id=71 data-nosnippet>71</a>        <span class="macro-nonterminal">$txsz</span>:ident,
+<a href=#72 id=72 data-nosnippet>72</a>    ) =&gt; {
+<a href=#73 id=73 data-nosnippet>73</a>        <span class="attr">#[doc = <span class="macro-nonterminal">$props_from_tcr_doc</span>]
+<a href=#74 id=74 data-nosnippet>74</a>        </span><span class="kw">fn </span><span class="macro-nonterminal">$props_from_tcr_name</span>(
+<a href=#75 id=75 data-nosnippet>75</a>            tcr: LocalRegisterCopy&lt;u64, TCR_EL1::Register&gt;,
+<a href=#76 id=76 data-nosnippet>76</a>        ) -&gt; <span class="prelude-ty">Option</span>&lt;VirtAddrSpaceProps&gt; {
+<a href=#77 id=77 data-nosnippet>77</a>            <span class="kw">use </span>TCR_EL1::{<span class="macro-nonterminal">$epdx</span>, <span class="macro-nonterminal">$tgx</span>, <span class="macro-nonterminal">$txsz</span>};
+<a href=#78 id=78 data-nosnippet>78</a>
+<a href=#79 id=79 data-nosnippet>79</a>            <span class="kw">if </span>!tcr.matches_all(<span class="macro-nonterminal">$epdx</span>::<span class="macro-nonterminal">$enable_ttbrx_walks</span>) {
+<a href=#80 id=80 data-nosnippet>80</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#81 id=81 data-nosnippet>81</a>            }
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a>            <span class="kw">let </span>page_shift = <span class="kw">match </span>tcr.read_as_enum::&lt;<span class="macro-nonterminal">$tgx::Value</span>&gt;(<span class="macro-nonterminal">$tgx</span>) {
+<a href=#84 id=84 data-nosnippet>84</a>                <span class="prelude-val">Some</span>(<span class="macro-nonterminal">$tgx::Value::KiB_4</span>) =&gt; <span class="number">12</span>,
+<a href=#85 id=85 data-nosnippet>85</a>                <span class="prelude-val">Some</span>(<span class="macro-nonterminal">$tgx::Value::KiB_16</span>) =&gt; <span class="number">14</span>,
+<a href=#86 id=86 data-nosnippet>86</a>                <span class="prelude-val">Some</span>(<span class="macro-nonterminal">$tgx::Value::KiB_64</span>) =&gt; <span class="number">16</span>,
+<a href=#87 id=87 data-nosnippet>87</a>                <span class="prelude-val">None </span>=&gt; <span class="macro">panic!</span>(<span class="string">"invalid TCR_EL1.{}"</span>, <span class="macro">stringify!</span>(<span class="macro-nonterminal">$tgx</span>)),
+<a href=#88 id=88 data-nosnippet>88</a>            };
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a>            <span class="kw">let </span>va_bits = <span class="kw">match </span>tcr.read(<span class="macro-nonterminal">$txsz</span>) {
+<a href=#91 id=91 data-nosnippet>91</a>                <span class="number">12 </span>=&gt; <span class="number">52</span>,
+<a href=#92 id=92 data-nosnippet>92</a>                <span class="number">16 </span>=&gt; <span class="number">48</span>,
+<a href=#93 id=93 data-nosnippet>93</a>                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(
+<a href=#94 id=94 data-nosnippet>94</a>                    <span class="string">"unsupported TCR_EL1.{}: {}"</span>,
+<a href=#95 id=95 data-nosnippet>95</a>                    <span class="macro">stringify!</span>(<span class="macro-nonterminal">$txsz</span>),
+<a href=#96 id=96 data-nosnippet>96</a>                    tcr.read(<span class="macro-nonterminal">$txsz</span>)
+<a href=#97 id=97 data-nosnippet>97</a>                ),
+<a href=#98 id=98 data-nosnippet>98</a>            };
+<a href=#99 id=99 data-nosnippet>99</a>
+<a href=#100 id=100 data-nosnippet>100</a>            <span class="prelude-val">Some</span>(VirtAddrSpaceProps {
+<a href=#101 id=101 data-nosnippet>101</a>                page_shift,
+<a href=#102 id=102 data-nosnippet>102</a>                va_bits,
+<a href=#103 id=103 data-nosnippet>103</a>            })
+<a href=#104 id=104 data-nosnippet>104</a>        }
+<a href=#105 id=105 data-nosnippet>105</a>
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="attr">#[doc = <span class="macro-nonterminal">$tcr_from_props_doc</span>]
+<a href=#107 id=107 data-nosnippet>107</a>        </span><span class="kw">fn </span><span class="macro-nonterminal">$tcr_from_props_name</span>(
+<a href=#108 id=108 data-nosnippet>108</a>            tcr: <span class="kw-2">&amp;mut </span>LocalRegisterCopy&lt;u64, TCR_EL1::Register&gt;,
+<a href=#109 id=109 data-nosnippet>109</a>            props: <span class="prelude-ty">Option</span>&lt;VirtAddrSpaceProps&gt;,
+<a href=#110 id=110 data-nosnippet>110</a>        ) {
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">use </span>TCR_EL1::{<span class="macro-nonterminal">$epdx</span>, <span class="macro-nonterminal">$tgx</span>, <span class="macro-nonterminal">$txsz</span>};
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(VirtAddrSpaceProps {
+<a href=#114 id=114 data-nosnippet>114</a>                page_shift,
+<a href=#115 id=115 data-nosnippet>115</a>                va_bits,
+<a href=#116 id=116 data-nosnippet>116</a>            }) = props
+<a href=#117 id=117 data-nosnippet>117</a>            <span class="kw">else </span>{
+<a href=#118 id=118 data-nosnippet>118</a>                tcr.modify(<span class="macro-nonterminal">$epdx</span>::<span class="macro-nonterminal">$disable_ttbrx_walks</span>);
+<a href=#119 id=119 data-nosnippet>119</a>                <span class="kw">return</span>;
+<a href=#120 id=120 data-nosnippet>120</a>            };
+<a href=#121 id=121 data-nosnippet>121</a>
+<a href=#122 id=122 data-nosnippet>122</a>            tcr.modify(<span class="macro-nonterminal">$epdx</span>::<span class="macro-nonterminal">$enable_ttbrx_walks </span>+ <span class="macro-nonterminal">$txsz</span>.val(<span class="number">64 </span>- (va_bits <span class="kw">as </span>u64)));
+<a href=#123 id=123 data-nosnippet>123</a>            tcr.modify(<span class="kw">match </span>page_shift {
+<a href=#124 id=124 data-nosnippet>124</a>                <span class="number">12 </span>=&gt; <span class="macro-nonterminal">$tgx::KiB_4</span>,
+<a href=#125 id=125 data-nosnippet>125</a>                <span class="number">14 </span>=&gt; <span class="macro-nonterminal">$tgx::KiB_16</span>,
+<a href=#126 id=126 data-nosnippet>126</a>                <span class="number">16 </span>=&gt; <span class="macro-nonterminal">$tgx::KiB_64</span>,
+<a href=#127 id=127 data-nosnippet>127</a>                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">"unsupported page shift: {}"</span>, page_shift),
+<a href=#128 id=128 data-nosnippet>128</a>            });
+<a href=#129 id=129 data-nosnippet>129</a>
+<a href=#130 id=130 data-nosnippet>130</a>            <span class="kw">if </span>va_bits &gt; <span class="number">48 </span>&amp;&amp; page_shift &lt; <span class="number">16 </span>{
+<a href=#131 id=131 data-nosnippet>131</a>                tcr.set(tcr.get() | TCR_DS);
+<a href=#132 id=132 data-nosnippet>132</a>            }
+<a href=#133 id=133 data-nosnippet>133</a>        }
+<a href=#134 id=134 data-nosnippet>134</a>    };
+<a href=#135 id=135 data-nosnippet>135</a>}
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a><span class="macro">props_tcr_conv_fn!</span>(
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="string">"Returns the properties for the lower virtual address space from a TCR value."</span>,
+<a href=#139 id=139 data-nosnippet>139</a>    lower_props_from_tcr,
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="string">"Updates a TCR value for the lower virtual address space from its properties."</span>,
+<a href=#141 id=141 data-nosnippet>141</a>    lower_tcr_from_props,
+<a href=#142 id=142 data-nosnippet>142</a>    EPD0,
+<a href=#143 id=143 data-nosnippet>143</a>    EnableTTBR0Walks,
+<a href=#144 id=144 data-nosnippet>144</a>    DisableTTBR0Walks,
+<a href=#145 id=145 data-nosnippet>145</a>    TG0,
+<a href=#146 id=146 data-nosnippet>146</a>    T0SZ,
+<a href=#147 id=147 data-nosnippet>147</a>);
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a><span class="macro">props_tcr_conv_fn!</span>(
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="string">"Returns the properties for the upper virtual address space from a TCR value."</span>,
+<a href=#151 id=151 data-nosnippet>151</a>    upper_props_from_tcr,
+<a href=#152 id=152 data-nosnippet>152</a>    <span class="string">"Updates a TCR value for the upper virtual address space from its properties."</span>,
+<a href=#153 id=153 data-nosnippet>153</a>    upper_tcr_from_props,
+<a href=#154 id=154 data-nosnippet>154</a>    EPD1,
+<a href=#155 id=155 data-nosnippet>155</a>    EnableTTBR1Walks,
+<a href=#156 id=156 data-nosnippet>156</a>    DisableTTBR1Walks,
+<a href=#157 id=157 data-nosnippet>157</a>    TG1,
+<a href=#158 id=158 data-nosnippet>158</a>    T1SZ,
+<a href=#159 id=159 data-nosnippet>159</a>);
+<a href=#160 id=160 data-nosnippet>160</a>
+<a href=#161 id=161 data-nosnippet>161</a><span class="doccomment">/// Decodes a virtual-address-space mode from a TCR value.
+<a href=#162 id=162 data-nosnippet>162</a></span><span class="kw">fn </span>mode_from_tcr(tcr: LocalRegisterCopy&lt;u64, TCR_EL1::Register&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;VirtAddrSpaceMode&gt; {
+<a href=#163 id=163 data-nosnippet>163</a>    <span class="kw">let </span>lower = lower_props_from_tcr(tcr);
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">let </span>upper = upper_props_from_tcr(tcr);
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    VirtAddrSpaceMode::from_dual_props(lower, upper)
+<a href=#167 id=167 data-nosnippet>167</a>}
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a><span class="doccomment">/// Returns the currently active AArch64 virtual-address-space mode.
+<a href=#170 id=170 data-nosnippet>170</a></span><span class="kw">fn </span>current_mode() -&gt; VirtAddrSpaceMode {
+<a href=#171 id=171 data-nosnippet>171</a>    mode_from_tcr(TCR_EL1.extract())
+<a href=#172 id=172 data-nosnippet>172</a>        .expect(<span class="string">"AArch64 has no valid active virtual address space mode"</span>)
+<a href=#173 id=173 data-nosnippet>173</a>}
+<a href=#174 id=174 data-nosnippet>174</a>
+<a href=#175 id=175 data-nosnippet>175</a><span class="doccomment">/// Returns a TCR value for a requested AArch64 virtual-address-space mode.
+<a href=#176 id=176 data-nosnippet>176</a></span><span class="kw">fn </span>tcr_for_mode(mode: VirtAddrSpaceMode) -&gt; LocalRegisterCopy&lt;u64, TCR_EL1::Register&gt; {
+<a href=#177 id=177 data-nosnippet>177</a>    <span class="kw">let </span>(lower, upper) = VirtAddrSpaceMode::into_dual_props(mode)
+<a href=#178 id=178 data-nosnippet>178</a>        .expect(<span class="string">"AArch64 does not support unified virtual address spaces"</span>);
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>    <span class="kw">let </span><span class="kw-2">mut </span>tcr = LocalRegisterCopy::&lt;u64, TCR_EL1::Register&gt;::new(<span class="number">0</span>);
+<a href=#181 id=181 data-nosnippet>181</a>    tcr.modify(
+<a href=#182 id=182 data-nosnippet>182</a>        TCR_EL1::IPS::Bits_48
+<a href=#183 id=183 data-nosnippet>183</a>            + TCR_EL1::SH0::Inner
+<a href=#184 id=184 data-nosnippet>184</a>            + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+<a href=#185 id=185 data-nosnippet>185</a>            + TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+<a href=#186 id=186 data-nosnippet>186</a>            + TCR_EL1::SH1::Inner
+<a href=#187 id=187 data-nosnippet>187</a>            + TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+<a href=#188 id=188 data-nosnippet>188</a>            + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable,
+<a href=#189 id=189 data-nosnippet>189</a>    );
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>    <span class="comment">// Set the lower and upper virtual address space properties in the TCR.
+<a href=#192 id=192 data-nosnippet>192</a>    </span>lower_tcr_from_props(<span class="kw-2">&amp;mut </span>tcr, lower);
+<a href=#193 id=193 data-nosnippet>193</a>    upper_tcr_from_props(<span class="kw-2">&amp;mut </span>tcr, upper);
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a>    tcr
+<a href=#196 id=196 data-nosnippet>196</a>}
+<a href=#197 id=197 data-nosnippet>197</a>
+<a href=#198 id=198 data-nosnippet>198</a><span class="doccomment">/// Collects RAM and device regions reported by the device tree.
+<a href=#199 id=199 data-nosnippet>199</a>///
+<a href=#200 id=200 data-nosnippet>200</a>/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
+<a href=#201 id=201 data-nosnippet>201</a>/// reserved device memory, preserving usable RAM on both sides.
+<a href=#202 id=202 data-nosnippet>202</a></span><span class="kw">pub fn </span>raw_mem_regions(arg: PlatformBootArg) -&gt; RawMemoryRegions {
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">let </span><span class="kw-2">mut </span>regions = RawMemoryRegions::new();
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="kw">if let </span>PlatformBootArg::DeviceTree(dtb_addr) = arg {
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">let </span>dtb = <span class="kw">unsafe </span>{
+<a href=#206 id=206 data-nosnippet>206</a>            DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
+<a href=#207 id=207 data-nosnippet>207</a>                .expect(<span class="string">"failed to parse device tree"</span>)
+<a href=#208 id=208 data-nosnippet>208</a>        };
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span>dtb_range = PhysAddrRange::from_start_size(dtb_addr, dtb.totalsize())
+<a href=#210 id=210 data-nosnippet>210</a>            .align_outwards(DEVICE_TREE_ALIGN)
+<a href=#211 id=211 data-nosnippet>211</a>            .expect(<span class="string">"device tree range alignment overflow"</span>);
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">for </span>node <span class="kw">in </span>dtb.nodes().iterator() {
+<a href=#213 id=213 data-nosnippet>213</a>            <span class="kw">let </span>node = node.expect(<span class="string">"failed to inspect device tree node"</span>);
+<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">let </span><span class="kw-2">mut </span>is_memory = <span class="bool-val">false</span>;
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">let </span><span class="kw-2">mut </span>is_supported = <span class="bool-val">false</span>;
+<a href=#216 id=216 data-nosnippet>216</a>            <span class="kw">let </span><span class="kw-2">mut </span>is_gic = <span class="bool-val">false</span>;
+<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">let </span><span class="kw-2">mut </span>reg_values = [<span class="number">0u64</span>; <span class="number">4</span>];
+<a href=#218 id=218 data-nosnippet>218</a>            <span class="kw">let </span><span class="kw-2">mut </span>reg_count = <span class="number">0</span>;
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">for </span>prop <span class="kw">in </span>node.props().iterator() {
+<a href=#220 id=220 data-nosnippet>220</a>                <span class="kw">let </span>prop = prop.expect(<span class="string">"failed to inspect device-tree property"</span>);
+<a href=#221 id=221 data-nosnippet>221</a>                <span class="kw">match </span>prop.name().expect(<span class="string">"invalid device-tree property name"</span>) {
+<a href=#222 id=222 data-nosnippet>222</a>                    <span class="string">"device_type" </span>=&gt; {
+<a href=#223 id=223 data-nosnippet>223</a>                        is_memory = prop.str().is_ok_and(|value| value == <span class="string">"memory"</span>);
+<a href=#224 id=224 data-nosnippet>224</a>                    }
+<a href=#225 id=225 data-nosnippet>225</a>                    <span class="string">"compatible" </span>=&gt; {
+<a href=#226 id=226 data-nosnippet>226</a>                        <span class="kw">for </span>value <span class="kw">in </span>prop.iter_str().iterator() {
+<a href=#227 id=227 data-nosnippet>227</a>                            <span class="kw">let </span>value = value.expect(<span class="string">"invalid compatible string"</span>);
+<a href=#228 id=228 data-nosnippet>228</a>                            is_gic |= value == <span class="string">"arm,gic-v3"</span>;
+<a href=#229 id=229 data-nosnippet>229</a>                            is_supported |=
+<a href=#230 id=230 data-nosnippet>230</a>                                <span class="macro">matches!</span>(value, <span class="string">"arm,gic-v3" </span>| <span class="string">"arm,pl011" </span>| <span class="string">"arm,armv8-timer"</span>);
+<a href=#231 id=231 data-nosnippet>231</a>                        }
+<a href=#232 id=232 data-nosnippet>232</a>                    }
+<a href=#233 id=233 data-nosnippet>233</a>                    <span class="string">"reg" </span>=&gt; {
+<a href=#234 id=234 data-nosnippet>234</a>                        <span class="kw">while </span>reg_count &lt; reg_values.len() {
+<a href=#235 id=235 data-nosnippet>235</a>                            <span class="kw">let </span><span class="prelude-val">Some</span>(value) = prop.u64(reg_count).ok() <span class="kw">else </span>{
+<a href=#236 id=236 data-nosnippet>236</a>                                <span class="kw">break</span>;
+<a href=#237 id=237 data-nosnippet>237</a>                            };
+<a href=#238 id=238 data-nosnippet>238</a>                            reg_values[reg_count] = value;
+<a href=#239 id=239 data-nosnippet>239</a>                            reg_count += <span class="number">1</span>;
+<a href=#240 id=240 data-nosnippet>240</a>                        }
+<a href=#241 id=241 data-nosnippet>241</a>                    }
+<a href=#242 id=242 data-nosnippet>242</a>                    <span class="kw">_ </span>=&gt; {}
+<a href=#243 id=243 data-nosnippet>243</a>                }
+<a href=#244 id=244 data-nosnippet>244</a>            }
+<a href=#245 id=245 data-nosnippet>245</a>
+<a href=#246 id=246 data-nosnippet>246</a>            <span class="kw">if </span>is_memory &amp;&amp; reg_count &gt;= <span class="number">2 </span>{
+<a href=#247 id=247 data-nosnippet>247</a>                <span class="kw">let </span>start = reg_values[<span class="number">0</span>];
+<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">let </span>end = start
+<a href=#249 id=249 data-nosnippet>249</a>                    .checked_add(reg_values[<span class="number">1</span>])
+<a href=#250 id=250 data-nosnippet>250</a>                    .expect(<span class="string">"memory range overflow"</span>);
+<a href=#251 id=251 data-nosnippet>251</a>                <span class="kw">let </span>memory_range = PhysAddrRange::new(<span class="macro">pa!</span>(start <span class="kw">as </span>usize), <span class="macro">pa!</span>(end <span class="kw">as </span>usize));
+<a href=#252 id=252 data-nosnippet>252</a>                <span class="kw">let </span>(before_dtb, after_dtb) = memory_range.subtract(dtb_range);
+<a href=#253 id=253 data-nosnippet>253</a>                <span class="kw">for </span>range <span class="kw">in </span>[before_dtb, after_dtb]
+<a href=#254 id=254 data-nosnippet>254</a>                    .into_iter()
+<a href=#255 id=255 data-nosnippet>255</a>                    .flatten()
+<a href=#256 id=256 data-nosnippet>256</a>                    .filter(|range| !range.is_empty())
+<a href=#257 id=257 data-nosnippet>257</a>                {
+<a href=#258 id=258 data-nosnippet>258</a>                    regions
+<a href=#259 id=259 data-nosnippet>259</a>                        .push(MemoryRegion {
+<a href=#260 id=260 data-nosnippet>260</a>                            range,
+<a href=#261 id=261 data-nosnippet>261</a>                            flags: DEFAULT_RAM_FLAGS,
+<a href=#262 id=262 data-nosnippet>262</a>                            desc: DEFAULT_RAM_DESC,
+<a href=#263 id=263 data-nosnippet>263</a>                        })
+<a href=#264 id=264 data-nosnippet>264</a>                        .expect(<span class="string">"too many platform memory regions"</span>);
+<a href=#265 id=265 data-nosnippet>265</a>                }
+<a href=#266 id=266 data-nosnippet>266</a>            }
+<a href=#267 id=267 data-nosnippet>267</a>
+<a href=#268 id=268 data-nosnippet>268</a>            <span class="kw">if </span>is_supported &amp;&amp; reg_count &gt;= <span class="number">2 </span>{
+<a href=#269 id=269 data-nosnippet>269</a>                <span class="kw">let _ </span>= regions.push(MemoryRegion {
+<a href=#270 id=270 data-nosnippet>270</a>                    range: PhysAddrRange::from_start_size(
+<a href=#271 id=271 data-nosnippet>271</a>                        <span class="macro">pa!</span>(reg_values[<span class="number">0</span>] <span class="kw">as </span>usize),
+<a href=#272 id=272 data-nosnippet>272</a>                        reg_values[<span class="number">1</span>] <span class="kw">as </span>usize,
+<a href=#273 id=273 data-nosnippet>273</a>                    ),
+<a href=#274 id=274 data-nosnippet>274</a>                    flags: MemoryRegionFlags::READ
+<a href=#275 id=275 data-nosnippet>275</a>                        | MemoryRegionFlags::WRITE
+<a href=#276 id=276 data-nosnippet>276</a>                        | MemoryRegionFlags::DEVICE
+<a href=#277 id=277 data-nosnippet>277</a>                        | MemoryRegionFlags::RESERVED,
+<a href=#278 id=278 data-nosnippet>278</a>                    desc: <span class="string">"device-tree MMIO"</span>,
+<a href=#279 id=279 data-nosnippet>279</a>                });
+<a href=#280 id=280 data-nosnippet>280</a>                <span class="kw">if </span>is_gic &amp;&amp; reg_count &gt;= <span class="number">4 </span>{
+<a href=#281 id=281 data-nosnippet>281</a>                    <span class="kw">let _ </span>= regions.push(MemoryRegion {
+<a href=#282 id=282 data-nosnippet>282</a>                        range: PhysAddrRange::from_start_size(
+<a href=#283 id=283 data-nosnippet>283</a>                            <span class="macro">pa!</span>(reg_values[<span class="number">2</span>] <span class="kw">as </span>usize),
+<a href=#284 id=284 data-nosnippet>284</a>                            reg_values[<span class="number">3</span>] <span class="kw">as </span>usize,
+<a href=#285 id=285 data-nosnippet>285</a>                        ),
+<a href=#286 id=286 data-nosnippet>286</a>                        flags: MemoryRegionFlags::READ
+<a href=#287 id=287 data-nosnippet>287</a>                            | MemoryRegionFlags::WRITE
+<a href=#288 id=288 data-nosnippet>288</a>                            | MemoryRegionFlags::DEVICE
+<a href=#289 id=289 data-nosnippet>289</a>                            | MemoryRegionFlags::RESERVED,
+<a href=#290 id=290 data-nosnippet>290</a>                        desc: <span class="string">"device-tree MMIO"</span>,
+<a href=#291 id=291 data-nosnippet>291</a>                    });
+<a href=#292 id=292 data-nosnippet>292</a>                }
+<a href=#293 id=293 data-nosnippet>293</a>            }
+<a href=#294 id=294 data-nosnippet>294</a>        }
+<a href=#295 id=295 data-nosnippet>295</a>
+<a href=#296 id=296 data-nosnippet>296</a>        regions
+<a href=#297 id=297 data-nosnippet>297</a>            .push(MemoryRegion {
+<a href=#298 id=298 data-nosnippet>298</a>                range: dtb_range,
+<a href=#299 id=299 data-nosnippet>299</a>                flags: MemoryRegionFlags::READ
+<a href=#300 id=300 data-nosnippet>300</a>                    | MemoryRegionFlags::WRITE
+<a href=#301 id=301 data-nosnippet>301</a>                    | MemoryRegionFlags::RESERVED,
+<a href=#302 id=302 data-nosnippet>302</a>                desc: DEVICE_TREE_DESC,
+<a href=#303 id=303 data-nosnippet>303</a>            })
+<a href=#304 id=304 data-nosnippet>304</a>            .expect(<span class="string">"too many platform memory regions"</span>);
+<a href=#305 id=305 data-nosnippet>305</a>    }
+<a href=#306 id=306 data-nosnippet>306</a>    regions
+<a href=#307 id=307 data-nosnippet>307</a>}
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a><span class="doccomment">/// Returns whether a [`VirtAddrSpaceProps`] is supported by the CPU.
+<a href=#310 id=310 data-nosnippet>310</a>///
+<a href=#311 id=311 data-nosnippet>311</a>/// Returns `None` if the properties are not supported by the CPU. Returns
+<a href=#312 id=312 data-nosnippet>312</a>/// `Some(true)` if the properties are supported. Returns `Some(false)` if the
+<a href=#313 id=313 data-nosnippet>313</a>/// properties are supported by the crate but not by the CPU.
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="kw">fn </span>is_props_supported_inner(props: VirtAddrSpaceProps, mmfr0: u64, mmfr2: u64) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt; {
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="comment">// FEAT_LPA2 uses the previously reserved granule encodings 1 and 2 for
+<a href=#316 id=316 data-nosnippet>316</a>    // 4 KiB and 16 KiB respectively.  A 64 KiB granule uses VARange instead.
+<a href=#317 id=317 data-nosnippet>317</a>    </span><span class="doccomment">/// ID_AA64MMFR0_EL1.TGran4 for "4 KiB granule is supported".
+<a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">const </span>TGRAN4_OK: u64 = <span class="number">0b0000</span>;
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="doccomment">/// ID_AA64MMFR0_EL1.TGran4 for "4 KiB granule supports 52-bit input addresses".
+<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">const </span>TGRAN4_LPA2: u64 = <span class="number">0b0001</span>;
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="doccomment">/// ID_AA64MMFR0_EL1.TGran16 for "16 KiB granule is supported".
+<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">const </span>TGRAN16_OK: u64 = <span class="number">0b0001</span>;
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// ID_AA64MMFR0_EL1.TGran16 for "16 KiB granule supports 52-bit input addresses".
+<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="kw">const </span>TGRAN16_LPA2: u64 = <span class="number">0b0010</span>;
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="doccomment">/// ID_AA64MMFR0_EL1.TGran64 for "64 KiB granule is supported".
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">const </span>TGRAN64_OK: u64 = <span class="number">0b0000</span>;
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="doccomment">/// ID_AA64MMFR2_EL1.VARange for "52-bit input addresses are supported".
+<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="kw">const </span>VARANGE_52BIT: u64 = <span class="number">0b0001</span>;
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a>    <span class="kw">let </span>VirtAddrSpaceProps {
+<a href=#331 id=331 data-nosnippet>331</a>        page_shift,
+<a href=#332 id=332 data-nosnippet>332</a>        va_bits,
+<a href=#333 id=333 data-nosnippet>333</a>    } = props;
+<a href=#334 id=334 data-nosnippet>334</a>
+<a href=#335 id=335 data-nosnippet>335</a>    <span class="kw">let </span>is_52_bit = <span class="kw">match </span>va_bits {
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="number">48 </span>=&gt; <span class="bool-val">false</span>,
+<a href=#337 id=337 data-nosnippet>337</a>        <span class="number">52 </span>=&gt; <span class="bool-val">true</span>,
+<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#339 id=339 data-nosnippet>339</a>    };
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="prelude-val">Some</span>(<span class="kw">match </span>page_shift {
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="number">12 </span>=&gt; {
+<a href=#343 id=343 data-nosnippet>343</a>            <span class="kw">let </span>tgran4 = ID_AA64MMFR0_EL1::TGran4.read(mmfr0);
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a>            (tgran4 == TGRAN4_LPA2) || (!is_52_bit &amp;&amp; tgran4 == TGRAN4_OK)
+<a href=#346 id=346 data-nosnippet>346</a>        }
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="number">14 </span>=&gt; {
+<a href=#348 id=348 data-nosnippet>348</a>            <span class="kw">let </span>tgran16 = ID_AA64MMFR0_EL1::TGran16.read(mmfr0);
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a>            (tgran16 == TGRAN16_LPA2) || (!is_52_bit &amp;&amp; tgran16 == TGRAN16_OK)
+<a href=#351 id=351 data-nosnippet>351</a>        }
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="number">16 </span>=&gt; {
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">let </span>tgran64 = ID_AA64MMFR0_EL1::TGran64.read(mmfr0);
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="kw">let </span>va_range = ID_AA64MMFR2_EL1::VARange.read(mmfr2);
+<a href=#355 id=355 data-nosnippet>355</a>
+<a href=#356 id=356 data-nosnippet>356</a>            (tgran64 == TGRAN64_OK) &amp;&amp; (!is_52_bit || va_range == VARANGE_52BIT)
+<a href=#357 id=357 data-nosnippet>357</a>        }
+<a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#359 id=359 data-nosnippet>359</a>    })
+<a href=#360 id=360 data-nosnippet>360</a>}
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a><span class="doccomment">/// Returns whether a [`VirtAddrSpaceProps`] is supported by this crate and the
+<a href=#363 id=363 data-nosnippet>363</a>/// CPU.
+<a href=#364 id=364 data-nosnippet>364</a></span><span class="kw">fn </span>is_props_supported(props: VirtAddrSpaceProps, mmfr0: u64, mmfr2: u64) -&gt; bool {
+<a href=#365 id=365 data-nosnippet>365</a>    is_props_supported_inner(props, mmfr0, mmfr2).is_some_and(|b| b)
+<a href=#366 id=366 data-nosnippet>366</a>}
+<a href=#367 id=367 data-nosnippet>367</a>
+<a href=#368 id=368 data-nosnippet>368</a><span class="kw">const </span>MAX_PROPS_FOR_HALF: usize = <span class="number">6</span>;
+<a href=#369 id=369 data-nosnippet>369</a>
+<a href=#370 id=370 data-nosnippet>370</a><span class="doccomment">/// Returns the AArch64 granules and address widths supported by the CPU.
+<a href=#371 id=371 data-nosnippet>371</a></span><span class="kw">fn </span>supported_props() -&gt; HeaplessVec&lt;VirtAddrSpaceProps, MAX_PROPS_FOR_HALF&gt; {
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw">let </span>mmfr0 = ID_AA64MMFR0_EL1.get();
+<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">let </span>mmfr2 = ID_AA64MMFR2_EL1.get();
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a>    <span class="kw">let </span><span class="kw-2">mut </span>props_set = HeaplessVec::new();
+<a href=#376 id=376 data-nosnippet>376</a>
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">for </span>page_shift <span class="kw">in </span>[<span class="number">12</span>, <span class="number">14</span>, <span class="number">16</span>] {
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">for </span>va_bits <span class="kw">in </span>[<span class="number">48</span>, <span class="number">52</span>] {
+<a href=#379 id=379 data-nosnippet>379</a>            <span class="kw">let </span>props = VirtAddrSpaceProps {
+<a href=#380 id=380 data-nosnippet>380</a>                page_shift,
+<a href=#381 id=381 data-nosnippet>381</a>                va_bits,
+<a href=#382 id=382 data-nosnippet>382</a>            };
+<a href=#383 id=383 data-nosnippet>383</a>
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">if </span>is_props_supported_inner(props, mmfr0, mmfr2)
+<a href=#385 id=385 data-nosnippet>385</a>                .expect(<span class="string">"invalid AArch64 virtual address-space properties: {props:?}"</span>)
+<a href=#386 id=386 data-nosnippet>386</a>            {
+<a href=#387 id=387 data-nosnippet>387</a>                props_set
+<a href=#388 id=388 data-nosnippet>388</a>                    .push(props)
+<a href=#389 id=389 data-nosnippet>389</a>                    .expect(<span class="string">"too many AArch64 virtual address-space properties"</span>);
+<a href=#390 id=390 data-nosnippet>390</a>            }
+<a href=#391 id=391 data-nosnippet>391</a>        }
+<a href=#392 id=392 data-nosnippet>392</a>    }
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a>    props_set
+<a href=#395 id=395 data-nosnippet>395</a>}
+<a href=#396 id=396 data-nosnippet>396</a>
+<a href=#397 id=397 data-nosnippet>397</a><span class="doccomment">/// Returns whether a [`VirtAddrSpaceMode`] is supported by this crate and the CPU.
+<a href=#398 id=398 data-nosnippet>398</a></span><span class="kw">fn </span>is_mode_supported(mode: VirtAddrSpaceMode) -&gt; bool {
+<a href=#399 id=399 data-nosnippet>399</a>    <span class="kw">let </span>mmfr0 = ID_AA64MMFR0_EL1.get();
+<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">let </span>mmfr2 = ID_AA64MMFR2_EL1.get();
+<a href=#401 id=401 data-nosnippet>401</a>
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="kw">match </span>mode {
+<a href=#403 id=403 data-nosnippet>403</a>        VirtAddrSpaceMode::LowerOnly(prop) | VirtAddrSpaceMode::UpperOnly(prop) =&gt; {
+<a href=#404 id=404 data-nosnippet>404</a>            is_props_supported(prop, mmfr0, mmfr2)
+<a href=#405 id=405 data-nosnippet>405</a>        }
+<a href=#406 id=406 data-nosnippet>406</a>        VirtAddrSpaceMode::Independent { lower, upper } =&gt; {
+<a href=#407 id=407 data-nosnippet>407</a>            is_props_supported(lower, mmfr0, mmfr2) &amp;&amp; is_props_supported(upper, mmfr0, mmfr2)
+<a href=#408 id=408 data-nosnippet>408</a>        }
+<a href=#409 id=409 data-nosnippet>409</a>        VirtAddrSpaceMode::Unified(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+<a href=#410 id=410 data-nosnippet>410</a>    }
+<a href=#411 id=411 data-nosnippet>411</a>}
+<a href=#412 id=412 data-nosnippet>412</a>
+<a href=#413 id=413 data-nosnippet>413</a><span class="doccomment">/// Returns the virtual-address modes supported by AArch64.
+<a href=#414 id=414 data-nosnippet>414</a>///
+<a href=#415 id=415 data-nosnippet>415</a>/// AArch64 uses separate lower and upper translation tables. For each table
+<a href=#416 id=416 data-nosnippet>416</a>/// there are three possible page granules (4 KiB, 16 KiB, and 64 KiB) and two
+<a href=#417 id=417 data-nosnippet>417</a>/// virtual address bits (48 and 52, there are actually more and in some cases
+<a href=#418 id=418 data-nosnippet>418</a>/// neither 48 nor 52 are supported, but we don't consider those cases here).
+<a href=#419 id=419 data-nosnippet>419</a></span><span class="kw">pub fn </span>virt_addr_space_modes() -&gt; VirtAddrSpaceModes {
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">let </span>props_for_half = supported_props();
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">if </span>props_for_half.is_empty() {
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="macro">panic!</span>(<span class="string">"AArch64 reports no supported translation granule"</span>);
+<a href=#423 id=423 data-nosnippet>423</a>    }
+<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">let </span><span class="kw-2">mut </span>modes = VirtAddrSpaceModes::new();
+<a href=#425 id=425 data-nosnippet>425</a>
+<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">for </span>p <span class="kw">in </span>props_for_half.iter().copied() {
+<a href=#427 id=427 data-nosnippet>427</a>        modes
+<a href=#428 id=428 data-nosnippet>428</a>            .modes
+<a href=#429 id=429 data-nosnippet>429</a>            .push(VirtAddrSpaceMode::LowerOnly(p))
+<a href=#430 id=430 data-nosnippet>430</a>            .expect(<span class="string">"too many virtual address space modes"</span>);
+<a href=#431 id=431 data-nosnippet>431</a>        modes
+<a href=#432 id=432 data-nosnippet>432</a>            .modes
+<a href=#433 id=433 data-nosnippet>433</a>            .push(VirtAddrSpaceMode::UpperOnly(p))
+<a href=#434 id=434 data-nosnippet>434</a>            .expect(<span class="string">"too many virtual address space modes"</span>);
+<a href=#435 id=435 data-nosnippet>435</a>    }
+<a href=#436 id=436 data-nosnippet>436</a>
+<a href=#437 id=437 data-nosnippet>437</a>    <span class="kw">for </span>lower <span class="kw">in </span>props_for_half.iter().copied() {
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">for </span>upper <span class="kw">in </span>props_for_half.iter().copied() {
+<a href=#439 id=439 data-nosnippet>439</a>            modes
+<a href=#440 id=440 data-nosnippet>440</a>                .modes
+<a href=#441 id=441 data-nosnippet>441</a>                .push(VirtAddrSpaceMode::Independent { lower, upper })
+<a href=#442 id=442 data-nosnippet>442</a>                .expect(<span class="string">"too many virtual address space modes"</span>)
+<a href=#443 id=443 data-nosnippet>443</a>        }
+<a href=#444 id=444 data-nosnippet>444</a>    }
+<a href=#445 id=445 data-nosnippet>445</a>
+<a href=#446 id=446 data-nosnippet>446</a>    <span class="kw">let </span>current = current_mode();
+<a href=#447 id=447 data-nosnippet>447</a>    modes.current_index = modes
+<a href=#448 id=448 data-nosnippet>448</a>        .modes
+<a href=#449 id=449 data-nosnippet>449</a>        .iter()
+<a href=#450 id=450 data-nosnippet>450</a>        .position(|candidate| <span class="kw-2">*</span>candidate == current)
+<a href=#451 id=451 data-nosnippet>451</a>        .expect(<span class="string">"active AArch64 virtual address-space mode is not supported"</span>);
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a>    <span class="macro">dbcn_println!</span>(<span class="string">"  Current mode: {}"</span>, current);
+<a href=#454 id=454 data-nosnippet>454</a>    <span class="kw">for </span>prop <span class="kw">in </span>props_for_half {
+<a href=#455 id=455 data-nosnippet>455</a>        <span class="macro">dbcn_println!</span>(
+<a href=#456 id=456 data-nosnippet>456</a>            <span class="string">"  Supported: {} KiB pages, {}-bit virtual addresses"</span>,
+<a href=#457 id=457 data-nosnippet>457</a>            <span class="number">1usize </span>&lt;&lt; (prop.page_shift - <span class="number">10</span>),
+<a href=#458 id=458 data-nosnippet>458</a>            prop.va_bits
+<a href=#459 id=459 data-nosnippet>459</a>        );
+<a href=#460 id=460 data-nosnippet>460</a>    }
+<a href=#461 id=461 data-nosnippet>461</a>
+<a href=#462 id=462 data-nosnippet>462</a>    modes
+<a href=#463 id=463 data-nosnippet>463</a>}
+<a href=#464 id=464 data-nosnippet>464</a>
+<a href=#465 id=465 data-nosnippet>465</a><span class="doccomment">/// Selects an AArch64 virtual-address-space mode.
+<a href=#466 id=466 data-nosnippet>466</a>///
+<a href=#467 id=467 data-nosnippet>467</a>/// Installs identity-mapped temporary roots before changing the translation
+<a href=#468 id=468 data-nosnippet>468</a>/// geometry. [`set_page_table_root`] replaces those roots with the final roots.
+<a href=#469 id=469 data-nosnippet>469</a></span><span class="kw">pub fn </span>set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
+<a href=#470 id=470 data-nosnippet>470</a>    <span class="kw">if </span>!is_mode_supported(mode) {
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="macro">panic!</span>(<span class="string">"Unsupported AArch64 virtual address-space mode: {mode:?}"</span>);
+<a href=#472 id=472 data-nosnippet>472</a>    }
+<a href=#473 id=473 data-nosnippet>473</a>
+<a href=#474 id=474 data-nosnippet>474</a>    temp_pt::switch_to_temporary_page_tables(mode, tcr_for_mode(mode));
+<a href=#475 id=475 data-nosnippet>475</a>}
+<a href=#476 id=476 data-nosnippet>476</a>
+<a href=#477 id=477 data-nosnippet>477</a><span class="doccomment">/// Returns the page-table descriptor for an AArch64 mode and caller-selected strategies.
+<a href=#478 id=478 data-nosnippet>478</a>///
+<a href=#479 id=479 data-nosnippet>479</a>/// The selected single-root or dual-root geometry captures `AL` for all operations that access,
+<a href=#480 id=480 data-nosnippet>480</a>/// allocate, or deallocate table frames, and `F` for pending cleanup on both sides. See
+<a href=#481 id=481 data-nosnippet>481</a>/// [`crate::mem::get_page_table_type`] for caller requirements.
+<a href=#482 id=482 data-nosnippet>482</a></span><span class="attr">#[cfg_or_dummy(target_arch = <span class="string">"aarch64"</span>)]
+<a href=#483 id=483 data-nosnippet>483</a></span><span class="kw">pub fn </span>get_page_table_type&lt;AL: PageAllocator, F: TlbFlusher&lt;VirtAddr&gt;&gt;(
+<a href=#484 id=484 data-nosnippet>484</a>    mode: VirtAddrSpaceMode,
+<a href=#485 id=485 data-nosnippet>485</a>) -&gt; OpaquePageTableType&lt;VirtAddr&gt; {
+<a href=#486 id=486 data-nosnippet>486</a>    <span class="kw">if </span>!is_mode_supported(mode) {
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="macro">panic!</span>(<span class="string">"Unsupported AArch64 virtual address-space mode: {mode:?}"</span>);
+<a href=#488 id=488 data-nosnippet>488</a>    }
+<a href=#489 id=489 data-nosnippet>489</a>
+<a href=#490 id=490 data-nosnippet>490</a>    <span class="kw">use </span>cartesian_product::product;
+<a href=#491 id=491 data-nosnippet>491</a>    <span class="kw">use </span>expt::{
+<a href=#492 id=492 data-nosnippet>492</a>        arch::aarch64::AArch64PageTableMeta <span class="kw">as </span>A,
+<a href=#493 id=493 data-nosnippet>493</a>        meta::{LowerCoverage <span class="kw">as </span>L, UpperCoverage <span class="kw">as </span>U},
+<a href=#494 id=494 data-nosnippet>494</a>        pte::aarch64::A64PTE,
+<a href=#495 id=495 data-nosnippet>495</a>    };
+<a href=#496 id=496 data-nosnippet>496</a>
+<a href=#497 id=497 data-nosnippet>497</a>    <span class="kw">use </span><span class="kw">crate</span>::mem::VirtAddrSpaceProps <span class="kw">as </span>P;
+<a href=#498 id=498 data-nosnippet>498</a>
+<a href=#499 id=499 data-nosnippet>499</a>    <span class="macro">macro_rules!</span> match_half_type {
+<a href=#500 id=500 data-nosnippet>500</a>        ([$((<span class="macro-nonterminal">$page_shift</span>:literal, <span class="macro-nonterminal">$va_bits</span>:literal)),+], <span class="macro-nonterminal">$page_shift_var</span>:ident, <span class="macro-nonterminal">$va_bits_var</span>:ident, <span class="macro-nonterminal">$half</span>:ident, <span class="macro-nonterminal">$mode</span>:ident) =&gt; {
+<a href=#501 id=501 data-nosnippet>501</a>            <span class="kw">match </span>(<span class="macro-nonterminal">$page_shift_var</span>, <span class="macro-nonterminal">$va_bits_var</span>) {
+<a href=#502 id=502 data-nosnippet>502</a>                $((<span class="macro-nonterminal">$page_shift</span>, <span class="macro-nonterminal">$va_bits</span>) =&gt; OpaquePageTableType::new::&lt;A&lt;<span class="macro-nonterminal">$va_bits</span>, <span class="macro-nonterminal">$page_shift</span>, <span class="macro-nonterminal">$half</span>&lt;VirtAddr&gt;&gt;, A64PTE, AL, F&gt;(),)+
+<a href=#503 id=503 data-nosnippet>503</a>                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">"Unsupported AArch64 virtual address-space mode: {:?}"</span>, <span class="macro-nonterminal">$mode</span>),
+<a href=#504 id=504 data-nosnippet>504</a>            }
+<a href=#505 id=505 data-nosnippet>505</a>        };
+<a href=#506 id=506 data-nosnippet>506</a>    }
+<a href=#507 id=507 data-nosnippet>507</a>
+<a href=#508 id=508 data-nosnippet>508</a>    <span class="macro">macro_rules!</span> match_dual_type {
+<a href=#509 id=509 data-nosnippet>509</a>        ([$((<span class="macro-nonterminal">$lower_page_shift</span>:literal, <span class="macro-nonterminal">$lower_va_bits</span>:literal, <span class="macro-nonterminal">$upper_page_shift</span>:literal, <span class="macro-nonterminal">$upper_va_bits</span>:literal)),+], <span class="macro-nonterminal">$lower_page_shift_var</span>:ident, <span class="macro-nonterminal">$lower_va_bits_var</span>:ident, <span class="macro-nonterminal">$upper_page_shift_var</span>:ident, <span class="macro-nonterminal">$upper_va_bits_var</span>:ident, <span class="macro-nonterminal">$mode</span>:ident) =&gt; {
+<a href=#510 id=510 data-nosnippet>510</a>            <span class="kw">match </span>(<span class="macro-nonterminal">$lower_page_shift_var</span>, <span class="macro-nonterminal">$lower_va_bits_var</span>, <span class="macro-nonterminal">$upper_page_shift_var</span>, <span class="macro-nonterminal">$upper_va_bits_var</span>) {
+<a href=#511 id=511 data-nosnippet>511</a>                $(
+<a href=#512 id=512 data-nosnippet>512</a>                    (<span class="macro-nonterminal">$lower_page_shift</span>, <span class="macro-nonterminal">$lower_va_bits</span>, <span class="macro-nonterminal">$upper_page_shift</span>, <span class="macro-nonterminal">$upper_va_bits</span>) =&gt;
+<a href=#513 id=513 data-nosnippet>513</a>                        OpaquePageTableType::new_dual::&lt;
+<a href=#514 id=514 data-nosnippet>514</a>                            A&lt;<span class="macro-nonterminal">$lower_va_bits</span>, <span class="macro-nonterminal">$lower_page_shift</span>, L&lt;VirtAddr&gt;&gt;,
+<a href=#515 id=515 data-nosnippet>515</a>                            A64PTE,
+<a href=#516 id=516 data-nosnippet>516</a>                            A&lt;<span class="macro-nonterminal">$upper_va_bits</span>, <span class="macro-nonterminal">$upper_page_shift</span>, U&lt;VirtAddr&gt;&gt;,
+<a href=#517 id=517 data-nosnippet>517</a>                            A64PTE,
+<a href=#518 id=518 data-nosnippet>518</a>                            AL,
+<a href=#519 id=519 data-nosnippet>519</a>                            F,
+<a href=#520 id=520 data-nosnippet>520</a>                        &gt;(),
+<a href=#521 id=521 data-nosnippet>521</a>                )+
+<a href=#522 id=522 data-nosnippet>522</a>                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">"Unsupported AArch64 virtual address-space mode: {:?}"</span>, <span class="macro-nonterminal">$mode</span>),
+<a href=#523 id=523 data-nosnippet>523</a>            }
+<a href=#524 id=524 data-nosnippet>524</a>        };
+<a href=#525 id=525 data-nosnippet>525</a>    }
+<a href=#526 id=526 data-nosnippet>526</a>
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="kw">match </span>mode {
+<a href=#528 id=528 data-nosnippet>528</a>        VirtAddrSpaceMode::LowerOnly(P {
+<a href=#529 id=529 data-nosnippet>529</a>            page_shift,
+<a href=#530 id=530 data-nosnippet>530</a>            va_bits,
+<a href=#531 id=531 data-nosnippet>531</a>        }) =&gt; <span class="macro">product!</span>([<span class="number">12</span>, <span class="number">14</span>, <span class="number">16</span>], [<span class="number">48</span>, <span class="number">52</span>] =&gt; <span class="macro">match_half_type!</span>(@, page_shift, va_bits, L, mode)),
+<a href=#532 id=532 data-nosnippet>532</a>        VirtAddrSpaceMode::UpperOnly(P {
+<a href=#533 id=533 data-nosnippet>533</a>            page_shift,
+<a href=#534 id=534 data-nosnippet>534</a>            va_bits,
+<a href=#535 id=535 data-nosnippet>535</a>        }) =&gt; <span class="macro">product!</span>([<span class="number">12</span>, <span class="number">14</span>, <span class="number">16</span>], [<span class="number">48</span>, <span class="number">52</span>] =&gt; <span class="macro">match_half_type!</span>(@, page_shift, va_bits, U, mode)),
+<a href=#536 id=536 data-nosnippet>536</a>        VirtAddrSpaceMode::Independent {
+<a href=#537 id=537 data-nosnippet>537</a>            lower:
+<a href=#538 id=538 data-nosnippet>538</a>                P {
+<a href=#539 id=539 data-nosnippet>539</a>                    page_shift: lower_page_shift,
+<a href=#540 id=540 data-nosnippet>540</a>                    va_bits: lower_va_bits,
+<a href=#541 id=541 data-nosnippet>541</a>                },
+<a href=#542 id=542 data-nosnippet>542</a>            upper:
+<a href=#543 id=543 data-nosnippet>543</a>                P {
+<a href=#544 id=544 data-nosnippet>544</a>                    page_shift: upper_page_shift,
+<a href=#545 id=545 data-nosnippet>545</a>                    va_bits: upper_va_bits,
+<a href=#546 id=546 data-nosnippet>546</a>                },
+<a href=#547 id=547 data-nosnippet>547</a>        } =&gt; {
+<a href=#548 id=548 data-nosnippet>548</a>            <span class="macro">product!</span>([<span class="number">12</span>, <span class="number">14</span>, <span class="number">16</span>], [<span class="number">48</span>, <span class="number">52</span>], [<span class="number">12</span>, <span class="number">14</span>, <span class="number">16</span>], [<span class="number">48</span>, <span class="number">52</span>] =&gt; <span class="macro">match_dual_type!</span>(@, lower_page_shift, lower_va_bits, upper_page_shift, upper_va_bits, mode))
+<a href=#549 id=549 data-nosnippet>549</a>        }
+<a href=#550 id=550 data-nosnippet>550</a>        VirtAddrSpaceMode::Unified(<span class="kw">_</span>) =&gt; {
+<a href=#551 id=551 data-nosnippet>551</a>            <span class="macro">panic!</span>(<span class="string">"AArch64 does not support unified virtual address spaces"</span>)
+<a href=#552 id=552 data-nosnippet>552</a>        }
+<a href=#553 id=553 data-nosnippet>553</a>    }
+<a href=#554 id=554 data-nosnippet>554</a>}
+<a href=#555 id=555 data-nosnippet>555</a>
+<a href=#556 id=556 data-nosnippet>556</a><span class="doccomment">/// Installs a selected AArch64 translation-table root.
+<a href=#557 id=557 data-nosnippet>557</a>///
+<a href=#558 id=558 data-nosnippet>558</a>/// Dual roots are installed in TTBR0 and TTBR1. A single root is installed in
+<a href=#559 id=559 data-nosnippet>559</a>/// the enabled translation regime for a lower-only or upper-only mode. The MMU
+<a href=#560 id=560 data-nosnippet>560</a>/// pipeline is synchronized before returning.
+<a href=#561 id=561 data-nosnippet>561</a></span><span class="attr">#[cfg_or_dummy(target_arch = <span class="string">"aarch64"</span>)]
+<a href=#562 id=562 data-nosnippet>562</a></span><span class="kw">pub fn </span>set_page_table_root(root: OpaquePageTableRoot) {
+<a href=#563 id=563 data-nosnippet>563</a>    <span class="kw">let </span>current_tcr = TCR_EL1.get();
+<a href=#564 id=564 data-nosnippet>564</a>    <span class="kw">match </span>root {
+<a href=#565 id=565 data-nosnippet>565</a>        OpaquePageTableRoot::Single(root) <span class="kw">if </span>TCR_EL1::EPD1.is_set(current_tcr) =&gt; {
+<a href=#566 id=566 data-nosnippet>566</a>            TTBR0_EL1.set_baddr(root.as_usize() <span class="kw">as </span>u64);
+<a href=#567 id=567 data-nosnippet>567</a>        }
+<a href=#568 id=568 data-nosnippet>568</a>        OpaquePageTableRoot::Single(root) <span class="kw">if </span>TCR_EL1::EPD0.is_set(current_tcr) =&gt; {
+<a href=#569 id=569 data-nosnippet>569</a>            TTBR1_EL1.set_baddr(root.as_usize() <span class="kw">as </span>u64);
+<a href=#570 id=570 data-nosnippet>570</a>        }
+<a href=#571 id=571 data-nosnippet>571</a>        OpaquePageTableRoot::Single(<span class="kw">_</span>) =&gt; {
+<a href=#572 id=572 data-nosnippet>572</a>            <span class="macro">panic!</span>(<span class="string">"AArch64 single-root page table requires a disabled opposite regime"</span>);
+<a href=#573 id=573 data-nosnippet>573</a>        }
+<a href=#574 id=574 data-nosnippet>574</a>        OpaquePageTableRoot::Dual(root) =&gt; {
+<a href=#575 id=575 data-nosnippet>575</a>            TTBR0_EL1.set_baddr(root.lower.as_usize() <span class="kw">as </span>u64);
+<a href=#576 id=576 data-nosnippet>576</a>            TTBR1_EL1.set_baddr(root.upper.as_usize() <span class="kw">as </span>u64);
+<a href=#577 id=577 data-nosnippet>577</a>        }
+<a href=#578 id=578 data-nosnippet>578</a>    }
+<a href=#579 id=579 data-nosnippet>579</a>    dsb(ISH);
+<a href=#580 id=580 data-nosnippet>580</a>    <span class="comment">// `aarch64-cpu` exposes architectural barriers and system registers, but
+<a href=#581 id=581 data-nosnippet>581</a>    // does not expose the EL1 TLB invalidation instruction.
+<a href=#582 id=582 data-nosnippet>582</a>    </span><span class="kw">unsafe </span>{ <span class="macro">asm!</span>(<span class="string">"tlbi vmalle1is"</span>, options(nostack)) };
+<a href=#583 id=583 data-nosnippet>583</a>    dsb(ISH);
+<a href=#584 id=584 data-nosnippet>584</a>    isb(SY);
+<a href=#585 id=585 data-nosnippet>585</a>}
+<a href=#586 id=586 data-nosnippet>586</a>
+<a href=#587 id=587 data-nosnippet>587</a><span class="attr">#[cfg(test)]
+<a href=#588 id=588 data-nosnippet>588</a></span><span class="kw">mod </span>tests {
+<a href=#589 id=589 data-nosnippet>589</a>    <span class="kw">use </span>aarch64_cpu::registers::TCR_EL1;
+<a href=#590 id=590 data-nosnippet>590</a>    <span class="kw">use </span>tock_registers::LocalRegisterCopy;
+<a href=#591 id=591 data-nosnippet>591</a>
+<a href=#592 id=592 data-nosnippet>592</a>    <span class="kw">use super</span>::{mode_from_tcr, tcr_for_mode, virt_addr_space_modes};
+<a href=#593 id=593 data-nosnippet>593</a>    <span class="kw">use </span><span class="kw">crate</span>::mem::VirtAddrSpaceMode;
+<a href=#594 id=594 data-nosnippet>594</a>
+<a href=#595 id=595 data-nosnippet>595</a>    <span class="attr">#[test]
+<a href=#596 id=596 data-nosnippet>596</a>    </span><span class="kw">fn </span>reports_independent_48_bit_halves_when_supported() {
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">let </span>modes = virt_addr_space_modes();
+<a href=#598 id=598 data-nosnippet>598</a>        <span class="macro">assert!</span>(modes.modes.contains(<span class="kw-2">&amp;</span>VirtAddrSpaceMode::Independent {
+<a href=#599 id=599 data-nosnippet>599</a>            lower: <span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#600 id=600 data-nosnippet>600</a>                page_shift: <span class="number">12</span>,
+<a href=#601 id=601 data-nosnippet>601</a>                va_bits: <span class="number">48</span>,
+<a href=#602 id=602 data-nosnippet>602</a>            },
+<a href=#603 id=603 data-nosnippet>603</a>            upper: <span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#604 id=604 data-nosnippet>604</a>                page_shift: <span class="number">12</span>,
+<a href=#605 id=605 data-nosnippet>605</a>                va_bits: <span class="number">48</span>,
+<a href=#606 id=606 data-nosnippet>606</a>            },
+<a href=#607 id=607 data-nosnippet>607</a>        }));
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="macro">assert!</span>(modes.current_index &lt; modes.modes.len());
+<a href=#609 id=609 data-nosnippet>609</a>    }
+<a href=#610 id=610 data-nosnippet>610</a>
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="attr">#[test]
+<a href=#612 id=612 data-nosnippet>612</a>    </span><span class="kw">fn </span>configures_split_translation_registers() {
+<a href=#613 id=613 data-nosnippet>613</a>        <span class="kw">let </span>tcr_value = TCR_EL1::T0SZ.val(<span class="number">64 </span>- <span class="number">48</span>).value
+<a href=#614 id=614 data-nosnippet>614</a>            | TCR_EL1::T1SZ.val(<span class="number">64 </span>- <span class="number">48</span>).value
+<a href=#615 id=615 data-nosnippet>615</a>            | TCR_EL1::TG0::KiB_4.value
+<a href=#616 id=616 data-nosnippet>616</a>            | TCR_EL1::TG1::KiB_4.value
+<a href=#617 id=617 data-nosnippet>617</a>            | TCR_EL1::SH0::Inner.value
+<a href=#618 id=618 data-nosnippet>618</a>            | TCR_EL1::SH1::Inner.value
+<a href=#619 id=619 data-nosnippet>619</a>            | TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable.value
+<a href=#620 id=620 data-nosnippet>620</a>            | TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable.value
+<a href=#621 id=621 data-nosnippet>621</a>            | TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable.value
+<a href=#622 id=622 data-nosnippet>622</a>            | TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable.value
+<a href=#623 id=623 data-nosnippet>623</a>            | TCR_EL1::IPS::Bits_48.value;
+<a href=#624 id=624 data-nosnippet>624</a>        <span class="kw">let </span>tcr = LocalRegisterCopy::&lt;u64, TCR_EL1::Register&gt;::new(tcr_value);
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="macro">assert_eq!</span>(tcr.read(TCR_EL1::T0SZ), <span class="number">16</span>);
+<a href=#626 id=626 data-nosnippet>626</a>        <span class="macro">assert_eq!</span>(tcr.read(TCR_EL1::T1SZ), <span class="number">16</span>);
+<a href=#627 id=627 data-nosnippet>627</a>        <span class="macro">assert_eq!</span>(
+<a href=#628 id=628 data-nosnippet>628</a>            tcr.read_as_enum::&lt;TCR_EL1::TG0::Value&gt;(TCR_EL1::TG0),
+<a href=#629 id=629 data-nosnippet>629</a>            <span class="prelude-val">Some</span>(TCR_EL1::TG0::Value::KiB_4)
+<a href=#630 id=630 data-nosnippet>630</a>        );
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="macro">assert_eq!</span>(
+<a href=#632 id=632 data-nosnippet>632</a>            tcr.read_as_enum::&lt;TCR_EL1::TG1::Value&gt;(TCR_EL1::TG1),
+<a href=#633 id=633 data-nosnippet>633</a>            <span class="prelude-val">Some</span>(TCR_EL1::TG1::Value::KiB_4)
+<a href=#634 id=634 data-nosnippet>634</a>        );
+<a href=#635 id=635 data-nosnippet>635</a>    }
+<a href=#636 id=636 data-nosnippet>636</a>
+<a href=#637 id=637 data-nosnippet>637</a>    <span class="attr">#[test]
+<a href=#638 id=638 data-nosnippet>638</a>    </span><span class="kw">fn </span>tcr_round_trips_translation_modes() {
+<a href=#639 id=639 data-nosnippet>639</a>        <span class="kw">let </span>modes = [
+<a href=#640 id=640 data-nosnippet>640</a>            VirtAddrSpaceMode::LowerOnly(<span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#641 id=641 data-nosnippet>641</a>                page_shift: <span class="number">12</span>,
+<a href=#642 id=642 data-nosnippet>642</a>                va_bits: <span class="number">52</span>,
+<a href=#643 id=643 data-nosnippet>643</a>            }),
+<a href=#644 id=644 data-nosnippet>644</a>            VirtAddrSpaceMode::UpperOnly(<span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#645 id=645 data-nosnippet>645</a>                page_shift: <span class="number">14</span>,
+<a href=#646 id=646 data-nosnippet>646</a>                va_bits: <span class="number">48</span>,
+<a href=#647 id=647 data-nosnippet>647</a>            }),
+<a href=#648 id=648 data-nosnippet>648</a>            VirtAddrSpaceMode::Independent {
+<a href=#649 id=649 data-nosnippet>649</a>                lower: <span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#650 id=650 data-nosnippet>650</a>                    page_shift: <span class="number">16</span>,
+<a href=#651 id=651 data-nosnippet>651</a>                    va_bits: <span class="number">48</span>,
+<a href=#652 id=652 data-nosnippet>652</a>                },
+<a href=#653 id=653 data-nosnippet>653</a>                upper: <span class="kw">crate</span>::mem::VirtAddrSpaceProps {
+<a href=#654 id=654 data-nosnippet>654</a>                    page_shift: <span class="number">12</span>,
+<a href=#655 id=655 data-nosnippet>655</a>                    va_bits: <span class="number">52</span>,
+<a href=#656 id=656 data-nosnippet>656</a>                },
+<a href=#657 id=657 data-nosnippet>657</a>            },
+<a href=#658 id=658 data-nosnippet>658</a>        ];
+<a href=#659 id=659 data-nosnippet>659</a>
+<a href=#660 id=660 data-nosnippet>660</a>        <span class="kw">for </span>mode <span class="kw">in </span>modes {
+<a href=#661 id=661 data-nosnippet>661</a>            <span class="kw">let </span>tcr = tcr_for_mode(mode);
+<a href=#662 id=662 data-nosnippet>662</a>            <span class="macro">assert_eq!</span>(mode_from_tcr(tcr), <span class="prelude-val">Some</span>(mode));
+<a href=#663 id=663 data-nosnippet>663</a>        }
+<a href=#664 id=664 data-nosnippet>664</a>    }
+<a href=#665 id=665 data-nosnippet>665</a>}
+</code></pre></div></section></main></body></html>

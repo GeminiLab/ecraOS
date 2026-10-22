@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["cfg_or_dummy"],"fn":["cfg_or_dummy_impl","collect_ident_from_pat"]};

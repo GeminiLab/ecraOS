@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["OpaquePageTableRoot","PageTableAction"],"struct":["OpaquePageTable","OpaquePageTableType","PageTableMethods"],"type":["ApplyActionsFn"]};

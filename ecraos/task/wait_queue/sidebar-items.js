@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["JoinValidationError","TaskWaitQueueError","TaskWaiterState"],"fn":["validate_join"],"struct":["TaskWaitQueue","TaskWaitQueueGuard","TaskWaiter"]};

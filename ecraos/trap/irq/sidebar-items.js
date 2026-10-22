@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["dispatch","init","register","set_enabled","unregister"],"static":["REGISTRY"]};

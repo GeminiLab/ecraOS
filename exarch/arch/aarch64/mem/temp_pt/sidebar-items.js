@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AARCH64_MAIR_EL1","MAX_PAGE_SIZE","TEMPORARY_DEVICE_SIZE","TEMPORARY_IDENTITY_SIZE","TEMPORARY_STORAGE_ENTRIES","TEMPORARY_TABLE_ENTRIES","TEMPORARY_TABLE_LEVELS"],"fn":["switch_to_temporary_page_tables","temporary_page_table_root"],"static":["TEMPORARY_LOWER_TABLES","TEMPORARY_UPPER_TABLES"],"struct":["TemporaryPageTables"]};

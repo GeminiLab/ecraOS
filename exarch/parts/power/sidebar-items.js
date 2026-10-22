@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CpuStartError","ShutdownReason"],"fn":["cpu_up","poweroff","shutdown"],"type":["APEntry","PhysicalCpuId"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["ap","apic","gdt","idt","ioapic","trap"]};

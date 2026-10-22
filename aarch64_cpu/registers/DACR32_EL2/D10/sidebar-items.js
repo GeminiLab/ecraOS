@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLEAR","Client","Manager","NoAccess","SET"],"enum":["Value"]};

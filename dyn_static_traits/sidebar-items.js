@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["dyn_static_traits"],"fn":["collect_static_trait_methods","dyn_static_traits_impl","error_at","implementation_type_ident"]};

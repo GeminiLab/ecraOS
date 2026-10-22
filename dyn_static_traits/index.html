@@ -1,0 +1,88 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`dyn_static_traits`"><title>dyn_static_traits - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="dyn_static_traits" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate dyn_static_traits</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../dyn_static_traits/index.html">dyn_<wbr>static_<wbr>traits</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#dyn_static_traits" title="`dyn_static_traits`"><code>dyn_static_traits</code></a><ul><li><a href="#static-traits" title="Static traits">Static traits</a></li><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#generated-table" title="Generated table">Generated table</a></li></ul></li></ul><h3><a href="#functions">Crate Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#attributes" title="Attribute Macros">Attribute Macros</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>dyn_<wbr>static_<wbr>traits</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/dyn_static_traits/lib.rs.html#1-465">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="dyn_static_traits"><a class="doc-anchor" href="#dyn_static_traits">§</a><code>dyn_static_traits</code></h2>
+<p><code>dyn_static_traits</code> provides the <code>#[dyn_static_traits]</code> attribute macro, which generates a
+function-pointer table for a static trait so that its implementation can be chosen at runtime. The
+generated code needs no runtime support, so it works in <code>no_std</code> crates.</p>
+<h3 id="static-traits"><a class="doc-anchor" href="#static-traits">§</a>Static traits</h3>
+<p>In this crate, a static trait means a trait that contains only associated functions without a
+receiver. Its functions are called on the implementing type, as in <code>C::now()</code>, rather than on a
+value, so implementations are often unit structs. Passing an implementation as a generic parameter
+selects it at compile time, which makes static traits a form of compile-time dependency injection:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">trait </span>Clock {
+    <span class="kw">fn </span>now() -&gt; u64;
+}
+
+<span class="kw">struct </span>BootClock;
+
+<span class="kw">impl </span>Clock <span class="kw">for </span>BootClock {
+    <span class="kw">fn </span>now() -&gt; u64 {
+        <span class="number">42
+    </span>}
+}
+
+<span class="kw">fn </span>elapsed_since&lt;C: Clock&gt;(start: u64) -&gt; u64 {
+    C::now() - start
+}
+
+<span class="macro">assert_eq!</span>(elapsed_since::&lt;BootClock&gt;(<span class="number">40</span>), <span class="number">2</span>);</code></pre></div>
+<p>Because its functions have no receiver, a static trait is not dyn compatible, and <code>dyn Clock</code>
+cannot select an implementation at runtime. The <code>#[dyn_static_traits]</code> attribute provides runtime
+selection with a generated table of function pointers instead.</p>
+<h4 id="trait-requirements"><a class="doc-anchor" href="#trait-requirements">§</a>Trait requirements</h4>
+<p>The attribute accepts only static traits and further restricts their functions. Default function
+bodies are allowed, and the generated table uses a default body when an implementation does not
+override it. The macro reports a compile error for:</p>
+<ul>
+<li>functions with a <code>self</code> receiver,</li>
+<li>functions with generic parameters, including lifetime parameters,</li>
+<li><code>async</code> or variadic functions,</li>
+<li>associated constants, associated types, and other non-function items.</li>
+</ul>
+<p>Some other signatures, such as those that mention <code>Self</code> or use <code>impl Trait</code>, cannot be represented
+by function pointers either. The <a href="attr.dyn_static_traits.html" title="attr dyn_static_traits::dyn_static_traits">attribute documentation</a> lists every
+limitation.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Add the crate as a dependency:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[dependencies]
+dyn_static_traits = &quot;0.1&quot;</code></pre></div>
+<p>Then annotate a static trait with the attribute, passing the name of the generated table:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+
+<span class="attr">#[dyn_static_traits(DynClock)]
+</span><span class="kw">trait </span>Clock {
+    <span class="kw">fn </span>now() -&gt; u64;
+}
+
+<span class="kw">struct </span>BootClock;
+
+<span class="kw">impl </span>Clock <span class="kw">for </span>BootClock {
+    <span class="kw">fn </span>now() -&gt; u64 {
+        <span class="number">42
+    </span>}
+}
+
+<span class="kw">fn </span>read_static&lt;T: Clock&gt;() -&gt; u64 {
+    T::now()
+}
+
+<span class="kw">fn </span>read_dynamic(clock: <span class="kw-2">&amp;</span>DynClock) -&gt; u64 {
+    (clock.now)()
+}
+
+<span class="macro">assert_eq!</span>(read_static::&lt;BootClock&gt;(), <span class="number">42</span>);
+<span class="macro">assert_eq!</span>(read_dynamic(<span class="kw-2">&amp;</span>DynClock::new::&lt;BootClock&gt;()), <span class="number">42</span>);</code></pre></div>
+<p>The trait itself is emitted unchanged, so <code>read_static</code> still selects the implementation at compile
+time, while <code>read_dynamic</code> receives it as a runtime value.</p>
+<h3 id="generated-table"><a class="doc-anchor" href="#generated-table">§</a>Generated table</h3>
+<p>For a trait <code>Clock</code> and the argument <code>DynClock</code>, the macro generates a <code>DynClock</code> struct with the
+trait’s visibility and generic parameters, one public function-pointer field per associated
+function, and a <code>Clone</code> implementation. Each field keeps the function’s name, parameters,
+return type, ABI, and <code>unsafe</code> qualifier, so calling a field of an <code>unsafe fn</code> still requires an
+<code>unsafe</code> block. <code>DynClock::new::&lt;T&gt;()</code> builds a table whose fields point to the functions of the
+implementation <code>T</code>. Tables built from different implementations share one type, so they can be
+stored in structures, passed across API boundaries, and chosen at runtime.</p>
+<p>Call a field with parentheses around the field access, such as <code>(clock.now)()</code>. Without them,
+<code>clock.now()</code> looks for a method named <code>now</code>. The <a href="attr.dyn_static_traits.html" title="attr dyn_static_traits::dyn_static_traits">attribute documentation</a>
+describes the expansion, generic traits, and further examples.</p>
+</div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.collect_static_trait_methods.html" title="fn dyn_static_traits::collect_static_trait_methods">collect_<wbr>static_<wbr>trait_<wbr>methods</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Collects the static associated-method signatures from a trait.</dd><dt><a class="fn" href="fn.dyn_static_traits_impl.html" title="fn dyn_static_traits::dyn_static_traits_impl">dyn_<wbr>static_<wbr>traits_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands a static trait and its function-pointer table.</dd><dt><a class="fn" href="fn.error_at.html" title="fn dyn_static_traits::error_at">error_<wbr>at</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Creates a compile error attached to a syntax node.</dd><dt><a class="fn" href="fn.implementation_type_ident.html" title="fn dyn_static_traits::implementation_type_ident">implementation_<wbr>type_<wbr>ident</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Chooses the implementation type parameter name for the generated constructor.</dd></dl><h2 id="attributes" class="section-header">Attribute Macros<a href="#attributes" class="anchor">§</a></h2><dl class="item-table"><dt><a class="attr" href="attr.dyn_static_traits.html" title="attr dyn_static_traits::dyn_static_traits">dyn_<wbr>static_<wbr>traits</a></dt><dd>Generates a function-pointer table for a static trait.</dd></dl></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_MEMORY_REGIONS","MAX_SPLIT_SUB_REGIONS"],"fn":["build_phys_mem_regions","check_phys_mem_regions","phys_mem_regions","push_phys_mem_region_no_overlap","push_phys_mem_region_skip_overlap","sort_phys_mem_regions","subtract_overlaps","try_phys_mem_regions","virt_range_to_id_phys_range"],"static":["PHYS_MEM_REGIONS"],"type":["MemoryRegions"]};

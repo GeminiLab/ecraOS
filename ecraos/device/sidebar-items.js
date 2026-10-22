@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["find_rsdp","in_u16","in_u32","in_u8","init_acpi_platform","load_aml_namespace","load_aml_table","out_u16","out_u32","out_u8","pci_config_address","print_acpi_processor","print_aml_field","print_aml_namespace_devices","probe_acpi","probe_device_info_source","probe_device_tree","probe_devices"],"struct":["AcpiHandler"]};

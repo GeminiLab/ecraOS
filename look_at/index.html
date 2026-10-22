@@ -1,0 +1,70 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`look_at`"><title>look_at - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="look_at" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate look_at</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../look_at/index.html">look_at</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#look_at" title="`look_at`"><code>look_at</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#compared-with-conditional-re-exports" title="Compared with conditional re-exports">Compared with conditional re-exports</a></li><li><a href="#declarations" title="Declarations">Declarations</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#macros" title="Macros">Macros</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>look_at</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/look_at/lib.rs.html#1-771">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="look_at"><a class="doc-anchor" href="#look_at">§</a><code>look_at</code></h2>
+<p><code>look_at</code> provides the <a href="macro.look_at.html" title="macro look_at::look_at"><code>look_at!</code></a> procedural macro. It exposes the items of one selected
+implementation module, usually chosen per architecture, through a list of declarations written once
+at the invocation site. Function declarations become forwarding wrappers. Type, constant, and <code>use</code>
+declarations become re-exports or typed constants.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Add the crate as a dependency and import the macro:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[dependencies]
+look_at = &quot;0.1&quot;</code></pre></div>
+<p>Then use the macro to expose the items of the selected implementation module:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>look_at::look_at;
+
+<span class="kw">mod </span>x86_64 {
+    <span class="kw">pub fn </span>page_shift() -&gt; u32 {
+        <span class="number">12
+    </span>}
+
+    <span class="kw">pub const </span>MAX_CPUS: usize = <span class="number">64</span>;
+}
+
+<span class="kw">mod </span>fallback {
+    <span class="kw">pub fn </span>page_shift() -&gt; u32 {
+        <span class="number">12
+    </span>}
+
+    <span class="kw">pub const </span>MAX_CPUS: usize = <span class="number">1</span>;
+}
+
+<span class="attr">#[cfg(target_arch = <span class="string">"x86_64"</span>)]
+</span><span class="kw">use </span>x86_64 <span class="kw">as </span>current;
+<span class="attr">#[cfg(not(target_arch = <span class="string">"x86_64"</span>))]
+</span><span class="kw">use </span>fallback <span class="kw">as </span>current;
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="kw">pub fn </span>page_shift() -&gt; u32;
+    <span class="kw">pub const </span>MAX_CPUS: usize;
+}
+
+<span class="macro">assert_eq!</span>(page_shift(), <span class="number">12</span>);
+<span class="macro">assert!</span>(MAX_CPUS &gt;= <span class="number">1</span>);</code></pre></div>
+<p>An invocation starts with <code>@</code>, a path to the implementation module, and <code>:</code>. Each following
+declaration ends with <code>;</code> and resolves below that path. The invocation must contain at least one
+declaration.</p>
+<h3 id="compared-with-conditional-re-exports"><a class="doc-anchor" href="#compared-with-conditional-re-exports">§</a>Compared with conditional re-exports</h3>
+<p>The <code>#[cfg]</code> imports above still select the implementation module. Re-exporting from it directly,
+for example with <code>pub use current::page_shift;</code>, would also give callers one set of names.
+Declaring the interface with <code>look_at!</code> adds the following:</p>
+<ul>
+<li>Each declaration is checked against the selected module in the crate that declares the
+interface. Diverging function signatures, constant types, and type bounds are rejected even
+when no caller uses the item.</li>
+<li>Function wrappers and forwarding constants are new items, so they can be public while their
+targets stay crate-private. A <code>pub use</code> cannot re-export such targets.</li>
+</ul>
+<p>In exchange, function wrappers are distinct functions, signatures are written once more, and some
+declarations are checked only partially. The <a href="macro.look_at.html" title="macro look_at::look_at"><code>look_at!</code></a> documentation describes the complete
+comparison, including when a conditional re-export is the simpler choice.</p>
+<h3 id="declarations"><a class="doc-anchor" href="#declarations">§</a>Declarations</h3><div><table><thead><tr><th>Declaration</th><th>Expansion</th></tr></thead><tbody>
+<tr><td><code>fn name(...) -&gt; T;</code></td><td>A wrapper that calls <code>path::name</code></td></tr>
+<tr><td><code>type Name;</code></td><td><code>use path::Name;</code></td></tr>
+<tr><td><code>type Name: Bound;</code></td><td>The re-export and a compile-time check that <code>path::Name: Bound</code></td></tr>
+<tr><td><code>const NAME: T;</code></td><td><code>const NAME: T = path::NAME;</code></td></tr>
+<tr><td><code>use tree;</code></td><td><code>use path::tree;</code></td></tr>
+</tbody></table>
+</div>
+<p>See the <a href="macro.look_at.html" title="macro look_at::look_at"><code>look_at!</code></a> documentation for the rules of each declaration kind, the handling of
+attributes, visibility, and doc comments, and the items that cannot be declared.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="input/index.html" title="mod look_at::input">input</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Macro input syntax.</dd></dl><h2 id="macros" class="section-header">Macros<a href="#macros" class="anchor">§</a></h2><dl class="item-table"><dt><a class="macro" href="macro.look_at.html" title="macro look_at::look_at">look_at</a></dt><dd>Generates wrappers and re-exports for declarations in an implementation module.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.collect_pattern_identifiers.html" title="fn look_at::collect_pattern_identifiers">collect_<wbr>pattern_<wbr>identifiers</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Collects identifiers declared by a function parameter pattern.</dd><dt><a class="fn" href="fn.expand.html" title="fn look_at::expand">expand</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands all declarations in one macro invocation.</dd><dt><a class="fn" href="fn.expand_const.html" title="fn look_at::expand_const">expand_<wbr>const</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands one constant declaration.</dd><dt><a class="fn" href="fn.expand_function.html" title="fn look_at::expand_function">expand_<wbr>function</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands one forwarding function.</dd><dt><a class="fn" href="fn.expand_item.html" title="fn look_at::expand_item">expand_<wbr>item</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands one placeholder item.</dd><dt><a class="fn" href="fn.expand_type.html" title="fn look_at::expand_type">expand_<wbr>type</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands one type declaration with optional trait bounds.</dd><dt><a class="fn" href="fn.expand_use.html" title="fn look_at::expand_use">expand_<wbr>use</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Expands one use tree declaration.</dd><dt><a class="fn" href="fn.forwarding_parameter_name.html" title="fn look_at::forwarding_parameter_name">forwarding_<wbr>parameter_<wbr>name</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Chooses a readable forwarding name for a function parameter pattern.</dd></dl></section></div></main></body></html>

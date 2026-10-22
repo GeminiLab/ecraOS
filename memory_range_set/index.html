@@ -1,0 +1,66 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`memory_range_set`"><title>memory_range_set - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="memory_range_set" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate memory_range_set</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../memory_range_set/index.html">memory_<wbr>range_<wbr>set</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#memory_range_set" title="`memory_range_set`"><code>memory_range_set</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#occupied-ranges" title="Occupied ranges">Occupied ranges</a></li><li><a href="#free-ranges" title="Free ranges">Free ranges</a></li></ul></li></ul><h3><a href="#macros">Crate Items</a></h3><ul class="block"><li><a href="#macros" title="Macros">Macros</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>memory_<wbr>range_<wbr>set</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/memory_range_set/lib.rs.html#1-819">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="memory_range_set"><a class="doc-anchor" href="#memory_range_set">§</a><code>memory_range_set</code></h2>
+<p><code>memory_range_set</code> provides <a href="struct.RangeSet.html" title="struct memory_range_set::RangeSet"><code>RangeSet</code></a>, a set of non-overlapping occupied address ranges inside a
+fixed limit. Each occupied range carries a caller-defined payload, and the remaining parts of the
+limit are indexed as free ranges by address and by size. Addresses use the <code>memory_addr</code> address
+types, such as <code>VirtAddr</code> and <code>PhysAddr</code>.</p>
+<p>The crate is <code>no_std</code> and requires <code>alloc</code>. It needs a nightly toolchain because it uses the
+<code>allocator_api</code>, <code>btree_cursors</code>, and <code>btreemap_alloc</code> features.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Add the crate as a dependency:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[dependencies]
+memory_range_set = &quot;0.1&quot;</code></pre></div>
+<p>Then create a set with its limit, insert occupied ranges, and query the occupied and free ranges:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{va, va_range};
+<span class="kw">use </span>memory_range_set::RangeSet;
+
+<span class="kw">let </span><span class="kw-2">mut </span>set = RangeSet::new(<span class="macro">va_range!</span>(<span class="number">0x0000</span>..<span class="number">0x8000</span>));
+<span class="macro">assert!</span>(set.try_insert(<span class="macro">va_range!</span>(<span class="number">0x1000</span>..<span class="number">0x3000</span>), <span class="string">"kernel"</span>).is_ok());
+<span class="macro">assert!</span>(set.try_insert(<span class="macro">va_range!</span>(<span class="number">0x5000</span>..<span class="number">0x6000</span>), <span class="string">"stack"</span>).is_ok());
+
+<span class="macro">assert_eq!</span>(
+    set.find(<span class="macro">va!</span>(<span class="number">0x2000</span>)),
+    <span class="prelude-val">Some</span>((<span class="macro">va_range!</span>(<span class="number">0x1000</span>..<span class="number">0x3000</span>), <span class="kw-2">&amp;</span><span class="string">"kernel"</span>))
+);
+<span class="macro">assert_eq!</span>(
+    set.find_free_range(<span class="number">0x1800</span>),
+    <span class="prelude-val">Some</span>(<span class="macro">va_range!</span>(<span class="number">0x3000</span>..<span class="number">0x5000</span>))
+);
+
+<span class="macro">assert_eq!</span>(
+    set.remove(<span class="macro">va!</span>(<span class="number">0x5800</span>)),
+    <span class="prelude-val">Some</span>((<span class="macro">va_range!</span>(<span class="number">0x5000</span>..<span class="number">0x6000</span>), <span class="string">"stack"</span>))
+);
+<span class="macro">assert_eq!</span>(
+    set.find_free_range_at(<span class="macro">va!</span>(<span class="number">0x5800</span>)),
+    <span class="prelude-val">Some</span>(<span class="macro">va_range!</span>(<span class="number">0x3000</span>..<span class="number">0x8000</span>))
+);</code></pre></div>
+<p><a href="struct.RangeSet.html#method.new" title="associated function memory_range_set::RangeSet::new"><code>RangeSet::new</code></a> allocates the internal B-tree nodes with the global allocator, and
+<a href="struct.RangeSet.html#method.new_in" title="associated function memory_range_set::RangeSet::new_in"><code>RangeSet::new_in</code></a> uses a given allocator instead.</p>
+<h3 id="occupied-ranges"><a class="doc-anchor" href="#occupied-ranges">§</a>Occupied ranges</h3>
+<p>All ranges are half-open, so ranges that only share an endpoint do not overlap.</p>
+<ul>
+<li><a href="struct.RangeSet.html#method.try_insert" title="method memory_range_set::RangeSet::try_insert"><code>RangeSet::try_insert</code></a> adds an occupied range with its payload. It fails with
+<a href="enum.TryInsertError.html#variant.Empty" title="variant memory_range_set::TryInsertError::Empty"><code>TryInsertError::Empty</code></a> when the range is empty, with <a href="enum.TryInsertError.html#variant.OutOfLimit" title="variant memory_range_set::TryInsertError::OutOfLimit"><code>TryInsertError::OutOfLimit</code></a> when the
+range is not fully inside the limit, and with <a href="enum.TryInsertError.html#variant.Overlap" title="variant memory_range_set::TryInsertError::Overlap"><code>TryInsertError::Overlap</code></a> when the range overlaps
+an occupied range. Every error returns the payload to the caller.</li>
+<li><a href="struct.RangeSet.html#method.find" title="method memory_range_set::RangeSet::find"><code>RangeSet::find</code></a> and <a href="struct.RangeSet.html#method.find_mut" title="method memory_range_set::RangeSet::find_mut"><code>RangeSet::find_mut</code></a> return the occupied range that contains an
+address, together with a reference to its payload.</li>
+<li><a href="struct.RangeSet.html#method.remove" title="method memory_range_set::RangeSet::remove"><code>RangeSet::remove</code></a> removes the occupied range that contains an address and returns the range
+and its payload.</li>
+<li><a href="struct.RangeSet.html#method.iter" title="method memory_range_set::RangeSet::iter"><code>RangeSet::iter</code></a> iterates over the occupied ranges and their payloads by start address.</li>
+</ul>
+<h3 id="free-ranges"><a class="doc-anchor" href="#free-ranges">§</a>Free ranges</h3>
+<p>A new set has one free range that covers the whole limit, or no free range when the limit is empty.
+Inserting a range splits the free range that contains it, and removing a range merges the freed
+space with adjacent free ranges. Free ranges are therefore never empty and never adjacent to each
+other.</p>
+<ul>
+<li><a href="struct.RangeSet.html#method.find_free_range" title="method memory_range_set::RangeSet::find_free_range"><code>RangeSet::find_free_range</code></a> returns the smallest free range whose size is at least the
+requested size. Among free ranges of the same size, it returns the one with the lowest start
+address.</li>
+<li><a href="struct.RangeSet.html#method.find_free_range_at" title="method memory_range_set::RangeSet::find_free_range_at"><code>RangeSet::find_free_range_at</code></a> returns the free range that contains an address.</li>
+<li><a href="struct.RangeSet.html#method.free_ranges_by_addr" title="method memory_range_set::RangeSet::free_ranges_by_addr"><code>RangeSet::free_ranges_by_addr</code></a> iterates over free ranges by start address, and
+<a href="struct.RangeSet.html#method.free_ranges_by_size" title="method memory_range_set::RangeSet::free_ranges_by_size"><code>RangeSet::free_ranges_by_size</code></a> iterates over them by size and then by start address.</li>
+</ul>
+</div></details><h2 id="macros" class="section-header">Macros<a href="#macros" class="anchor">§</a></h2><dl class="item-table"><dt><a class="macro" href="macro.unreachable_inconsistency.html" title="macro memory_range_set::unreachable_inconsistency">unreachable_<wbr>inconsistency</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>An internal inconsistency panic helper.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.AddrRangeBySize.html" title="struct memory_range_set::AddrRangeBySize">Addr<wbr>Range<wbr>BySize</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>An address range ordered by its size.</dd><dt><a class="struct" href="struct.AddrRangeByStart.html" title="struct memory_range_set::AddrRangeByStart">Addr<wbr>Range<wbr>ByStart</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>An address range ordered by its start address.</dd><dt><a class="struct" href="struct.FreeRangesDebug.html" title="struct memory_range_set::FreeRangesDebug">Free<wbr>Ranges<wbr>Debug</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>A debug view of the free ranges in a range set.</dd><dt><a class="struct" href="struct.OccupiedRangesDebug.html" title="struct memory_range_set::OccupiedRangesDebug">Occupied<wbr>Ranges<wbr>Debug</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>A debug view of the occupied ranges in a range set.</dd><dt><a class="struct" href="struct.RangeInSet.html" title="struct memory_range_set::RangeInSet">Range<wbr>InSet</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>An occupied range stored in a range set.</dd><dt><a class="struct" href="struct.RangeSet.html" title="struct memory_range_set::RangeSet">Range<wbr>Set</a></dt><dd>A set of non-overlapping occupied memory ranges.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.TryInsertError.html" title="enum memory_range_set::TryInsertError">TryInsert<wbr>Error</a></dt><dd>An error returned by range insertion.</dd></dl></section></div></main></body></html>

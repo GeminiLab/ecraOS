@@ -1,0 +1,40 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Update already installed debug triggers based on a trigger configuration array in the shared memory of the calling hart."><title>debug_update_triggers in sbi_rt - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="sbi_rt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">debug_update_triggers</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../sbi_rt/index.html">sbi_rt</a><span class="version">0.0.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">debug_<wbr>update_<wbr>triggers</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#return-value" title="Return value">Return value</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate sbi_<wbr>rt</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">sbi_rt</a></div><h1>Function <span class="fn">debug_<wbr>update_<wbr>triggers</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/sbi_rt/dbtr.rs.html#177-179">Source</a> </span></div><pre class="rust item-decl"><code>pub fn debug_update_triggers(trig_count: <a class="primitive" href="https://doc.rust-lang.org/nightly/core/primitive.usize.html">usize</a>) -&gt; <a class="struct" href="struct.SbiRet.html" title="struct sbi_rt::SbiRet">SbiRet</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Update already installed debug triggers based on a trigger configuration array in the
+shared memory of the calling hart.</p>
+<p>The <code>trig_count</code> parameter represents the number of trigger configuration entries in
+the shared memory at offset <code>0x0</code>.</p>
+<p>The i’th trigger configuration at <code>offset = i * (XLEN / 2)</code> in the shared memory
+consists of four consecutive XLEN-bit words in little-endian format as follows:</p>
+<div class="example-wrap"><pre class="language-text"><code>word[0] = `trig_idx` read by the SBI implementation
+word[1] = `trig_tdata1` read by the SBI implementation
+word[2] = `trig_tdata2` read by the SBI implementation
+word[3] = `trig_tdata3` read by the SBI implementation</code></pre></div>
+<p>The SBI implementation MUST consider trigger configurations in the increasing order of
+the array index and starting with array index <code>0</code>. To install a debug trigger for the
+trigger configuration at array index <code>i</code> in the shared memory, the SBI implementation
+MUST do the following:</p>
+<ul>
+<li>Map an unused HW debug trigger which matches the trigger configuration to an
+an unused <code>trig_idx</code>.</li>
+<li>Save a copy of the <code>trig_tdata1.vs</code>, <code>trig_tdata1.vu</code>, <code>trig_tdata1.s</code>, and
+<code>trig_tdata.u</code> bits in <code>trig_state</code>.</li>
+<li>Update the <code>tdata1</code>, <code>tdata2</code>, and <code>tdata3</code> CSRs of the HW debug trigger.</li>
+<li>Write <code>trig_idx</code> at <code>offset = i * (XLEN / 2)</code> in the shared memory.</li>
+</ul>
+<p>Additionally for each trigger configuration chain in the shared memory, the SBI
+implementation MUST assign contiguous <code>trig_idx</code> values and contiguous HW debug
+triggers when installing the trigger configuration chain.</p>
+<p>The last trigger configuration in the shared memory MUST not have <code>trig_tdata1.chain == 1</code>
+for <code>trig_tdata1.type = 2 or 6</code> to prevent incomplete trigger configuration chain
+in the shared memory.</p>
+<p>The <code>SbiRet.value</code> is set to zero upon success or if shared memory is disabled whereas
+<code>SbiRet.value</code> is set to the array index <code>i</code> of the failing trigger configuration upon
+other failures.</p>
+<h2 id="return-value"><a class="doc-anchor" href="#return-value">§</a>Return value</h2><div><table><thead><tr><th style="text-align: left">Error code</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>SbiRet::success()</code></td><td style="text-align: left">Triggers updated successfully.</td></tr>
+<tr><td style="text-align: left"><code>SbiRet::no_shmem()</code></td><td style="text-align: left">Shared memory for debug triggers is disabled.</td></tr>
+<tr><td style="text-align: left"><code>SbiRet::bad_range()</code></td><td style="text-align: left"><code>trig_count &gt;= trig_max</code>.</td></tr>
+<tr><td style="text-align: left"><code>SbiRet::invalid_param()</code></td><td style="text-align: left">One of the trigger configuration in the shared memory has an invalid of <code>trig_idx</code> (i.e. <code>trig_idx &gt;= trig_max</code>), <code>trig_tdata1</code>, <code>trig_tdata2</code>, or <code>trig_tdata3</code>.</td></tr>
+<tr><td style="text-align: left"><code>SbiRet::failed()</code></td><td style="text-align: left">One of the trigger configurations has valid <code>trig_idx</code> but the corresponding debug trigger is not mapped to any HW debug trigger.</td></tr>
+<tr><td style="text-align: left"><code>SbiRet::not_supported()</code></td><td style="text-align: left">One of the trigger configuration can’t be programmed due to unimplemented optional bits in <code>tdata1</code>, <code>tdata2</code>, or <code>tdata3</code> CSRs.</td></tr>
+</tbody></table>
+</div></div></details></section></div></main></body></html>

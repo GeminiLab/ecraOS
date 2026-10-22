@@ -1,0 +1,206 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="memory_addr"><title>memory_addr - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="memory_addr" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate memory_addr</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../memory_addr/index.html">memory_<wbr>addr</a><span class="version">0.5.0-alpha.const-addr-and-ranges.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#memory_addr" title="memory_addr">memory_addr</a><ul><li><a href="#overview" title="Overview">Overview</a></li><li><a href="#address-types-and-operations" title="Address Types and Operations">Address Types and Operations</a></li><li><a href="#address-ranges" title="Address Ranges">Address Ranges</a></li><li><a href="#const-support" title="Const Support">Const Support</a></li><li><a href="#toolchain-requirements" title="Toolchain Requirements">Toolchain Requirements</a></li></ul></li></ul><h3><a href="#macros">Crate Items</a></h3><ul class="block"><li><a href="#macros" title="Macros">Macros</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>memory_<wbr>addr</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/memory_addr/lib.rs.html#1-161">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="memory_addr"><a class="doc-anchor" href="#memory_addr">§</a>memory_addr</h2>
+<p><a href="https://crates.io/crates/memory_addr"><img src="https://img.shields.io/crates/v/memory_addr" alt="Crates.io" /></a>
+<a href="https://docs.rs/memory_addr"><img src="https://docs.rs/memory_addr/badge.svg" alt="Docs.rs" /></a>
+<a href="https://github.com/arceos-org/axmm_crates/actions/workflows/ci.yml"><img src="https://github.com/arceos-org/axmm_crates/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a></p>
+<h3 id="overview"><a class="doc-anchor" href="#overview">§</a>Overview</h3>
+<p><code>memory_addr</code> provides address types, address ranges, and page iterators for
+low-level memory management. It is <code>no_std</code> and does not require allocation.</p>
+<p>The types describe numerical addresses and ranges. They do not allocate or map
+memory, check architecture-specific address limits, or establish whether an
+address is safe to dereference.</p>
+<h3 id="address-types-and-operations"><a class="doc-anchor" href="#address-types-and-operations">§</a>Address Types and Operations</h3><h4 id="built-in-address-types"><a class="doc-anchor" href="#built-in-address-types">§</a>Built-in Address Types</h4>
+<p><code>PhysAddr</code> and <code>VirtAddr</code> distinguish physical and virtual addresses. Both wrap
+a <code>usize</code> and <strong>preserve its full range of values</strong>. Construct them with <code>pa!</code> and
+<code>va!</code>, or use <code>from_usize</code> and <code>From&lt;usize&gt;</code>. Convert back with <code>as_usize</code> or
+<code>Into&lt;usize&gt;</code>. <code>VirtAddr</code> also provides conversions to and from raw pointers.</p>
+<p><code>MemoryAddr</code> provides alignment helpers and checked, wrapping, and overflowing
+arithmetic. Address addition and subtraction use byte offsets. The ordinary
+<code>+</code> and <code>-</code> operators follow the corresponding <code>usize</code> operators, including
+their overflow behavior. Methods such as <code>checked_add</code> specify their overflow
+behavior explicitly.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{pa, va, MemoryAddr, PhysAddr};
+
+<span class="kw">let </span>physical = PhysAddr::from_usize(<span class="number">0x1234</span>);
+<span class="kw">let </span>virtual_addr = <span class="macro">va!</span>(<span class="number">0x2000</span>);
+
+<span class="macro">assert_eq!</span>(physical.align_down_4k(), <span class="macro">pa!</span>(<span class="number">0x1000</span>));
+<span class="macro">assert_eq!</span>(physical.align_offset_4k(), <span class="number">0x234</span>);
+<span class="macro">assert_eq!</span>(virtual_addr + <span class="number">0x100</span>, <span class="macro">va!</span>(<span class="number">0x2100</span>));
+<span class="macro">assert_eq!</span>(virtual_addr.offset(-<span class="number">0x100</span>), <span class="macro">va!</span>(<span class="number">0x1f00</span>));
+<span class="macro">assert_eq!</span>(<span class="macro">va!</span>(usize::MAX).checked_add(<span class="number">1</span>), <span class="prelude-val">None</span>);</code></pre></div><h4 id="creating-new-address-types"><a class="doc-anchor" href="#creating-new-address-types">§</a>Creating New Address Types</h4>
+<p><code>def_usize_addr!</code> creates a distinct address type with conversions, ordering,
+and arithmetic. It automatically satisfies <code>MemoryAddr</code> and can be used with
+the generic range and iterator types. <code>def_usize_addr_formatter!</code> adds debug
+and hexadecimal formatting with a custom prefix.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{def_usize_addr, def_usize_addr_formatter, MemoryAddr};
+
+<span class="macro">def_usize_addr!</span> {
+    <span class="doccomment">/// A guest physical address.
+    ///
+    /// Distinguishes guest addresses from host physical addresses.
+    </span><span class="kw">pub type </span>GuestPhysAddr;
+}
+
+<span class="macro">def_usize_addr_formatter!</span> {
+    GuestPhysAddr = <span class="string">"GPA:{}"</span>;
+}
+
+<span class="kw">let </span>addr = GuestPhysAddr::from_usize(<span class="number">0x1234</span>);
+<span class="macro">assert_eq!</span>(addr.align_down_4k(), GuestPhysAddr::from_usize(<span class="number">0x1000</span>));
+<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{addr:?}"</span>), <span class="string">"GPA:0x1234"</span>);</code></pre></div><h3 id="address-ranges"><a class="doc-anchor" href="#address-ranges">§</a>Address Ranges</h3><h4 id="range-types"><a class="doc-anchor" href="#range-types">§</a>Range Types</h4>
+<p>All address ranges have an inclusive start and an exclusive end. The three
+representations differ in how they store the end:</p>
+<div><table><thead><tr><th>Type</th><th>Representation</th></tr></thead><tbody>
+<tr><td><code>AddrRange&lt;A&gt;</code></td><td>Stores <code>start</code> and a representable exclusive <code>end</code>.</td></tr>
+<tr><td><code>AddrRangeFrom&lt;A&gt;</code></td><td>Stores <code>start</code> and extends through <code>usize::MAX</code>. Its implicit exclusive end is one past the maximum address.</td></tr>
+<tr><td><code>GeneralAddrRange&lt;A&gt;</code></td><td>Holds either representation in its <code>Range</code> or <code>RangeFrom</code> variant.</td></tr>
+</tbody></table>
+</div>
+<p><code>VirtAddrRange</code> and <code>PhysAddrRange</code> are bounded ranges with the corresponding
+address type. <code>VirtAddrRangeFrom</code> and <code>PhysAddrRangeFrom</code> are their open-ended
+counterparts. <code>GeneralAddrRange&lt;A&gt;</code> is useful when one value must hold either
+kind of range.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{va, AddrRangeBounds, GeneralAddrRange, VirtAddrRange, VirtAddrRangeFrom};
+
+<span class="kw">let </span>bounded = VirtAddrRange::new(<span class="macro">va!</span>(<span class="number">0x1000</span>), <span class="macro">va!</span>(<span class="number">0x2000</span>));
+<span class="kw">let </span>last_byte = VirtAddrRangeFrom::new(<span class="macro">va!</span>(usize::MAX));
+<span class="kw">let </span>ranges = [GeneralAddrRange::from(bounded), GeneralAddrRange::from(last_byte)];
+
+<span class="macro">assert_eq!</span>(ranges[<span class="number">0</span>].checked_end(), <span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x2000</span>)));
+<span class="macro">assert_eq!</span>(ranges[<span class="number">1</span>].checked_end(), <span class="prelude-val">None</span>);
+<span class="macro">assert_eq!</span>(ranges[<span class="number">1</span>].size(), <span class="number">1</span>);</code></pre></div>
+<p>A bounded range is empty when <code>start == end</code> and invalid when <code>start &gt; end</code>.
+Its checked constructors reject reversed endpoints. Public fields and range
+conversions can produce invalid ranges, which can be detected with <code>is_valid</code>.
+Unless a method documents otherwise, its queries require a valid range.
+Open-ended ranges are always valid and nonempty.</p>
+<h4 id="operations"><a class="doc-anchor" href="#operations">§</a>Operations</h4>
+<p><code>AddrRangeBounds</code> provides the common queries for all three range types:</p>
+<ul>
+<li><code>start</code>, <code>end</code>, and <code>size</code> return the endpoints and byte count.</li>
+<li><code>checked_end</code> and <code>checked_size</code> return <code>None</code> when their result is not
+representable. The corresponding <code>end</code> and <code>size</code> methods panic instead.</li>
+<li><code>is_valid</code> and <code>is_empty</code> check validity and emptiness.</li>
+<li><code>contains</code> tests an address. <code>contains_range</code>, <code>contained_in</code>, and <code>overlaps</code>
+compare ranges, including ranges of different representations.</li>
+</ul>
+<p>An open-ended range never has a representable exclusive end. Its size is
+representable unless it starts at zero and covers the entire address space.</p>
+<p>Every valid range contains every empty range, regardless of the empty range’s
+endpoints. Empty ranges never overlap any range, including another empty
+range. Equality still compares the stored endpoints and, for
+<code>GeneralAddrRange</code>, the variant.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{va, va_range, AddrRangeBounds};
+
+<span class="kw">let </span>range = <span class="macro">va_range!</span>(<span class="number">0x1000</span>..<span class="number">0x3000</span>);
+<span class="kw">let </span>empty = <span class="macro">va_range!</span>(usize::MAX..usize::MAX);
+
+<span class="macro">assert_eq!</span>(range.size(), <span class="number">0x2000</span>);
+<span class="macro">assert!</span>(range.contains(<span class="macro">va!</span>(<span class="number">0x1000</span>)));
+<span class="macro">assert!</span>(!range.contains(<span class="macro">va!</span>(<span class="number">0x3000</span>)));
+<span class="macro">assert!</span>(range.contains_range(<span class="macro">va_range!</span>(<span class="number">0x1800</span>..<span class="number">0x2000</span>)));
+<span class="macro">assert!</span>(range.contains_range(empty));
+<span class="macro">assert!</span>(empty.contained_in(range));
+<span class="macro">assert!</span>(!range.overlaps(empty));</code></pre></div><h4 id="conversions"><a class="doc-anchor" href="#conversions">§</a>Conversions</h4>
+<p><code>IntoAddrRange</code> converts standard library ranges with address or integer
+endpoints. It supports the legacy <code>core::ops</code> ranges and the new <code>core::range</code>
+types. Endpoints are converted with <code>Into&lt;A&gt;</code>, and a missing start becomes zero.</p>
+<div><table><thead><tr><th>Source range</th><th>Result of <code>into_addr_range</code></th></tr></thead><tbody>
+<tr><td><code>start..end</code>, <code>..end</code></td><td><code>AddrRange&lt;A&gt;</code></td></tr>
+<tr><td><code>start..</code>, <code>..</code></td><td><code>AddrRangeFrom&lt;A&gt;</code></td></tr>
+<tr><td><code>start..=last</code>, <code>..=last</code></td><td><code>GeneralAddrRange&lt;A&gt;</code></td></tr>
+</tbody></table>
+</div>
+<p>Exclusive ends are preserved. Inclusive ends are converted to exclusive ends
+by adding one, with <code>usize::MAX</code> selecting an open-ended representation.
+Reversed exclusive ranges remain invalid. Reversed inclusive ranges and
+exhausted legacy inclusive ranges become empty bounded ranges.</p>
+<p><code>into_general_addr_range</code> always returns <code>GeneralAddrRange&lt;A&gt;</code>. Existing address
+ranges can also use <code>into_general</code> to obtain that common representation.
+<code>addr_range!</code>, <code>va_range!</code>, and <code>pa_range!</code> are shorthand for the corresponding
+conversions, with the latter two selecting virtual and physical address types.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{va, va_range, AddrRangeBounds, GeneralAddrRange, IntoAddrRange, VirtAddr};
+
+<span class="kw">let </span>bounded = <span class="macro">va_range!</span>(<span class="number">0x1000</span>..<span class="number">0x2000</span>);
+<span class="kw">let </span>tail = <span class="macro">va_range!</span>(usize::MAX..);
+<span class="kw">let </span>full: GeneralAddrRange&lt;VirtAddr&gt; = (..=usize::MAX).into_general_addr_range();
+
+<span class="macro">assert_eq!</span>(bounded.checked_end(), <span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x2000</span>)));
+<span class="macro">assert_eq!</span>(tail.size(), <span class="number">1</span>);
+<span class="macro">assert!</span>(full.contains(<span class="macro">va!</span>(usize::MAX)));
+<span class="macro">assert_eq!</span>(full.checked_size(), <span class="prelude-val">None</span>);</code></pre></div><h4 id="iteration"><a class="doc-anchor" href="#iteration">§</a>Iteration</h4>
+<p><code>iter(page_size)</code> returns an iterator over page start addresses. The page size
+must be a nonzero power of two, and each representable endpoint must be aligned
+to it. Invalid ranges, invalid page sizes, and unaligned endpoints return
+<code>None</code>. Empty aligned ranges produce an empty iterator.</p>
+<p>The associated iterator types are <code>AddrRangeIter</code>, <code>AddrRangeFromIter</code>, and
+<code>GeneralAddrRangeIter</code>. They own their iteration state and yield complete pages
+in ascending order. Open-ended iteration includes the final page and then
+terminates without wrapping to zero.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>memory_addr::{va, va_range, AddrRangeBounds, PAGE_SIZE_4K};
+
+<span class="kw">let </span><span class="kw-2">mut </span>pages = <span class="macro">va_range!</span>(<span class="number">0x1000</span>..<span class="number">0x3000</span>).iter(PAGE_SIZE_4K).unwrap();
+<span class="macro">assert_eq!</span>(pages.next(), <span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x1000</span>)));
+<span class="macro">assert_eq!</span>(pages.next(), <span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x2000</span>)));
+<span class="macro">assert_eq!</span>(pages.next(), <span class="prelude-val">None</span>);
+
+<span class="kw">let </span>last_page = <span class="macro">va!</span>(usize::MAX - (PAGE_SIZE_4K - <span class="number">1</span>));
+<span class="kw">let </span><span class="kw-2">mut </span>tail = <span class="macro">va_range!</span>(last_page..).iter(PAGE_SIZE_4K).unwrap();
+<span class="macro">assert_eq!</span>(tail.next(), <span class="prelude-val">Some</span>(last_page));
+<span class="macro">assert_eq!</span>(tail.next(), <span class="prelude-val">None</span>);</code></pre></div>
+<p><code>PageIter</code>, <code>DynPageIter</code>, and the fixed-size aliases remain for compatibility.
+Prefer the range iterators for new code.</p>
+<h3 id="const-support"><a class="doc-anchor" href="#const-support">§</a>Const Support</h3>
+<p>The built-in address types support const arithmetic and conversions. Address
+ranges support const construction, queries, conversions, and iteration when
+their address type provides the required const operations. The same APIs also
+accept runtime-only address types in ordinary runtime code.</p>
+<p>Runtime use does not itself require feature attributes in the calling crate.
+Const trait calls and const iteration require the relevant nightly features,
+as shown below. The inherent <code>from_usize</code> and <code>as_usize</code> methods do not require
+these feature attributes, even in const expressions.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#![feature(const_trait_impl, const_iter)]
+
+</span><span class="kw">use </span>memory_addr::{va, AddrRangeBounds, MemoryAddr, VirtAddr, VirtAddrRange, PAGE_SIZE_4K};
+
+<span class="kw">const </span>START: VirtAddr = <span class="macro">va!</span>(<span class="number">0x1234</span>).align_down_4k();
+<span class="kw">const </span>PAGES: [<span class="prelude-ty">Option</span>&lt;VirtAddr&gt;; <span class="number">3</span>] = {
+    <span class="kw">let </span>range = VirtAddrRange::new(START, <span class="macro">va!</span>(<span class="number">0x3000</span>));
+    <span class="kw">let </span><span class="kw-2">mut </span>iter = range.iter(PAGE_SIZE_4K).unwrap();
+    [iter.next(), iter.next(), iter.next()]
+};
+
+<span class="macro">assert_eq!</span>(PAGES, [<span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x1000</span>)), <span class="prelude-val">Some</span>(<span class="macro">va!</span>(<span class="number">0x2000</span>)), <span class="prelude-val">None</span>]);</code></pre></div>
+<p>For a custom address type, <code>def_usize_addr! { pub const type Name; }</code> enables
+const trait implementations. The ordinary <code>pub type Name;</code> form generates
+runtime trait implementations, while retaining const <code>from_usize</code> and
+<code>as_usize</code> methods. See the macro documentation for the feature attributes
+required by its const form.</p>
+<h3 id="toolchain-requirements"><a class="doc-anchor" href="#toolchain-requirements">§</a>Toolchain Requirements</h3>
+<p>The recommended toolchain is <strong>1.98-nightly</strong>. CI uses
+<code>nightly-2026-06-01</code> (<code>rustc 1.98.0-nightly (14210df0e 2026-05-31)</code>).
+Select the toolchain explicitly, for example with
+<code>cargo +nightly-2026-06-01 test -p memory_addr</code>.</p>
+<p>There is no supported stable Rust version: the crate unconditionally uses
+unstable const traits, const iterators, and const derives. Cargo’s
+<code>rust-version = "1.98"</code> declares a conservative minimum version, not a claim
+that stable Rust 1.98 can build the crate. Cargo cannot express a nightly
+date in that field, and some 1.97-nightly releases lack the required support.</p>
+<p>The earliest nightly verified to compile the source is
+<strong>nightly-2026-04-28</strong> (<code>rustc 1.97.0-nightly (52b6e2c20 2026-04-27)</code>).
+The preceding nightly fails to compile the const closure in
+<code>AddrRange::try_from_start_size</code>, which requires
+<a href="https://github.com/rust-lang/rust/pull/155772">Rust PR #155772</a>.
+Reproducing this source-level minimum requires <code>--ignore-rust-version</code>
+because Cargo’s declared minimum is intentionally higher. Newer nightlies
+may still change these unstable APIs.</p>
+<p>Downstream crates must select a compatible nightly themselves. The const
+features described above do not make the crate usable with stable Rust.</p>
+</div></details><h2 id="macros" class="section-header">Macros<a href="#macros" class="anchor">§</a></h2><dl class="item-table"><dt><a class="macro" href="macro.addr_range.html" title="macro memory_addr::addr_range">addr_<wbr>range</a></dt><dd>Converts a standard library range into an address range.</dd><dt><a class="macro" href="macro.def_usize_addr.html" title="macro memory_addr::def_usize_addr">def_<wbr>usize_<wbr>addr</a></dt><dd>Creates a new address type by wrapping a <code>usize</code>.</dd><dt><a class="macro" href="macro.def_usize_addr_formatter.html" title="macro memory_addr::def_usize_addr_formatter">def_<wbr>usize_<wbr>addr_<wbr>formatter</a></dt><dd>Creates debug and hexadecimal formatting implementations for address types.</dd><dt><a class="macro" href="macro.pa.html" title="macro memory_addr::pa">pa</a></dt><dd>Creates a physical address from a <code>usize</code> expression.</dd><dt><a class="macro" href="macro.pa_range.html" title="macro memory_addr::pa_range">pa_<wbr>range</a></dt><dd>Converts a standard library range into a physical address range.</dd><dt><a class="macro" href="macro.va.html" title="macro memory_addr::va">va</a></dt><dd>Creates a virtual address from a <code>usize</code> expression.</dd><dt><a class="macro" href="macro.va_range.html" title="macro memory_addr::va_range">va_<wbr>range</a></dt><dd>Converts a standard library range into a virtual address range.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.AddrRange.html" title="struct memory_addr::AddrRange">Addr<wbr>Range</a></dt><dd>A range of a given memory address type <code>A</code>.</dd><dt><a class="struct" href="struct.AddrRangeFrom.html" title="struct memory_addr::AddrRangeFrom">Addr<wbr>Range<wbr>From</a></dt><dd>An address range extending from its start through the maximum address.</dd><dt><a class="struct" href="struct.AddrRangeFromIter.html" title="struct memory_addr::AddrRangeFromIter">Addr<wbr>Range<wbr>From<wbr>Iter</a></dt><dd>An iterator over pages through the end of the address space.</dd><dt><a class="struct" href="struct.AddrRangeIter.html" title="struct memory_addr::AddrRangeIter">Addr<wbr>Range<wbr>Iter</a></dt><dd>An iterator over the pages in a bounded address range.</dd><dt><a class="struct" href="struct.DynPageIter.html" title="struct memory_addr::DynPageIter">DynPage<wbr>Iter</a></dt><dd>A page-by-page iterator with dynamic page size.</dd><dt><a class="struct" href="struct.PageIter.html" title="struct memory_addr::PageIter">Page<wbr>Iter</a></dt><dd>A page-by-page iterator.</dd><dt><a class="struct" href="struct.PhysAddr.html" title="struct memory_addr::PhysAddr">Phys<wbr>Addr</a></dt><dd>A physical memory address.</dd><dt><a class="struct" href="struct.VirtAddr.html" title="struct memory_addr::VirtAddr">Virt<wbr>Addr</a></dt><dd>A virtual memory address.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.GeneralAddrRange.html" title="enum memory_addr::GeneralAddrRange">General<wbr>Addr<wbr>Range</a></dt><dd>An address range with either a bounded or an open-ended representation.</dd><dt><a class="enum" href="enum.GeneralAddrRangeIter.html" title="enum memory_addr::GeneralAddrRangeIter">General<wbr>Addr<wbr>Range<wbr>Iter</a></dt><dd>A page iterator over either kind of address range.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.PAGE_SIZE_1G.html" title="constant memory_addr::PAGE_SIZE_1G">PAGE_<wbr>SIZE_<wbr>1G</a></dt><dd>The size of a 1G page (1073741824 bytes).</dd><dt><a class="constant" href="constant.PAGE_SIZE_2M.html" title="constant memory_addr::PAGE_SIZE_2M">PAGE_<wbr>SIZE_<wbr>2M</a></dt><dd>The size of a 2M page (2097152 bytes).</dd><dt><a class="constant" href="constant.PAGE_SIZE_4K.html" title="constant memory_addr::PAGE_SIZE_4K">PAGE_<wbr>SIZE_<wbr>4K</a></dt><dd>The size of a 4K page (4096 bytes).</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.AddrRangeBounds.html" title="trait memory_addr::AddrRangeBounds">Addr<wbr>Range<wbr>Bounds</a></dt><dd>A trait for address range types.</dd><dt><a class="trait" href="trait.AddrRangeIterator.html" title="trait memory_addr::AddrRangeIterator">Addr<wbr>Range<wbr>Iterator</a></dt><dd>A page iterator constructed from an address range.</dd><dt><a class="trait" href="trait.IntoAddrRange.html" title="trait memory_addr::IntoAddrRange">Into<wbr>Addr<wbr>Range</a></dt><dd>A conversion from a standard library range to an address range.</dd><dt><a class="trait" href="trait.MemoryAddr.html" title="trait memory_addr::MemoryAddr">Memory<wbr>Addr</a></dt><dd>A trait for memory address types.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.align_down.html" title="fn memory_addr::align_down">align_<wbr>down</a></dt><dd>Aligns an address downwards.</dd><dt><a class="fn" href="fn.align_down_4k.html" title="fn memory_addr::align_down_4k">align_<wbr>down_<wbr>4k</a></dt><dd>Aligns an address downwards to a 4K boundary.</dd><dt><a class="fn" href="fn.align_offset.html" title="fn memory_addr::align_offset">align_<wbr>offset</a></dt><dd>Returns the offset of the address within the alignment.</dd><dt><a class="fn" href="fn.align_offset_4k.html" title="fn memory_addr::align_offset_4k">align_<wbr>offset_<wbr>4k</a></dt><dd>Returns the offset of the address within a 4K-sized page.</dd><dt><a class="fn" href="fn.align_up.html" title="fn memory_addr::align_up">align_<wbr>up</a></dt><dd>Aligns an address upwards.</dd><dt><a class="fn" href="fn.align_up_4k.html" title="fn memory_addr::align_up_4k">align_<wbr>up_<wbr>4k</a></dt><dd>Aligns an address upwards to a 4K boundary.</dd><dt><a class="fn" href="fn.align_up_checked.html" title="fn memory_addr::align_up_checked">align_<wbr>up_<wbr>checked</a></dt><dd>Aligns an address upwards in a checked manner.</dd><dt><a class="fn" href="fn.is_aligned.html" title="fn memory_addr::is_aligned">is_<wbr>aligned</a></dt><dd>Checks whether an address has the requested alignment.</dd><dt><a class="fn" href="fn.is_aligned_4k.html" title="fn memory_addr::is_aligned_4k">is_<wbr>aligned_<wbr>4k</a></dt><dd>Checks whether the address is 4K-aligned.</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.PageIter1G.html" title="type memory_addr::PageIter1G">Page<wbr>Iter1G</a></dt><dd>A <a href="struct.PageIter.html" title="struct memory_addr::PageIter"><code>PageIter</code></a> for 1G pages.</dd><dt><a class="type" href="type.PageIter2M.html" title="type memory_addr::PageIter2M">Page<wbr>Iter2M</a></dt><dd>A <a href="struct.PageIter.html" title="struct memory_addr::PageIter"><code>PageIter</code></a> for 2M pages.</dd><dt><a class="type" href="type.PageIter4K.html" title="type memory_addr::PageIter4K">Page<wbr>Iter4K</a></dt><dd>A <a href="struct.PageIter.html" title="struct memory_addr::PageIter"><code>PageIter</code></a> for 4K pages.</dd><dt><a class="type" href="type.PhysAddrRange.html" title="type memory_addr::PhysAddrRange">Phys<wbr>Addr<wbr>Range</a></dt><dd>A range of physical addresses <a href="struct.PhysAddr.html" title="struct memory_addr::PhysAddr"><code>PhysAddr</code></a>.</dd><dt><a class="type" href="type.PhysAddrRangeFrom.html" title="type memory_addr::PhysAddrRangeFrom">Phys<wbr>Addr<wbr>Range<wbr>From</a></dt><dd>A physical address range extending through the maximum address.</dd><dt><a class="type" href="type.VirtAddrRange.html" title="type memory_addr::VirtAddrRange">Virt<wbr>Addr<wbr>Range</a></dt><dd>A range of virtual addresses <a href="struct.VirtAddr.html" title="struct memory_addr::VirtAddr"><code>VirtAddr</code></a>.</dd><dt><a class="type" href="type.VirtAddrRangeFrom.html" title="type memory_addr::VirtAddrRangeFrom">Virt<wbr>Addr<wbr>Range<wbr>From</a></dt><dd>A virtual address range extending through the maximum address.</dd></dl></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KERNEL_STACK_ALIGNMENT","KERNEL_STACK_DEFAULT_SIZE","KERNEL_STACK_MAPPING_FLAGS"],"fn":["can_release","reap_released_stacks"],"static":["RELEASE_QUEUE"],"struct":["KernelStack","ReleaseQueue","StackRelease"]};

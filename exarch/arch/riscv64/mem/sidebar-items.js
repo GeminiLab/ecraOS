@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEVICE_MMIO_DESC","DEVICE_TREE_ALIGN","DEVICE_TREE_DESC"],"fn":["get_page_table_type","raw_mem_regions","set_page_table_root","set_virt_addr_space_mode","virt_addr_space_modes"],"type":["LocalTlbFlusher"]};

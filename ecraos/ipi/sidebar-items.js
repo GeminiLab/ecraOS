@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Failure","IpiError","IpiReason"],"fn":["call_many","call_many_inner","diagnostic","drain_mailbox","handle_ipi","init","notify","notify_inner","register_tlb_handler"],"static":["MAILBOXES","NEXT_GENERATION","TLB_HANDLER"],"struct":["IpiDiagnostic","KernelBackend","Mailbox","Reservations","SyncSlot"],"trait":["Backend"]};

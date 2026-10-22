@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TrapDisposition","TrapHandlerKind"],"mod":["sealed"],"struct":["HandlerSlots"],"trait":["TrapHandler"],"type":["ExceptionHandler","GlobalIrqHandler","LocalInterruptHandler"]};

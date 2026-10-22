@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["disable_local","enable_local","handle","local_enabled","on_interrupt_exit"],"mod":["handlers","irq","semantic"],"struct":["PageFaultFlags"],"trait":["KernelTrapIf","TrapFrameAccess"]};

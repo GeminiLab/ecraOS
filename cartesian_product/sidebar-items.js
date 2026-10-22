@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["array_tokens","cartesian_product","expand","replace_at"],"macro":["product"],"struct":["Callback","CallbackArg","Dimension","ProductInput"]};

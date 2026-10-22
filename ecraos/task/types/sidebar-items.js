@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TaskExitStatus","TaskPlacement","TaskState","TaskStateError","WaitResult"],"fn":["execution_arg_from_arc","execution_arg_into_arc","finish_handoff_wakeup","route_handoff_wakeup","task_trampoline"],"struct":["Completion","JoinHandle","Task"],"type":["TaskId","TaskRef","WeakTaskRef"]};

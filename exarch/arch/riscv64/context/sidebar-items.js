@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["context_entry_trampoline","init_task_context","switch"],"struct":["GeneralRegisters","TaskContext","TrapFrame"]};

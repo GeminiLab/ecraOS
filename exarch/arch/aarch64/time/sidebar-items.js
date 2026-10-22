@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init","monotonic_ticks","nanos_to_ticks","read_counter","read_frequency","set_oneshot_timer","ticks_to_nanos"],"static":["FREQUENCY_HZ","INIT_TICK"]};

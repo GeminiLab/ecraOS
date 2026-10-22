@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["APIC_ERROR_VECTOR","APIC_IPI_VECTOR","APIC_SPURIOUS_VECTOR","APIC_TIMER_VECTOR"],"fn":["is_reserved"]};

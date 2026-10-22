@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IpiAllShorthand","IpiDestMode","LocalApicMode","TimerDivide","TimerMode"],"fn":["xapic_base"],"struct":["ErrorFlags","LocalApic","LocalApicBuilder"]};

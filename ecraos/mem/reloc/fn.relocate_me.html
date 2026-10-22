@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Handles the relocation of the kernel, by patching the kernel according to the `R_&#60;current_arch&#62;_RELATIVE` entries from the `.rela.dyn` section."><title>relocate_me in ecraos::mem::reloc - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="ecraos" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">relocate_me</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../ecraos/index.html">ecraos</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">relocate_<wbr>me</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#notes" title="Notes">Notes</a><ul><li><a href="#vma-assumption" title="VMA Assumption">VMA Assumption</a></li><li><a href="#got-prevention" title="GOT Prevention">GOT Prevention</a></li></ul></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In ecraos::<wbr>mem::<wbr>reloc</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">ecraos</a>::<wbr><a href="../index.html">mem</a>::<wbr><a href="index.html">reloc</a></div><h1>Function <span class="fn">relocate_<wbr>me</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/ecraos/mem/reloc.rs.html#122-153">Source</a> </span></div><pre class="rust item-decl"><code>pub unsafe fn relocate_me()</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Handles the relocation of the kernel, by patching the kernel according to
+the <code>R_&lt;current_arch&gt;_RELATIVE</code> entries from the <code>.rela.dyn</code> section.</p>
+<h2 id="notes"><a class="doc-anchor" href="#notes">§</a>Notes</h2><h3 id="vma-assumption"><a class="doc-anchor" href="#vma-assumption">§</a>VMA Assumption</h3>
+<p>This function assumes that during linking, <a href="../../fn.kernel_entry.html" title="fn ecraos::kernel_entry"><code>kernel_entry</code></a> is placed at the
+very beginning of the kernel image, and at VMA 0.</p>
+<p>The linker script of this crate should handle this correctly. Take care when
+updating it.</p>
+<h3 id="got-prevention"><a class="doc-anchor" href="#got-prevention">§</a>GOT Prevention</h3>
+<p>This function must be <strong>naturally place-independent</strong>, i.e. it must not
+access the GOT or PLT indirections. Updates to this function must be
+carefully scrutinized to ensure that this invariant is maintained.</p>
+<p>Even the most trivial calls to core library functions can break this. For
+example, the following is a wrong implementation:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">pub unsafe fn </span>relocate_me() {
+    <span class="kw">unsafe extern </span><span class="string">"C" </span>{
+        <span class="kw">fn </span>_srela_dyn();
+        <span class="kw">fn </span>_erela_dyn();
+    }
+
+    <span class="comment">// The kernel entry is at VMA 0, so the load bias is the actual address of
+    // the kernel entry.
+    </span><span class="kw">let </span>load_bias = <span class="kw">unsafe </span>{ <span class="macro">get_symbol_addr!</span>(<span class="kw">crate</span>::kernel_entry) };
+    <span class="kw">let </span>srela_dyn_addr = <span class="kw">unsafe </span>{ <span class="macro">get_symbol_addr!</span>(_srela_dyn) };
+    <span class="kw">let </span>erela_dyn_addr = <span class="kw">unsafe </span>{ <span class="macro">get_symbol_addr!</span>(_erela_dyn) };
+
+    <span class="kw">let </span>rela_base = srela_dyn_addr <span class="kw">as </span><span class="kw-2">*const </span>Elf64Rela;
+    <span class="kw">let </span>rela_cnt = (erela_dyn_addr - srela_dyn_addr) / core::mem::size_of::&lt;Elf64Rela&gt;();
+
+    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..rela_cnt {
+        <span class="kw">let </span>rela = <span class="kw">unsafe </span>{ rela_base.add(i).as_ref_unchecked() };
+        <span class="kw">if </span>rela.info <span class="kw">as </span>u32 == RELATIVE_TYPE {
+            <span class="kw">let </span>target = (load_bias + rela.addend <span class="kw">as </span>usize) <span class="kw">as </span><span class="kw-2">*mut </span>u64;
+            <span class="kw">unsafe </span>{
+                target.write((load_bias <span class="kw">as </span>u64).wrapping_add_signed(rela.addend));
+            }
+        }
+    }
+}</code></pre></div></div></details></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["collect_pattern_identifiers","expand","expand_const","expand_function","expand_item","expand_type","expand_use","forwarding_parameter_name"],"macro":["look_at"],"mod":["input"]};

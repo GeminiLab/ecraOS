@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IrqMode"],"struct":["IoApic","IrqFlags","RedirectionTableEntry"]};

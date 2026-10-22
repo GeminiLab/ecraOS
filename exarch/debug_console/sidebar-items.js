@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["read_bytes","write_bytes","write_fmt","write_str"],"macro":[["dbcn_print",1],["dbcn_println",1]],"struct":["DebugConsole"]};

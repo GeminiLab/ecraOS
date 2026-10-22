@@ -1,0 +1,202 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Generates a function-pointer table for a static trait."><title>dyn_static_traits in dyn_static_traits - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="dyn_static_traits" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">dyn_static_traits</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../dyn_static_traits/index.html">dyn_<wbr>static_<wbr>traits</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">dyn_<wbr>static_<wbr>traits</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#static-traits" title="Static traits">Static traits</a></li><li><a href="#generated-items" title="Generated items">Generated items</a><ul><li><a href="#function-pointer-fields" title="Function-pointer fields">Function-pointer fields</a></li><li><a href="#generic-traits" title="Generic traits">Generic traits</a></li></ul></li><li><a href="#requirements" title="Requirements">Requirements</a></li><li><a href="#examples" title="Examples">Examples</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate dyn_<wbr>static_<wbr>traits</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">dyn_static_traits</a></div><h1>Attribute Macro <span class="attr">dyn_<wbr>static_<wbr>traits</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/dyn_static_traits/lib.rs.html#458-465">Source</a> </span></div><pre class="rust item-decl"><code>#[dyn_static_traits]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Generates a function-pointer table for a static trait.</p>
+<p>The attribute is applied to a static trait and takes the name of the table to generate as its
+only argument, as in <code>#[dyn_static_traits(DynClock)]</code>. The trait is emitted unchanged, so it
+still works as a generic parameter, and the generated table adds runtime selection between its
+implementations. The generated code needs no runtime support and works in <code>no_std</code> crates.</p>
+<h2 id="static-traits"><a class="doc-anchor" href="#static-traits">§</a>Static traits</h2>
+<p>In this crate, a static trait means a trait whose items are exclusively static associated
+methods, which Rust calls associated functions with no receiver in their signature. For example,
+<code>fn page_size() -&gt; usize</code> is static, while <code>fn page_size(&amp;self) -&gt; usize</code> is not.</p>
+<p>Static traits are useful as generic parameters for static dependency injection. A generic
+function such as <code>fn read&lt;T: Storage&gt;()</code> can call <code>T::read()</code> with the implementation selected
+at compile time. This pattern applies to many scenarios like allocators, logging, clocks, device
+access, synchronization policies, platform services, and other static interfaces.</p>
+<p>Because their functions have no receiver, static traits are not dyn compatible, so a
+<code>dyn Trait</code> object cannot select their implementation at runtime. The generated table provides
+dynamic behavior for the same static interface instead. It is a concrete struct of function
+pointers, not a <code>dyn Trait</code> object. Each <code>new::&lt;T&gt;</code> call still names its implementation type
+statically, but the resulting table no longer carries <code>T</code> in its own type. Tables built from
+different implementations can therefore be stored behind one common type, passed across an API
+boundary, or chosen conditionally at runtime.</p>
+<h2 id="generated-items"><a class="doc-anchor" href="#generated-items">§</a>Generated items</h2>
+<p>For <code>#[dyn_static_traits(DynClock)]</code> on a trait <code>Clock</code>, the macro emits the trait unchanged,
+followed by these items:</p>
+<ul>
+<li>A struct <code>DynClock</code> with the visibility and generic parameters of <code>Clock</code>. It has one public
+field per associated function, named after the function.</li>
+<li>An inherent <code>pub fn new&lt;T: Clock&gt;() -&gt; Self</code> constructor that stores the functions of <code>T</code> in
+the fields. A function that <code>T</code> does not override uses the default body from the trait.</li>
+<li>A <code>Clone</code> implementation that copies every function pointer. It places no <code>Clone</code> bound on
+the parameters of the trait.</li>
+</ul>
+<p>The table, its fields, its constructor, and its <code>Clone</code> implementation receive generated doc
+comments. For a trait with one function, the expansion is roughly equivalent to the following
+code:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">trait </span>Clock {
+    <span class="kw">fn </span>now() -&gt; u64;
+}
+
+<span class="kw">struct </span>DynClock {
+    <span class="kw">pub </span>now: <span class="kw">fn</span>() -&gt; u64,
+}
+
+<span class="kw">impl </span>DynClock {
+    <span class="kw">pub fn </span>new&lt;T: Clock&gt;() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ now: T::now }
+    }
+}
+
+<span class="kw">impl </span>Clone <span class="kw">for </span>DynClock {
+    <span class="kw">fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ now: <span class="self">self</span>.now }
+    }
+}</code></pre></div><h3 id="function-pointer-fields"><a class="doc-anchor" href="#function-pointer-fields">§</a>Function-pointer fields</h3>
+<p>Each field type keeps the parameters, return type, ABI, and <code>unsafe</code> qualifier of its function,
+so <code>unsafe extern "C" fn read(pointer: *const u32) -&gt; u32;</code> produces a field of type
+<code>unsafe extern "C" fn(pointer: *const u32) -&gt; u32</code>. Elided lifetimes in a signature become
+higher-ranked lifetimes of the function pointer, so a function such as
+<code>fn first(text: &amp;str) -&gt; &amp;str</code> keeps its borrowing behavior. A field for an <code>unsafe fn</code> still
+requires an unsafe call and retains the safety contract of the original associated function.</p>
+<p>A field is called with parentheses around the field access, such as <code>(table.now)()</code>, because
+<code>table.now()</code> would look for a method.</p>
+<h3 id="generic-traits"><a class="doc-anchor" href="#generic-traits">§</a>Generic traits</h3>
+<p>Type, const, and lifetime parameters of the trait become parameters of the table, and <code>new</code>
+requires its implementation parameter to implement the trait with the same arguments, as in
+<code>DynStore::&lt;u8, 4&gt;::new::&lt;Zeros&gt;()</code>. A generic table is <code>Clone</code> regardless of its type
+arguments. Every type and lifetime parameter of the trait must appear in at least one function
+signature, because the generated struct would otherwise leave it unused.</p>
+<p>The implementation parameter of <code>new</code> is named <code>T</code> when that name is free. When the trait
+itself or one of its type or const parameters is named <code>T</code>, the macro uses the first free name
+among <code>TA</code> to <code>TZ</code>, then <code>TAA</code>, <code>TAB</code>, and so on, so trait parameters can use any name.</p>
+<h2 id="requirements"><a class="doc-anchor" href="#requirements">§</a>Requirements</h2>
+<p>The annotated trait must contain only static associated methods. The macro reports a compile
+error for:</p>
+<ul>
+<li>functions with a <code>self</code> receiver,</li>
+<li>functions with generic parameters, including lifetime parameters,</li>
+<li><code>async</code> or variadic functions,</li>
+<li>associated constants, associated types, macro invocations, and other non-function items.</li>
+</ul>
+<p>Functions may have default bodies. Some signatures pass these checks, but a function-pointer
+field cannot represent them, so the generated table fails to compile:</p>
+<ul>
+<li>signatures that mention <code>Self</code>, which refers to the table inside the generated struct,</li>
+<li><code>impl Trait</code> in a parameter or return type,</li>
+<li>parameter patterns other than plain names and <code>_</code>, such as <code>mut value</code> or <code>(left, right)</code>,
+even in functions with default bodies.</li>
+</ul>
+<p>Attributes on trait functions stay on the trait and are not copied to the fields. In
+particular, a function under a disabled <code>#[cfg]</code> still receives a field, so the constructor
+fails to compile.</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+
+<span class="attr">#[dyn_static_traits(DynClock)]
+</span><span class="kw">trait </span>Clock {
+    <span class="kw">fn </span>now() -&gt; u64;
+}
+
+<span class="kw">struct </span>MonotonicClock;
+
+<span class="kw">impl </span>Clock <span class="kw">for </span>MonotonicClock {
+    <span class="kw">fn </span>now() -&gt; u64 {
+        <span class="number">42
+    </span>}
+}
+
+<span class="comment">// Static dependency injection uses the trait as a generic parameter.
+</span><span class="kw">fn </span>read_time&lt;T: Clock&gt;() -&gt; u64 {
+    T::now()
+}
+<span class="macro">assert_eq!</span>(read_time::&lt;MonotonicClock&gt;(), <span class="number">42</span>);
+
+<span class="comment">// Dynamic selection stores the generated function-pointer table.
+</span><span class="kw">let </span>clock = DynClock::new::&lt;MonotonicClock&gt;();
+<span class="macro">assert_eq!</span>((clock.now)(), <span class="number">42</span>);</code></pre></div>
+<p>Tables built from different implementations share one type, so a program can choose between
+them at runtime:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+
+<span class="attr">#[dyn_static_traits(DynConsole)]
+</span><span class="kw">trait </span>Console {
+    <span class="kw">fn </span>name() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
+}
+
+<span class="kw">struct </span>Serial;
+
+<span class="kw">impl </span>Console <span class="kw">for </span>Serial {
+    <span class="kw">fn </span>name() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+        <span class="string">"serial"
+    </span>}
+}
+
+<span class="kw">struct </span>Framebuffer;
+
+<span class="kw">impl </span>Console <span class="kw">for </span>Framebuffer {
+    <span class="kw">fn </span>name() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+        <span class="string">"framebuffer"
+    </span>}
+}
+
+<span class="kw">fn </span>select(graphics: bool) -&gt; DynConsole {
+    <span class="kw">if </span>graphics {
+        DynConsole::new::&lt;Framebuffer&gt;()
+    } <span class="kw">else </span>{
+        DynConsole::new::&lt;Serial&gt;()
+    }
+}
+
+<span class="macro">assert_eq!</span>((select(<span class="bool-val">false</span>).name)(), <span class="string">"serial"</span>);
+<span class="macro">assert_eq!</span>((select(<span class="bool-val">true</span>).name)(), <span class="string">"framebuffer"</span>);</code></pre></div>
+<p>A generic trait produces a generic table, and default bodies fill the fields that an
+implementation does not override:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+
+<span class="attr">#[dyn_static_traits(DynStore)]
+</span><span class="kw">trait </span>Store&lt;V: Copy, <span class="kw">const </span>N: usize&gt; {
+    <span class="kw">fn </span>read(index: usize) -&gt; V;
+
+    <span class="kw">fn </span>capacity() -&gt; usize {
+        N
+    }
+}
+
+<span class="kw">struct </span>Zeros;
+
+<span class="kw">impl </span>Store&lt;u8, <span class="number">4</span>&gt; <span class="kw">for </span>Zeros {
+    <span class="kw">fn </span>read(_index: usize) -&gt; u8 {
+        <span class="number">0
+    </span>}
+}
+
+<span class="kw">let </span>store = DynStore::&lt;u8, <span class="number">4</span>&gt;::new::&lt;Zeros&gt;();
+<span class="macro">assert_eq!</span>((store.read)(<span class="number">2</span>), <span class="number">0</span>);
+<span class="macro">assert_eq!</span>((store.capacity)(), <span class="number">4</span>);</code></pre></div>
+<p>An <code>unsafe</code> associated function keeps its qualifier in the table:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+
+<span class="attr">#[dyn_static_traits(DynReader)]
+</span><span class="kw">trait </span>Reader {
+    <span class="doccomment">/// Reads a value through a raw pointer.
+    ///
+    /// `pointer` must be valid for reads.
+    </span><span class="kw">unsafe fn </span>read(pointer: <span class="kw-2">*const </span>u32) -&gt; u32;
+}
+
+<span class="kw">struct </span>DirectReader;
+
+<span class="kw">impl </span>Reader <span class="kw">for </span>DirectReader {
+    <span class="kw">unsafe fn </span>read(pointer: <span class="kw-2">*const </span>u32) -&gt; u32 {
+        <span class="comment">// SAFETY: The caller guarantees that `pointer` is valid for reads.
+        </span><span class="kw">unsafe </span>{ <span class="kw-2">*</span>pointer }
+    }
+}
+
+<span class="kw">let </span>reader = DynReader::new::&lt;DirectReader&gt;();
+<span class="kw">let </span>value = <span class="number">7</span>;
+<span class="comment">// SAFETY: `value` is live for the duration of the call.
+</span><span class="macro">assert_eq!</span>(<span class="kw">unsafe </span>{ (reader.read)(<span class="kw-2">&amp;</span><span class="kw">raw const </span>value) }, <span class="number">7</span>);</code></pre></div></div></details></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CPU_NUM"],"enum":["DomainError","DomainLifecycle","DomainPolicy"],"fn":["create_domain","downgrade","lookup_domain"],"static":["DOMAIN_REGISTRY","NEXT_DOMAIN_ID"],"struct":["CpuSet","SchedulingDomain"],"type":["DomainId","DomainRef"]};

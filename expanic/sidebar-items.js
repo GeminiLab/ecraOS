@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["terminate_handler"],"enum":["TerminateReason"],"fn":["terminate","terminate_fallback"],"macro":[["bug",1],["kpanic",1]],"mod":["bug"],"static":["DEFAULT_TERMINATE"],"struct":["TerminateLocation"],"trait":["UnwrapOrBug"]};

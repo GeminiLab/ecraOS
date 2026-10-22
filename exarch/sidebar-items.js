@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["dbcn_print",1],["dbcn_println",1]],"mod":["arch","context","debug_console","device","init","ipi","kernel_if","mem","parts","power","reloc_hook","time","trap"]};
