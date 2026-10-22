@@ -1,0 +1,41 @@
+name: Documentation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  doc-tests:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-06-01
+          components: rust-src
+
+      - name: Generate documentation
+        # TODO: Add -D rustdoc::broken_intra_doc_links -D missing-docs to RUSTDOCFLAGS.
+        run: >-
+          RUSTFLAGS="--cfg ecraos_doc"
+          RUSTDOCFLAGS="-Zunstable-options --enable-index-page --cfg ecraos_doc"
+          cargo doc --workspace --document-private-items
+
+      - name: Deploy documentation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages
+          folder: target/doc
