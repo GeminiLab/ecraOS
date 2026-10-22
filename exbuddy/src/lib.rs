@@ -27,7 +27,7 @@ mod stats;
 mod tests;
 
 #[doc(inline)]
-pub use buddy::BuddyAllocator;
+pub use buddy::{BuddyAllocator, BuddySectionIter, BuddySectionIterMut};
 #[doc(inline)]
 pub use error::{BuddyError, BuddyResult};
 #[doc(inline)]

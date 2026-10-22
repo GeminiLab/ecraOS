@@ -1,6 +1,7 @@
 //! AArch64 implementation of the common platform initialization contract.
 
 use crate::init::PlatformBootArg;
+use cfg_or_dummy::cfg_or_dummy;
 use lazyinit::LazyInit;
 
 use super::trap::Aarch64ExternalIrqConfig;
@@ -64,6 +65,7 @@ pub fn init_early(arg: PlatformBootArg) {
 }
 
 /// Runs late bootstrap-CPU initialization.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn init_later() {
     if let Some(config) = GIC_CONFIG.get() {
         crate::trap::irq::init_external_controller(config.clone());

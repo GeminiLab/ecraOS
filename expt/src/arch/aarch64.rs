@@ -239,9 +239,3 @@ mod tests {
         );
     }
 }
-
-/// Metadata for AArch64 4 KiB, four-level, 48-bit page table hierarchies.
-///
-/// Levels zero through two may contain leaf mappings, providing 4 KiB, 2 MiB,
-/// and 1 GiB mapping sizes.
-pub type Aarch64PageTableMeta = AArch64PageTableMeta4KiBLower<48>;

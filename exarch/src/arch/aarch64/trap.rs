@@ -5,15 +5,19 @@
 use core::arch::global_asm;
 
 use aarch64_cpu::registers::{DAIF, ReadWriteable, Readable, VBAR_EL1, Writeable};
+use cfg_or_dummy::cfg_or_dummy;
 
 use crate::trap::{
     Exception, Interrupt, LocalInterrupt, PageFaultFlags, RawTrap, Trap, TrapDisposition,
-    TrapFrame, TrapFrameAccess,
+    TrapFrameAccess,
 };
 
-use super::gicv3::{self, GicInterrupt};
 pub use super::gicv3::{
     Aarch64ExternalIrqConfig, ArchIrq, init_external_controller, prepare_irq, set_irq_enabled,
+};
+use super::{
+    context::TrapFrame,
+    gicv3::{self, GicInterrupt},
 };
 
 global_asm!(include_str!("trap.S"));
@@ -58,6 +62,7 @@ pub fn local_enabled() -> bool {
 /// Dispatches one acknowledged GIC interrupt and completes it before the safe point.
 ///
 /// SGI, timer PPI and SPI namespaces remain distinct and the IPI path acquires no controller lock.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn handle_external(frame: &mut TrapFrame) -> TrapDisposition {
     let intid = gicv3::acknowledge();
     let disposition = match gicv3::decode_intid(intid) {
@@ -86,6 +91,7 @@ pub fn handle_external(frame: &mut TrapFrame) -> TrapDisposition {
 }
 
 /// Decodes one synchronous AArch64 exception and dispatches it to common handlers.
+#[cfg_or_dummy(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 extern "C" fn aarch64_trap_handler(frame: &mut TrapFrame) {
     let ec = (frame.esr_el1 >> 26) & 0x3f;

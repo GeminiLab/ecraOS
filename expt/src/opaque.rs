@@ -74,7 +74,8 @@ pub enum OpaquePageTableRoot {
     /// Independent lower and upper physical roots used by AArch64.
     ///
     /// Each address identifies the root page table of a separate hierarchy.
-    #[cfg(any(test, target_arch = "aarch64"))]
+    #[cfg(any(test, doc, target_arch = "aarch64"))]
+    #[cfg_attr(doc, doc(cfg(target_arch = "aarch64")))]
     Dual(crate::pt::DualPageTableRoot),
 }
 
@@ -139,9 +140,9 @@ impl<A: VirtAddr> PageTableMethods<A> {
                     .map(|pt| OpaquePageTableRoot::Single(pt.leak()))
             },
             apply_actions: |root, actions| {
-                #[cfg(not(any(test, target_arch = "aarch64")))]
+                #[cfg(not(any(test, doc, target_arch = "aarch64")))]
                 let OpaquePageTableRoot::Single(root) = root;
-                #[cfg(any(test, target_arch = "aarch64"))]
+                #[cfg(any(test, doc, target_arch = "aarch64"))]
                 let OpaquePageTableRoot::Single(root) = root else {
                     bug!("passing dual-root page table to single-root page table operation")
                 };
@@ -177,7 +178,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
                 OpaquePageTableRoot::Single(root) => {
                     drop(unsafe { PageTable::<M, PTE, AL, F>::new_at(root) });
                 }
-                #[cfg(any(test, target_arch = "aarch64"))]
+                #[cfg(any(test, doc, target_arch = "aarch64"))]
                 OpaquePageTableRoot::Dual(_) => {
                     bug!("passing dual-root page table to single-root page table destruction")
                 }
@@ -188,7 +189,8 @@ impl<A: VirtAddr> PageTableMethods<A> {
     /// Creates a method table for a dual-root multi-level page table type.
     ///
     /// Both roots use the statically selected allocator for table frames and destruction.
-    #[cfg(any(test, target_arch = "aarch64"))]
+    #[cfg(any(test, doc, target_arch = "aarch64"))]
+    #[cfg_attr(doc, doc(cfg(target_arch = "aarch64")))]
     pub const fn new_dual<ML, PTEL, MU, PTEU, AL, F>() -> Self
     where
         ML: PageTableMeta<VirtAddr = A, Coverage = crate::meta::LowerCoverage<A>>,
@@ -301,7 +303,8 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
     /// upper coverage policies.
     // NOTE: As with `new`, newer nightly trait solvers may fail to infer these
     // anonymous const bounds when a downstream crate instantiates this method.
-    #[cfg(any(test, target_arch = "aarch64"))]
+    #[cfg(any(test, doc, target_arch = "aarch64"))]
+    #[cfg_attr(doc, doc(cfg(target_arch = "aarch64")))]
     pub const fn new_dual<ML, PTEL, MU, PTEU, AL, F>() -> Self
     where
         ML: PageTableMeta<VirtAddr = A, Coverage = crate::meta::LowerCoverage<A>>,

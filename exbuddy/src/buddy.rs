@@ -29,7 +29,7 @@ use crate::{
 ///
 /// A section is a contiguous range of physical memory pages that is managed by
 /// the allocator. It consists of the metadata pages (containing a header of type
-/// [`BuddySection`], and an array of heap page metadata of type [`PageMeta`]), and then the heap
+/// [`BuddySection`], and an array of heap page metadata of type `PageMeta`), and then the heap
 /// pages (pages available for allocation). The memory layout of a section is as
 /// follows:
 ///
@@ -39,7 +39,7 @@ use crate::{
 /// |     `struct BuddySection`    |
 /// +------------------------------+   < aligned to align_of::<PageMeta>()
 /// | Page metadata array          |
-/// |     `[PageMeta]` * N         |
+/// |     `PageMeta` * N         |
 /// +------------------------------+   < aligned to page_size
 /// | Heap                         |
 /// |     N free pages             |

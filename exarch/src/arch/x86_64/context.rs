@@ -6,6 +6,7 @@ use core::arch::global_asm;
 use core::mem::offset_of;
 use core::ops::Sub;
 
+use cfg_or_dummy::cfg_or_dummy;
 use memory_addr::{MemoryAddr, VirtAddr, va};
 
 use crate::trap::TrapFrameAccess;
@@ -80,6 +81,7 @@ pub unsafe fn init_task_context(
 ///
 /// Local interrupts must be disabled. Both pointers must be aligned, valid, and uniquely writable
 /// where appropriate until this task is resumed.
+#[cfg_or_dummy(target_arch = "x86_64")]
 pub unsafe fn switch(previous: *mut TaskContext, next: *const TaskContext) {
     unsafe extern "C" {
         /// Performs the raw x86-64 context switch.

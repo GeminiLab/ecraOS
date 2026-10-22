@@ -22,12 +22,12 @@ xuantie-c9xx = []
 bitflags = "2.9"
 memory_addr = "0.5.0-alpha.const-addr-and-ranges.0"
 
-[target.'cfg(any(target_arch = "aarch64", docsrs))'.dependencies]
+[target.'cfg(any(target_arch = "aarch64", ecraos_doc))'.dependencies]
 aarch64-cpu = "11.0"
 
-[target.'cfg(any(target_arch = "x86_64", docsrs))'.dependencies]
+[target.'cfg(any(target_arch = "x86_64", ecraos_doc))'.dependencies]
 x86_64 = { version = "0.15", default-features = false }
 
 [package.metadata.docs.rs]
-rustc-args = ["--cfg", "docsrs"]
+rustc-args = ["--cfg", "ecraos_doc"]
 all-features = true

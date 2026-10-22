@@ -316,10 +316,10 @@ impl fmt::Display for VirtAddrSpaceMode {
 /// The maximum number of virtual address space modes that can be supported by
 /// the platform.
 ///
-/// This value is chosen to make [`VirtAddrSpace`] 256 bytes long. Also, AArch64
-/// supports up to 6 modes for each half of the virtual address space (4/16/64
-/// KiB page size, 48/52 bit VA, T<n>SZ not considered), so 48 seems to be a
-/// always-reasonably-large-enough value.
+/// This value is chosen to make [`VirtAddrSpaceModes`] 256 bytes long. Also,
+/// AArch64 supports up to 6 modes for each half of the virtual address space
+/// (4/16/64 KiB page size, 48/52 bit VA, `T<n>SZ` not considered), so 48 seems
+/// to be a always-reasonably-large-enough value.
 pub const MAX_VA_MODES: usize = 48;
 
 /// The supported and current virtual address space modes.

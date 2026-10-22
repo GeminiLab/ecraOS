@@ -22,7 +22,7 @@
 #[cfg(all(test, not(feature = "host-test"), not(rust_analyzer)))]
 compile_error!("`host-test` feature must be enabled for unit tests on host");
 
-#[cfg(all(not(test), feature = "host-test"))]
+#[cfg(all(not(test), not(doc), feature = "host-test"))]
 compile_error!("`host-test` feature must not be enabled for real kernel build");
 
 #[cfg(all(feature = "host-test", not(target_os = "linux")))]

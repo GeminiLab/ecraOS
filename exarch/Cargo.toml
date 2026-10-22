@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bitflags = "2.11"
 cartesian_product = { path = "../utils/cartesian_product" }
+cfg_or_dummy = { path = "../utils/cfg_or_dummy" }
 crate_interface = { version = "0.3", features = ["weak_default"] }
 ecraldr_base.workspace = true
 expalloc_trait = { path = "../expalloc_trait" }
@@ -19,7 +20,7 @@ look_at = { path = "../utils/look_at" }
 memory_addr.workspace = true
 page_table_entry = "0.6.1"
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
+[target.'cfg(any(target_arch = "x86_64", ecraos_doc))'.dependencies]
 multiboot = "0.8"
 raw-cpuid = "11.6"
 uart_16550 = "0.4"  # later versions cannot be used because of the lack of const constructors
@@ -27,12 +28,15 @@ x2apic = "0.5"
 x86 = "0.52"
 x86_64 = "0.15.4"
 
-[target.'cfg(target_arch = "riscv64")'.dependencies]
+[target.'cfg(any(target_arch = "riscv64", ecraos_doc))'.dependencies]
 fdt-rs = { version = "0.4", default-features = false }
 riscv = "0.16"
-sbi-rt = { version = "0.0.4", features = ["legacy"] }
+sbi-rt = { version = "0.0.4" }
 
-[target.'cfg(target_arch = "aarch64")'.dependencies]
+[target.'cfg(any(target_arch = "aarch64", ecraos_doc))'.dependencies]
 aarch64-cpu = "11"
 fdt-rs = { version = "0.4", default-features = false }
 tock-registers = "0.10"
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "ecraos_doc"]

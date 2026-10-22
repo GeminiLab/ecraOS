@@ -4,6 +4,7 @@
 
 use core::arch::global_asm;
 
+use cfg_or_dummy::cfg_or_dummy;
 use log::{error, warn};
 use memory_addr::va;
 use riscv::{
@@ -75,6 +76,7 @@ fn handle_breakpoint(sepc: &mut usize) {
 /// Dispatches a RISC-V page fault to the common kernel callback.
 ///
 /// An unhandled fault is fatal and includes the complete saved context in its diagnostic.
+#[cfg_or_dummy(target_arch = "riscv64")]
 fn handle_page_fault(tf: &mut TrapFrame, mut flags: PageFaultFlags) -> TrapDisposition {
     let user = is_user(tf);
     if user {
@@ -95,6 +97,7 @@ fn handle_page_fault(tf: &mut TrapFrame, mut flags: PageFaultFlags) -> TrapDispo
 /// Dispatches one RISC-V supervisor trap.
 ///
 /// This symbol is called directly by `trap.S` with a pointer to its stack-resident frame.
+#[cfg_or_dummy(target_arch = "riscv64")]
 #[unsafe(no_mangle)]
 extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
     let scause = scause::read();
@@ -129,6 +132,7 @@ extern "C" fn riscv_trap_handler(tf: &mut TrapFrame) {
 }
 
 /// Handles a RISC-V trap that is known to the kernel.
+#[cfg_or_dummy(target_arch = "riscv64")]
 fn valid_riscv_trap_handler(
     tf: &mut TrapFrame,
     scause: RiscVTrap<RiscVInterrupt, RiscVException>,
@@ -185,6 +189,7 @@ fn valid_riscv_trap_handler(
 }
 
 /// Handles a RISC-V trap that is unknown to the kernel.
+#[cfg_or_dummy(target_arch = "riscv64")]
 fn unknown_riscv_trap_handler(tf: &mut TrapFrame, scause: Scause) -> TrapDisposition {
     let raw_trap = RawTrap(scause.bits());
 

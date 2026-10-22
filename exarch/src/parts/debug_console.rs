@@ -2,7 +2,7 @@
 //!
 //! Methods here provide a high-level interface for writing and reading bytes through a
 //! platform-selected debug console device. Methods in this mod may be unavailable before
-//! [`init_early`](crate::init::InitIf::init_early) is called.
+//! [`init_early`](crate::init::init_early) is called.
 
 use core::fmt::Write;
 

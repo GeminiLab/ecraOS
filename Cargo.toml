@@ -12,6 +12,7 @@ members = [
     "exslab",
     "page_table_entry",
     "utils/cartesian_product",
+    "utils/cfg_or_dummy",
     "utils/dyn_static_traits",
     "utils/look_at",
     "utils/maybe_non_generic",

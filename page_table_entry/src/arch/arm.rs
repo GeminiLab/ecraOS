@@ -295,13 +295,13 @@ impl From<DescriptorAttr> for MappingFlags {
 pub struct A32PTE(u32);
 
 impl A32PTE {
-    /// Physical address mask for Section (bits [31:20] for 1MB alignment)
+    /// Physical address mask for Section (bits `[31:20]` for 1MB alignment)
     const SECTION_ADDR_MASK: u32 = 0xfff0_0000;
 
-    /// Physical address mask for Page Table (bits [31:10] for 1KB alignment)
+    /// Physical address mask for Page Table (bits `[31:10]` for 1KB alignment)
     const PAGE_TABLE_ADDR_MASK: u32 = 0xffff_fc00;
 
-    /// Physical address mask for Small Page (bits [31:12] for 4KB alignment)
+    /// Physical address mask for Small Page (bits `[31:12]` for 4KB alignment)
     const SMALL_PAGE_ADDR_MASK: u32 = 0xffff_f000;
 
     /// Creates an empty descriptor with all bits set to zero.

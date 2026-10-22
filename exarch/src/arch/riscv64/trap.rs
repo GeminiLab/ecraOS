@@ -4,6 +4,7 @@
 
 use alloc::boxed::Box;
 
+use cfg_or_dummy::cfg_or_dummy;
 use kspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::PhysAddr;
@@ -146,6 +147,7 @@ pub fn init_external_controller(config: RiscvExternalIrqConfig) {
 }
 
 /// Claims, dispatches, and completes every pending source for the current hart.
+#[cfg_or_dummy(target_arch = "riscv64")]
 pub fn handle_external(frame: &mut TrapFrame) -> TrapDisposition {
     let Some(plic) = PLIC.get() else {
         return TrapDisposition::Unhandled;

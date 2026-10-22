@@ -7,6 +7,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![feature(extern_item_impls)]
+#![feature(doc_cfg)]
 #![deny(unfulfilled_lint_expectations)]
 
 /// The Rust standard allocator interface.
@@ -19,7 +20,7 @@ pub use expanic::{bug, kpanic};
 use log::info;
 
 mod device;
-#[cfg(feature = "foundation-test")]
+#[cfg(any(feature = "foundation-test", doc))]
 pub mod foundation_test;
 mod ipi;
 mod kernel_if;
@@ -129,7 +130,7 @@ fn print_hello_banner() {
 ///
 /// This function should never be called directly.
 #[ecraldr_base::kernel_entry]
-pub unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
+unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     // Relocate the kernel image.
     unsafe { mem::reloc::relocate_me() };
 
@@ -166,8 +167,8 @@ pub unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) ->
 /// # Safety
 ///
 /// This function should only be called by the [`kernel_entry`] function, via
-/// [`mem::init_vmm`], and should never be called directly.
-pub unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
+/// [`mem::init_and_enable_vmm`], and should never be called directly.
+unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     // Relocate the kernel image again.
     unsafe { mem::reloc::relocate_me() };
 

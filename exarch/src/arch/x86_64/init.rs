@@ -1,4 +1,4 @@
-//! [`exarch::init::InitIf`] implementation for this platform.
+//! Platform initialization functions for x86_64.
 
 use crate::init::PlatformBootArg;
 

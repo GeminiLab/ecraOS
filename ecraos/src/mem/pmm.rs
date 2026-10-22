@@ -14,8 +14,8 @@ pub type MemoryRegions = HeaplessVec<MemoryRegion, MAX_MEMORY_REGIONS>;
 
 /// Static storage for the physical memory region table.
 ///
-/// Written once by [`set_phys_mem_regions`] and read back via
-/// [`saved_phys_mem_regions`].
+/// Written once by [`build_phys_mem_regions`] and read back via
+/// [`phys_mem_regions`].
 static PHYS_MEM_REGIONS: LazyInit<MemoryRegions> = LazyInit::new();
 
 /// Retrieves the physical memory regions.

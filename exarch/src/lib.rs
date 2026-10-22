@@ -2,10 +2,11 @@
 
 #![no_std]
 #![feature(linkage)]
+#![feature(doc_cfg)]
 
 extern crate alloc;
 
-mod arch;
+pub mod arch;
 pub mod kernel_if;
 mod parts;
 

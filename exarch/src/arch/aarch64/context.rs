@@ -5,6 +5,7 @@
 
 use core::{arch::global_asm, mem::offset_of};
 
+use cfg_or_dummy::cfg_or_dummy;
 use memory_addr::{MemoryAddr, VirtAddr, va};
 
 use crate::trap::TrapFrameAccess;
@@ -67,6 +68,7 @@ pub unsafe fn init_task_context(
 /// # Safety
 ///
 /// Local interrupts must be disabled and both context pointers must remain valid for the switch.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub unsafe fn switch(previous: *mut TaskContext, next: *const TaskContext) {
     unsafe extern "C" {
         /// Performs the raw AArch64 context switch.

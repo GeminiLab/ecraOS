@@ -6,6 +6,7 @@ use core::{
 };
 
 use aarch64_cpu::registers::{Readable, TCR_EL1};
+use cfg_or_dummy::cfg_or_dummy;
 use expt::opaque::OpaquePageTableRoot;
 use memory_addr::{PhysAddr, VirtAddr, va};
 
@@ -44,6 +45,7 @@ macro_rules! psci_with {
 }
 
 /// Invokes the PSCI function using the appropriate instruction.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn invoke_psci(function: u64, arg0: u64, arg1: u64, arg2: u64) -> i64 {
     if PSCI_USES_HVC.load(Ordering::Acquire) {
         psci_with!("hvc", function, arg0, arg1, arg2)
@@ -77,6 +79,7 @@ unsafe extern "C" {
 }
 
 /// Requests PSCI to start one application CPU.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn cpu_up(
     phys_id: PhysicalCpuId,
     page_table_root: OpaquePageTableRoot,

@@ -83,6 +83,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "cfg_or_dummy"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "const_fn"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -185,6 +194,7 @@ dependencies = [
  "aarch64-cpu",
  "bitflags 2.11.1",
  "cartesian_product",
+ "cfg_or_dummy",
  "crate_interface",
  "ecraldr_base",
  "expalloc_trait",

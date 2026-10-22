@@ -1,4 +1,4 @@
-//! [`exarch::init::InitIf`] implementation for RISC-V.
+//! Platform initialization functions for RISC-V.
 
 use crate::init::PlatformBootArg;
 

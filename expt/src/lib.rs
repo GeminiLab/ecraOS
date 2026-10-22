@@ -62,6 +62,7 @@
 #![feature(const_convert)]
 #![feature(const_closures)]
 #![feature(const_result_trait_fn)]
+#![feature(doc_cfg)]
 #![warn(missing_docs)]
 
 /// The standard library used by unit tests.

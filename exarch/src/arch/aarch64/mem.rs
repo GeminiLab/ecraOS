@@ -9,6 +9,7 @@ use aarch64_cpu::{
     asm::barrier::{ISH, SY, dsb, isb},
     registers::{ID_AA64MMFR0_EL1, ID_AA64MMFR2_EL1, Readable, TCR_EL1, TTBR0_EL1, TTBR1_EL1},
 };
+use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::PlatformBootArg;
 use expalloc_trait::PageAllocator;
 use expt::{
@@ -478,6 +479,7 @@ pub fn set_virt_addr_space_mode(mode: VirtAddrSpaceMode) {
 /// The selected single-root or dual-root geometry captures `AL` for all operations that access,
 /// allocate, or deallocate table frames, and `F` for pending cleanup on both sides. See
 /// [`crate::mem::get_page_table_type`] for caller requirements.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
     mode: VirtAddrSpaceMode,
 ) -> OpaquePageTableType<VirtAddr> {
@@ -556,6 +558,7 @@ pub fn get_page_table_type<AL: PageAllocator, F: TlbFlusher<VirtAddr>>(
 /// Dual roots are installed in TTBR0 and TTBR1. A single root is installed in
 /// the enabled translation regime for a lower-only or upper-only mode. The MMU
 /// pipeline is synchronized before returning.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn set_page_table_root(root: OpaquePageTableRoot) {
     let current_tcr = TCR_EL1.get();
     match root {
