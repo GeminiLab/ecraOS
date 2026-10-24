@@ -69,6 +69,7 @@ fn pa(value: usize) -> PhysAddr {
 #[derive(Clone, Copy, Debug)]
 struct TestPte(usize);
 
+/// Encodes independent test leaves and child-table descriptors.
 impl GenericPTE for TestPte {
     /// Constructs a leaf with independent address and permission fields.
     ///
@@ -146,6 +147,7 @@ impl GenericPTE for TestPte {
 /// Two bits per level exercise one through five levels with small allocations.
 struct Geometry<const DEPTH: usize, const MAX_LEAF: usize, C>(PhantomData<C>);
 
+/// Describes compact test hierarchies with a selectable depth, leaf limit, and coverage.
 impl<const DEPTH: usize, const MAX_LEAF: usize, C> PageTableMeta for Geometry<DEPTH, MAX_LEAF, C>
 where
     C: const PageTableCoverage<VirtAddr = VirtAddr> + Send + Sync,
@@ -191,6 +193,7 @@ type DualTable =
 /// Child levels require 8192 and 16384 bytes, whereas the root requires only sixteen bytes.
 struct MultiFrame;
 
+/// Describes the non-uniform fixture's multi-frame tables.
 impl PageTableMeta for MultiFrame {
     /// The larger geometry's virtual-address representation.
     type VirtAddr = VirtAddr;
@@ -270,6 +273,7 @@ struct TestState {
     events: Vec<Event>,
 }
 
+/// Initializes and releases per-test physical-memory state.
 impl TestState {
     /// Creates an isolated physical-memory registry.
     ///
@@ -294,6 +298,7 @@ impl TestState {
     }
 }
 
+/// Releases host memory left in a worker's allocation registry.
 impl Drop for TestState {
     /// Discards leftover host buffers when a test thread exits.
     ///
@@ -315,6 +320,7 @@ std::thread_local! {
 /// Declare it before tested values so their destructors precede the leak assertion.
 struct TestContext;
 
+/// Creates a scope for isolated allocation accounting.
 impl TestContext {
     /// Begins a test without inherited allocations or events.
     ///
@@ -331,6 +337,7 @@ impl TestContext {
     }
 }
 
+/// Checks allocation accounting or releases buffers after a failed test.
 impl Drop for TestContext {
     /// Checks complete deallocation unless the test is already unwinding.
     ///
@@ -355,6 +362,7 @@ impl Drop for TestContext {
 /// Different identifiers expose allocator selection after leak/new_at transfers.
 struct TestAllocator<const ID: usize>;
 
+/// Allocates and translates instrumented table-frame runs.
 impl<const ID: usize> PageAllocator for TestAllocator<ID> {
     /// Returns the fixed 4 KiB allocator frame shift.
     fn page_size_shift() -> usize {
@@ -460,6 +468,7 @@ impl<const ID: usize> PageAllocator for TestAllocator<ID> {
 /// Identifiers expose selection errors without simulating a CPU TLB.
 struct RecordingFlusher<const ID: usize>;
 
+/// Records invalidations without executing privileged instructions.
 impl<const ID: usize> TlbFlusher<VirtAddr> for RecordingFlusher<ID> {
     /// Records a completed call through the selected strategy.
     ///
@@ -678,10 +687,11 @@ where
     assert_eq!(mapping::<M>(root, address), None);
 }
 
-/// Construction, transfer, and exact table-frame lifecycle tests.
-///
-/// These assertions distinguish deallocating a hierarchy from retaining caller-managed data.
 mod lifecycle {
+    //! Construction, transfer, and exact table-frame lifecycle tests.
+    //!
+    //! These assertions distinguish deallocating a hierarchy from retaining caller-managed data.
+
     use super::*;
 
     /// Checks root initialization against deliberately nonzero allocator memory.
@@ -993,10 +1003,11 @@ mod lifecycle {
     }
 }
 
-/// Mapping and unmapping effects independently of allocation failure.
-///
-/// Snapshots follow explicit or cursor-Drop cleanup and compare literal expected mappings.
 mod mutations {
+    //! Mapping and unmapping effects independently of allocation failure.
+    //!
+    //! Snapshots follow explicit or cursor-Drop cleanup and compare literal expected mappings.
+
     use super::*;
 
     /// Checks lower and upper canonical mappings within one root.
@@ -1469,10 +1480,11 @@ mod mutations {
     }
 }
 
-/// Partial completion and cleanup behavior at cursor boundaries.
-///
-/// Allocation budgets force failures at exact hierarchy depths without timing assumptions.
 mod failures_and_batching {
+    //! Partial completion and cleanup behavior at cursor boundaries.
+    //!
+    //! Allocation budgets force failures at exact hierarchy depths without timing assumptions.
+
     use super::*;
 
     /// Checks every allocation boundary of a five-level base-page path.
@@ -1826,10 +1838,11 @@ mod failures_and_batching {
     }
 }
 
-/// Deterministic mixed mutation checks against an independent base-page model.
-///
-/// Every completed operation is followed by cleanup and exhaustive physical/permission checks.
 mod model {
+    //! Deterministic mixed mutation checks against an independent base-page model.
+    //!
+    //! Every completed operation is followed by cleanup and exhaustive physical/permission checks.
+
     use super::*;
 
     /// Advances a deterministic sequence without external randomness.
@@ -1902,10 +1915,12 @@ mod model {
     }
 }
 
-/// Flush request processing and virtual-address coverage tests.
-///
-/// Recording strategies exercise dispatch without executing processor invalidation instructions.
 mod flush_and_coverage {
+    //! Flush request processing and virtual-address coverage tests.
+    //!
+    //! Recording strategies exercise dispatch without executing processor invalidation
+    //! instructions.
+
     use super::*;
 
     /// Verifies that empty cleanup performs no dispatch.
@@ -2468,11 +2483,12 @@ mod flush_and_coverage {
     }
 }
 
-/// Asymmetric dual-root and erased-format lifecycle checks.
-///
-/// These cases exercise independent geometries, allocator transfers, partial failures, and
-/// cleanup while keeping all page table activity inside the in-memory test backing.
 mod dual_and_opaque {
+    //! Asymmetric dual-root and erased-format lifecycle checks.
+    //!
+    //! These cases exercise independent geometries, allocator transfers, partial failures, and
+    //! cleanup while keeping all page table activity inside the in-memory test backing.
+
     use super::*;
 
     /// Extracts the physical root of an erased single-root table.

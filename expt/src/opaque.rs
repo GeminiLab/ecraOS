@@ -4,6 +4,12 @@
 //! [`OpaquePageTable`] combines those operations with an erased root to represent different
 //! multi-level page table formats in a single type. This permits runtime page table hierarchy
 //! format selection.
+//!
+//! [`OpaquePageTable`] also captures the [`TlbFlusher`] used for cleanup. Batches follow the same
+//! range and partial-failure contracts as concrete cursors and the
+//! [safety requirements for page table updates](crate#safely-updating-page-tables).
+//! See [`OpaquePageTable::apply_actions`] for automatic cleanup and
+//! [`OpaquePageTable::apply_actions_with_cleanup`] for explicit cleanup transfer.
 
 use core::mem::ManuallyDrop;
 
@@ -91,11 +97,11 @@ type ApplyActionsFn<A> = for<'a> fn(
 /// Destruction deallocates table frames through the concrete value's destructor.
 #[derive(Clone)]
 struct PageTableMethods<A: VirtAddr> {
-    /// Creates a new, empty and zeroed page table hierarchy.
+    /// The allocator for a new, empty, zeroed hierarchy.
     pub new_alloc: fn() -> PagingResult<A, OpaquePageTableRoot>,
-    /// Applies a sequence of updates to a page table hierarchy and returns the pending cleanup.
+    /// The mutation function that returns pending cleanup after a successful batch.
     pub apply_actions: ApplyActionsFn<A>,
-    /// Destroys and deallocates a page table hierarchy.
+    /// The destructor for the hierarchy's table frames.
     pub destroy: fn(root: OpaquePageTableRoot),
 }
 
@@ -125,7 +131,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
     ///
     /// `M` supplies the page table hierarchy geometry and must use `A` for virtual addresses.
     /// `PTE` supplies the concrete entry representation, and `AL` supplies table frame allocation,
-    /// address translation, and destruction.
+    /// address translation, and destruction. `F` supplies cleanup for all values using the table.
     pub const fn new<M, PTE, AL, F>() -> Self
     where
         M: PageTableMeta<VirtAddr = A>,
@@ -188,7 +194,7 @@ impl<A: VirtAddr> PageTableMethods<A> {
 
     /// Creates a method table for a dual-root multi-level page table type.
     ///
-    /// Both roots use the statically selected allocator for table frames and destruction.
+    /// Both roots use `AL` for table frames and destruction and `F` for TLB invalidation.
     #[cfg(any(test, doc, target_arch = "aarch64"))]
     #[cfg_attr(doc, doc(cfg(target_arch = "aarch64")))]
     pub const fn new_dual<ML, PTEL, MU, PTEU, AL, F>() -> Self
@@ -259,8 +265,9 @@ impl<A: VirtAddr> PageTableMethods<A> {
 /// format. It does not store a root page table and can create any number of
 /// [`OpaquePageTable`] values using that format.
 ///
-/// The descriptor captures the allocator used for all table frame allocation and
-/// deallocation performed through those values.
+/// The descriptor captures the allocator used for all table frame allocation and deallocation,
+/// and the [`TlbFlusher`] used for cleanup. Different formats can share this descriptor type when
+/// they use the same semantic virtual-address type.
 #[derive(Clone)]
 pub struct OpaquePageTableType<A: VirtAddr> {
     /// The operations specialized for the selected concrete type.
@@ -277,7 +284,8 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
     ///
     /// `M` supplies the page table hierarchy geometry and must use `A` for virtual addresses.
     /// `PTE` supplies the concrete page table entry representation and `AL`
-    /// supplies the allocator for table frames.
+    /// supplies the allocator for table frames. `F` selects the TLB invalidation scope and
+    /// completion guarantees, as described by [`TlbFlusher`].
     // NOTE: This direct bound currently compiles on nightly-2026-06-01, but
     // newer nightly trait solvers may report E0284 when downstream crates
     // instantiate it with architecture metadata.
@@ -300,7 +308,7 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
     /// `ML` and `PTEL` describe the lower-address root, while `MU` and `PTEU`
     /// describe the upper-address root. The two metadata types must use the
     /// same semantic virtual-address type and the corresponding lower and
-    /// upper coverage policies.
+    /// upper coverage policies. Both hierarchies use `AL` for table frames and `F` for cleanup.
     // NOTE: As with `new`, newer nightly trait solvers may fail to infer these
     // anonymous const bounds when a downstream crate instantiates this method.
     #[cfg(any(test, doc, target_arch = "aarch64"))]
@@ -363,7 +371,8 @@ impl<A: VirtAddr> OpaquePageTableType<A> {
 /// A runtime type-erased multi-level page table.
 ///
 /// The value stores root addresses and operations specialized for its concrete format.
-/// See the crate-level documentation for table-frame deallocation and hardware-use requirements.
+/// See [table-frame lifetime](crate#table-frame-lifetime) and the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 pub struct OpaquePageTable<A: VirtAddr> {
     /// The physical root addresses of the managed hierarchies.
     ///
@@ -477,7 +486,8 @@ impl<A: VirtAddr> OpaquePageTable<A> {
 
 /// Opaque multi-level page table destruction.
 ///
-/// See the crate-level documentation for table-frame deallocation and hardware-use requirements.
+/// See [table-frame lifetime](crate#table-frame-lifetime) and the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 impl<A: VirtAddr> Drop for OpaquePageTable<A> {
     /// Deallocates table frames through the stored destruction operation.
     ///
@@ -487,12 +497,13 @@ impl<A: VirtAddr> Drop for OpaquePageTable<A> {
     }
 }
 
-/// Lifecycle regressions that require access to erased method pointers.
-///
-/// These tests verify that leaking a multi-level page table works after its stored operations
-/// become unusable.
 #[cfg(test)]
 mod tests {
+    //! Lifecycle regressions for erased method pointers and dummy descriptors.
+    //!
+    //! The tests check that leaking preserves roots without calling stored operations and that
+    //! using a dummy descriptor reports an internal bug.
+
     use memory_addr::{VirtAddr, pa};
     use std::{panic::catch_unwind, string::String};
 

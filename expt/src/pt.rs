@@ -80,7 +80,7 @@ pub trait PageTableLike: Sized {
 
     /// Creates a cursor for batched mutations.
     ///
-    /// See [PageTableCursorLike] for batching and cleanup behavior.
+    /// See [`PageTableCursorLike`] for batching and cleanup behavior.
     fn cursor(&mut self) -> Self::Cursor<'_>;
 }
 
@@ -94,8 +94,12 @@ pub trait PageTableLike: Sized {
 /// Map and unmap round ranges outward to base-page boundaries. A successful return means the PTE
 /// mutations and any table-frame deallocations are complete, with TLB invalidations still pending.
 /// Errors retain earlier mutations, including any intermediate tables already installed and any
-/// table frames already deallocated. Operations are not transactional. See the crate-level
-/// documentation for access coordination requirements.
+/// table frames already deallocated. Operations are not transactional. See the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
+///
+/// A single-root cursor treats zero-size requests as no-ops before validating their addresses.
+/// A dual-root cursor first validates the starting address to select a root, even for zero-size
+/// requests.
 ///
 /// Cleanup remains pending until [`Self::clean_up`] processes it or [`Self::take_cleanup`]
 /// transfers it to the caller. Implementations also process any remaining cleanup automatically
@@ -117,9 +121,11 @@ pub trait PageTableCursorLike {
 
     /// Maps a virtual range to physical memory.
     ///
-    /// This operation changes page table entries while mapped data frames remain
-    /// caller-managed. Replacing a child-table descriptor immediately deallocates its subtree's
-    /// table frames. See the trait-level contract for partial failure and cleanup.
+    /// Expands the virtual range outward to base-page boundaries and rounds `paddr` down to a
+    /// base-page boundary independently. It replaces existing mappings, choosing the largest
+    /// supported leaf size allowed by the range and the virtual-to-physical offset. Mapped data
+    /// frames remain caller-managed. Replacing a child-table descriptor immediately deallocates
+    /// its subtree's table frames. See the trait-level contract for partial failure and cleanup.
     fn map(
         &mut self,
         vaddr: Self::VirtAddr,
@@ -130,9 +136,10 @@ pub trait PageTableCursorLike {
 
     /// Removes mappings from a virtual address range.
     ///
-    /// This operation clears mappings but does not deallocate their data frames.
-    /// Intermediate tables remain allocated. See the trait-level contract for partial failure
-    /// and cleanup.
+    /// Expands the range outward to base-page boundaries and splits huge mappings when needed.
+    /// Mapped data frames and existing intermediate tables remain allocated. Missing paths may
+    /// allocate intermediate tables, so unmapping can fail with an allocation error. See the
+    /// trait-level contract for partial failure and cleanup.
     fn unmap(&mut self, vaddr: Self::VirtAddr, size: usize) -> PagingResult<Self::VirtAddr>;
 
     /// Processes pending invalidations using the selected TLB flushing strategy.
@@ -144,8 +151,9 @@ pub trait PageTableCursorLike {
     ///
     /// # Safety
     ///
-    /// The caller must handle the returned cleanup properly after calling this
-    /// function, and before any other operations on the cursor.
+    /// The caller must process the returned cleanup before any further cursor
+    /// operation and before resuming accesses excluded by the
+    /// [safety requirements for page table updates](crate#safely-updating-page-tables).
     ///
     /// See [`PendingCleanup`] for synchronization requirements.
     unsafe fn take_cleanup(&mut self) -> PendingCleanup<Self::VirtAddr>;

@@ -15,6 +15,7 @@ use crate::{
 /// Sv39 uses three nine-bit levels and supports leaf mappings at every level.
 pub struct Sv39PageTableMeta;
 
+/// Describes Sv39's geometry and canonical coverage.
 impl PageTableMeta for Sv39PageTableMeta {
     /// The standard virtual-address type used by Sv39.
     type VirtAddr = VirtAddr;
@@ -25,7 +26,7 @@ impl PageTableMeta for Sv39PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv39 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9];
-    /// Sv39 uses sign-extended lower and upper address ranges.
+    /// The sign-extended lower and upper address ranges used by Sv39.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The highest level that supports an Sv39 leaf mapping.
@@ -39,6 +40,7 @@ impl PageTableMeta for Sv39PageTableMeta {
 /// Sv48 uses four nine-bit levels and supports leaf mappings at every level.
 pub struct Sv48PageTableMeta;
 
+/// Describes Sv48's geometry and canonical coverage.
 impl PageTableMeta for Sv48PageTableMeta {
     /// The standard virtual-address type used by Sv48.
     type VirtAddr = VirtAddr;
@@ -49,7 +51,7 @@ impl PageTableMeta for Sv48PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv48 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
-    /// Sv48 uses sign-extended lower and upper address ranges.
+    /// The sign-extended lower and upper address ranges used by Sv48.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The highest level that supports an Sv48 leaf mapping.
@@ -63,6 +65,7 @@ impl PageTableMeta for Sv48PageTableMeta {
 /// Sv57 uses five nine-bit levels and supports leaf mappings at every level.
 pub struct Sv57PageTableMeta;
 
+/// Describes Sv57's geometry and canonical coverage.
 impl PageTableMeta for Sv57PageTableMeta {
     /// The standard virtual-address type used by Sv57.
     type VirtAddr = VirtAddr;
@@ -73,7 +76,7 @@ impl PageTableMeta for Sv57PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each Sv57 level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
-    /// Sv57 uses sign-extended lower and upper address ranges.
+    /// The sign-extended lower and upper address ranges used by Sv57.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The highest level that supports an Sv57 leaf mapping.
@@ -94,7 +97,11 @@ impl PageTableMeta for Sv57PageTableMeta {
 /// [`TlbFlusher`] for synchronization requirements.
 pub struct Riscv64LocalTlbFlusher;
 
+/// Performs RISC-V invalidation on the calling processor.
 impl TlbFlusher<VirtAddr> for Riscv64LocalTlbFlusher {
+    /// Invalidates one ASID-zero mapping or all local translations.
+    ///
+    /// See [`Riscv64LocalTlbFlusher`] for the treatment of global translations.
     fn flush(addr: Option<VirtAddr>) {
         flush_local_tlb(addr);
     }

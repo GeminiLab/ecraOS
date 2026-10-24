@@ -23,6 +23,7 @@ use memory_addr::{AddrRange, MemoryAddr};
 /// Address types provide arithmetic and hexadecimal formatting for traversal.
 pub const trait VirtAddr: [const] MemoryAddr + LowerHex {}
 
+/// Provides virtual-address operations for semantic address types with hexadecimal formatting.
 const impl<T> VirtAddr for T where T: [const] MemoryAddr + LowerHex {}
 
 /// The virtual-address coverage policy of a page table hierarchy.
@@ -50,7 +51,8 @@ pub const trait PageTableCoverage {
     /// the page table hierarchy's address space. Implementations with a canonical
     /// hole should override this method to reject ranges that cross that hole. A
     /// non-empty range whose exclusive end is zero denotes the end of the
-    /// `usize` address space.
+    /// `usize` address space. This sentinel is part of coverage validation and does not bypass
+    /// the checked endpoint arithmetic of cursor mapping operations.
     fn validate_and_truncate_vaddr_range(
         range: AddrRange<Self::VirtAddr>,
         va_bits: usize,
@@ -106,9 +108,12 @@ const fn va_masks(va_bits: usize) -> (usize, usize) {
     (valid_mask, !valid_mask)
 }
 
+/// Validates zero-extended addresses in the lower range.
 const impl<A: [const] VirtAddr> PageTableCoverage for LowerCoverage<A> {
+    /// The semantic address type accepted by the policy.
     type VirtAddr = A;
 
+    /// Rejects nonzero high bits and returns the implemented low bits.
     fn validate_and_truncate_vaddr(vaddr: Self::VirtAddr, va_bits: usize) -> Result<usize, usize> {
         let raw = vaddr.into();
         let (valid_mask, high_bits_mask) = va_masks(va_bits);
@@ -120,9 +125,12 @@ const impl<A: [const] VirtAddr> PageTableCoverage for LowerCoverage<A> {
     }
 }
 
+/// Validates one-extended addresses in the upper range.
 const impl<A: [const] VirtAddr> PageTableCoverage for UpperCoverage<A> {
+    /// The semantic address type accepted by the policy.
     type VirtAddr = A;
 
+    /// Rejects high bits that are not all set and returns the implemented low bits.
     fn validate_and_truncate_vaddr(vaddr: Self::VirtAddr, va_bits: usize) -> Result<usize, usize> {
         let raw = vaddr.into();
         let (valid_mask, high_bits_mask) = va_masks(va_bits);
@@ -134,9 +142,12 @@ const impl<A: [const] VirtAddr> PageTableCoverage for UpperCoverage<A> {
     }
 }
 
+/// Validates sign-extended addresses and ranges without crossing the canonical hole.
 const impl<A: [const] VirtAddr> PageTableCoverage for SymmetricCoverage<A> {
+    /// The semantic address type accepted by the policy.
     type VirtAddr = A;
 
+    /// Checks sign extension and returns the implemented low bits.
     fn validate_and_truncate_vaddr(vaddr: Self::VirtAddr, va_bits: usize) -> Result<usize, usize> {
         let raw = vaddr.into();
         let (valid_mask, _) = va_masks(va_bits);
@@ -154,6 +165,10 @@ const impl<A: [const] VirtAddr> PageTableCoverage for SymmetricCoverage<A> {
         }
     }
 
+    /// Validates a half-open range confined to one canonical side.
+    ///
+    /// Returns truncated endpoints, or the first invalid address when the range crosses the
+    /// canonical hole. An exclusive end of zero can represent the end of the upper range.
     fn validate_and_truncate_vaddr_range(
         range: AddrRange<Self::VirtAddr>,
         va_bits: usize,
@@ -220,9 +235,14 @@ where
 
 /// Metadata for a page table hierarchy format.
 ///
-/// Implementations provide the virtual-address type, level widths, supported
-/// leaf levels. The derived constants use
-/// those values to describe table sizes and address-bit ranges.
+/// Implementations provide the virtual-address type, coverage policy, base-page offset width,
+/// level widths, and maximum leaf level. The derived constants describe table sizes and
+/// address-bit ranges.
+///
+/// The geometry must match the selected [`page_table_entry::GenericPTE`] encoding and the hardware
+/// translation regime when the hierarchy is used by a processor. Metadata alone does not check
+/// CPU feature support or configure hardware. The default derived constants should normally be
+/// retained so traversal and table-frame sizing agree.
 pub trait PageTableMeta: Send + Sync {
     /// The semantic virtual-address type used by this page table hierarchy format.
     ///
@@ -333,6 +353,7 @@ pub(crate) struct PageTableMetaAssertions<M: PageTableMeta> {
     _phantom: PhantomData<M>,
 }
 
+/// Groups the compile-time checks required before a hierarchy is adopted.
 impl<M: PageTableMeta> PageTableMetaAssertions<M> {
     /// The assertion that the virtual-address width fits in the address type.
     ///

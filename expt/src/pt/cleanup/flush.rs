@@ -1,4 +1,4 @@
-//! TLB flush management for page table hierarchy mutations.
+//! TLB flushing strategies and invalidation requests.
 //!
 //! Cursor operations accumulate requests for the selected [`TlbFlusher`] to process.
 
@@ -18,12 +18,18 @@ use crate::meta::VirtAddr;
 ///
 /// Callers must select a strategy suitable for the affected page table hierarchy and its hardware
 /// users. An incorrect strategy can leave stale translations or page-walk state when accesses
-/// resume under the crate-level access coordination contract.
+/// resume. Follow the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 /// A strategy that waits for remote acknowledgement must not be invoked while the caller holds an
 /// IRQ-disabling guard, page-table lock, or allocator lock.
+///
+/// The same flusher handles every hierarchy using its type. Implementations that need an address
+/// space identifier or root must obtain that context outside this interface. Cleanup can request
+/// a full flush after topology changes or when individual requests exceed
+/// [`SMALL_FLUSH_THRESHOLD`], so both forms must cover the hierarchy's affected translations.
 #[dyn_static_traits(DynTlbFlusher)]
 pub trait TlbFlusher<A: VirtAddr> {
-    /// Flushes the TLB with a specified address.
+    /// Invalidates one mapping or all addresses within the strategy's scope.
     ///
     /// `Some(addr)` invalidates the mapping containing `addr`. `None` requests invalidation of all
     /// addresses within this strategy's scope. Required synchronization completes before return.
@@ -59,14 +65,14 @@ pub enum TlbFlush<A: VirtAddr> {
     Full,
 }
 
-/// TLB invalidation requests accumulated.
+/// An accumulated batch of TLB invalidation requests.
 ///
 /// Individual pages are retained up to [`SMALL_FLUSH_THRESHOLD`], after which
 /// the state is promoted to a full flush.
 ///
-/// This type is **just a list** and does **NOT** automatically perform TLB flushing on its items.
-/// It's caller's ability and responsibility to interpret the list and perform TLB flushing on its
-/// items.
+/// Dropping or clearing this value performs no invalidation. Call [`Self::flush_with`] to process
+/// its requests, or place it in a [`super::PendingCleanup`] batch for automatic cleanup.
+/// Repeated addresses are retained and count separately toward the threshold.
 #[derive(Default)]
 pub enum TlbFlushes<A: VirtAddr> {
     /// No pending invalidation.
@@ -84,6 +90,7 @@ pub enum TlbFlushes<A: VirtAddr> {
     Full,
 }
 
+/// Accumulates requests and promotes overflowing page lists to full invalidation.
 impl<A: VirtAddr> AddAssign<TlbFlush<A>> for TlbFlushes<A> {
     /// Merges one invalidation request into the pending state.
     ///
@@ -112,6 +119,7 @@ impl<A: VirtAddr> AddAssign<TlbFlush<A>> for TlbFlushes<A> {
     }
 }
 
+/// Combines a batch and one request by value.
 impl<A: VirtAddr> Add<TlbFlush<A>> for TlbFlushes<A> {
     /// The pending-flush state produced by the addition.
     ///
@@ -127,6 +135,7 @@ impl<A: VirtAddr> Add<TlbFlush<A>> for TlbFlushes<A> {
     }
 }
 
+/// Processes or combines recorded invalidations.
 impl<A: VirtAddr> TlbFlushes<A> {
     /// Executes the recorded invalidations and clears the list.
     ///
@@ -145,7 +154,7 @@ impl<A: VirtAddr> TlbFlushes<A> {
         self.clear();
     }
 
-    /// Clears the list and discards all its items.
+    /// Discards every pending request without performing invalidation.
     pub fn clear(&mut self) {
         *self = TlbFlushes::None;
     }

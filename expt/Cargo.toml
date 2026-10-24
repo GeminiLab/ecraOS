@@ -1,7 +1,14 @@
 [package]
 name = "expt"
+description = "Flexible and efficient architecture-independent multi-level page table structures."
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/expt"
+readme = "README.md"
+keywords = ["paging", "page-table", "virtual-memory", "no-std"]
+categories = ["data-structures", "memory-management", "no-std"]
 
 [dependencies]
 cfg-if.workspace = true
@@ -25,3 +32,4 @@ aarch64-cpu = "11"
 
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "ecraos_doc"]
+rustdoc-args = ["--cfg", "ecraos_doc"]

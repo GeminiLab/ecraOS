@@ -6,8 +6,9 @@ use crate::meta::VirtAddr;
 
 /// An error produced by a page table hierarchy operation.
 ///
-/// Errors describe unavailable mappings, unsupported traversal, allocation failure,
-/// invalid virtual-address coverage, etc.
+/// Errors describe unavailable mappings, unsupported traversal, allocation failure, and invalid
+/// virtual-address coverage. A failed mutation can retain earlier changes and pending cleanup, as
+/// described by [`PageTableCursorLike`](crate::pt::PageTableCursorLike).
 #[derive(Debug, thiserror::Error)]
 pub enum PagingError<A: VirtAddr> {
     /// The requested virtual page has no mapping.
@@ -19,7 +20,8 @@ pub enum PagingError<A: VirtAddr> {
     /// The requested virtual page already has a mapping.
     ///
     /// This variant is available for operations that reject replacement of an
-    /// existing mapping.
+    /// existing mapping. Current cursor `map` operations replace existing mappings and do not
+    /// produce this variant.
     #[error("The page is already mapped")]
     AlreadyMapped,
     /// The traversal encountered a huge-page mapping.

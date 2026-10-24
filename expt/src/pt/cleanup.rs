@@ -2,8 +2,8 @@
 //!
 //! [`PendingCleanup`] performs accumulated TLB invalidations through the selected [`TlbFlusher`].
 //! [`TlbFlushes`] stores requests without automatically processing them. Table-frame deallocation
-//! happens during mutation and is not part of pending cleanup. See the crate-level documentation
-//! for access coordination requirements.
+//! happens during mutation and is not part of pending cleanup. See the
+//! [safety requirements for page table updates](crate#safely-updating-page-tables).
 
 use core::{mem::ManuallyDrop, ops::AddAssign, ptr};
 
@@ -18,12 +18,12 @@ pub use flush::{DynTlbFlusher, SMALL_FLUSH_THRESHOLD, TlbFlush, TlbFlusher, TlbF
 /// Call [`Self::clean_up`] to perform TLB invalidation, or call [`Self::into_inner`] to take the
 /// requests and TLB flusher for manual processing.
 ///
-/// [`Drop`]ping this value has the same effect as calling [`Self::clean_up`], but it's not the
-/// recommended way to handle cleanup.
+/// Dropping this value also processes cleanup. Explicit cleanup makes the synchronization point
+/// visible to the caller.
 ///
 /// The selected [`TlbFlusher`] determines the architecture, invalidation scope, and completion
-/// guarantees. See [`TlbFlusher`] for strategy selection and the crate-level documentation for
-/// access coordination requirements.
+/// guarantees. See [`TlbFlusher`] for strategy selection and the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 #[must_use = "call `clean_up` or `into_inner` explicitly, rather than relying on Drop's cleanup"]
 pub struct PendingCleanup<A: VirtAddr> {
     /// The pending invalidation requests.
@@ -32,6 +32,7 @@ pub struct PendingCleanup<A: VirtAddr> {
     flusher: DynTlbFlusher<A>,
 }
 
+/// Constructs, combines, and processes cleanup batches.
 impl<A: VirtAddr> PendingCleanup<A> {
     /// Creates an empty [`PendingCleanup`] with the given TLB flusher.
     pub fn new(flusher: &DynTlbFlusher<A>) -> Self {
@@ -61,7 +62,8 @@ impl<A: VirtAddr> PendingCleanup<A> {
     /// # Safety
     ///
     /// The caller must process the returned requests through a suitable TLB flusher and complete
-    /// any further synchronization required by the crate-level access coordination contract.
+    /// any further synchronization required by the
+    /// [safety requirements for page table updates](crate#safely-updating-page-tables).
     pub unsafe fn into_inner(self) -> (TlbFlushes<A>, DynTlbFlusher<A>) {
         let this = ManuallyDrop::new(self);
 
@@ -96,6 +98,7 @@ impl<A: VirtAddr> PendingCleanup<A> {
     }
 }
 
+/// Processes any requests still held by a cleanup batch.
 impl<A: VirtAddr> Drop for PendingCleanup<A> {
     /// Performs the same cleanup as [`Self::clean_up`].
     fn drop(&mut self) {

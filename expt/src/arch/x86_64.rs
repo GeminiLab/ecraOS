@@ -1,4 +1,4 @@
-//! x86_64 page table hierarchy metadata and TLB operations.
+//! x86-64 page table hierarchy metadata and local TLB operations.
 //!
 //! The module describes standard four-level and five-level paging with 4 KiB
 //! base pages and provides local TLB invalidation.
@@ -10,12 +10,13 @@ use crate::{
     pt::cleanup::TlbFlusher,
 };
 
-/// Metadata for standard `x86_64` four-level page table hierarchies.
+/// Metadata for standard x86-64 four-level page table hierarchies.
 ///
 /// The format addresses 48 virtual bits and supports leaf mappings up to 1 GiB
 /// at level two.
 pub struct X86Level4PageTableMeta;
 
+/// Describes the four-level hierarchy's geometry and canonical coverage.
 impl PageTableMeta for X86Level4PageTableMeta {
     /// The standard virtual-address type used by x86-64 paging.
     type VirtAddr = VirtAddr;
@@ -26,7 +27,7 @@ impl PageTableMeta for X86Level4PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each paging level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9];
-    /// x86-64 paging uses sign-extended lower and upper address ranges.
+    /// The sign-extended lower and upper address ranges used by x86-64 paging.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The highest level that supports an x86-64 leaf mapping.
@@ -35,12 +36,13 @@ impl PageTableMeta for X86Level4PageTableMeta {
     const MAX_PAGE_LEVEL: usize = 2;
 }
 
-/// Metadata for standard `x86_64` five-level page table hierarchies.
+/// Metadata for standard x86-64 five-level page table hierarchies.
 ///
 /// The format addresses 57 virtual bits and supports leaf mappings up to 1 GiB
 /// at level two.
 pub struct X86Level5PageTableMeta;
 
+/// Describes the five-level hierarchy's geometry and canonical coverage.
 impl PageTableMeta for X86Level5PageTableMeta {
     /// The standard virtual-address type used by x86-64 paging.
     type VirtAddr = VirtAddr;
@@ -51,7 +53,7 @@ impl PageTableMeta for X86Level5PageTableMeta {
     const PAGE_OFFSET_BITS: usize = 12;
     /// The nine virtual-address bits consumed by each paging level.
     const LEVEL_BITS: [usize; Self::LEVELS] = [9, 9, 9, 9, 9];
-    /// x86-64 paging uses sign-extended lower and upper address ranges.
+    /// The sign-extended lower and upper address ranges used by x86-64 paging.
     type Coverage = SymmetricCoverage<Self::VirtAddr>;
 
     /// The highest level that supports an x86-64 leaf mapping.
@@ -72,7 +74,9 @@ impl PageTableMeta for X86Level5PageTableMeta {
 /// PCIDs. See [`TlbFlusher`] for synchronization requirements.
 pub struct X86LocalTlbFlusher;
 
+/// Performs invalidation in the calling CPU's current address space.
 impl TlbFlusher<VirtAddr> for X86LocalTlbFlusher {
+    /// Invalidates one mapping or reloads CR3 within [`X86LocalTlbFlusher`]'s scope.
     fn flush(addr: Option<VirtAddr>) {
         flush_local_tlb(addr);
     }

@@ -30,7 +30,8 @@ use crate::{
 ///
 /// The page table hierarchy must form a valid tree.
 ///
-/// See the crate-level documentation for table-frame deallocation and hardware-use requirements.
+/// See [table-frame lifetime](crate#table-frame-lifetime) and the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 ///
 /// Use [`PageTable::leak`] to consume this value while retaining its table frames, then use
 /// [`PageTable::new_at`] to construct another value from the existing hierarchy.
@@ -55,11 +56,13 @@ where
 
 /// A mutating cursor over a [`PageTable`].
 ///
-/// The mutable borrow excludes other Rust mutations through the borrowed value. Callers
-/// remain responsible for coordinating hardware use with the selected [`TlbFlusher`],
-/// and for ensuring that no other multi-level page table manages the same table frames.
+/// The mutable borrow excludes other Rust mutations through the borrowed value. Callers must
+/// prevent hardware accesses to affected mappings and tables until updates and cleanup finish,
+/// select a suitable [`TlbFlusher`], and ensure that no other multi-level page table manages the
+/// same table frames.
 ///
-/// See [`PageTableCursorLike`] for mutation, table-frame deallocation, and partial-failure behavior.
+/// See [`PageTableCursorLike`] for mutation, table-frame deallocation, and partial-failure
+/// behavior.
 /// [`PendingCleanup`] performs pending invalidations through `F`.
 pub struct PageTableCursor<'a, M, PTE, AL, F>
 where
@@ -168,12 +171,16 @@ where
     /// # Safety
     ///
     /// The root must identify a valid tree-shaped page table hierarchy for `M` and `PTE`.
+    /// All entries must use that representation, and table allocations must not overlap or be
+    /// shared with another hierarchy.
     ///
-    /// No other code may access the page table hierarchy while the [`PageTable`]
-    /// lives.
+    /// This value must have exclusive responsibility for managing the hierarchy's table frames.
+    /// Software access must go through this value, and hardware use must obey the
+    /// [safety requirements for page table updates](crate#safely-updating-page-tables).
     ///
     /// The [`PageAllocator`] specified by `AL` must be able to manage the existing
-    /// table frames.
+    /// table frames, including translating their physical addresses into accessible, correctly
+    /// aligned storage and deallocating each table with the byte size required by its level.
     pub unsafe fn new_at(paddr: PhysAddr) -> Self {
         #[allow(clippy::let_unit_value)] // Make sure that the assertions are not ignored.
         let _ = crate::meta::PageTableMetaAssertions::<M>::ASSERTIONS;
@@ -321,8 +328,7 @@ where
     ///
     /// # Safety
     ///
-    /// The caller must handle the returned cleanup properly after calling this
-    /// function, and before any other operations on the cursor.
+    /// The caller must meet the cleanup requirements of [`PageTableCursorLike::take_cleanup`].
     pub unsafe fn take_cleanup(&mut self) -> PendingCleanup<M::VirtAddr> {
         core::mem::replace(&mut self.pending_cleanup, PendingCleanup::new_with::<F>())
     }
@@ -600,15 +606,16 @@ where
 
     /// Maps a virtual address range to a physical address range.
     ///
-    /// The range is rounded outwards to base-page boundaries, existing mappings
-    /// in the covered range are replaced, and the virtual-to-physical offset is
-    /// preserved across the mapped range.
+    /// The virtual range expands outward to base-page boundaries, and `paddr` is rounded down
+    /// independently. Each resulting page maps at a constant offset from the aligned virtual
+    /// start to the aligned physical start. Existing mappings in the expanded range are replaced.
+    /// For example, with 4 KiB base pages, `(vaddr = 0x1003, paddr = 0x8005, size = 0x1000)`
+    /// maps virtual `0x1000..0x3000` to physical `0x8000..0xa000`.
     ///
-    /// The physical address is rounded down to base-page boundary.
+    /// A zero-size request succeeds without validating addresses or recording cleanup. An
+    /// overflowing virtual endpoint or outward alignment fails with [`PagingError::NonCanonical`].
     ///
-    /// Mapping a range of zero size is a no-op.
-    ///
-    /// See [PageTableCursorLike::map] for cleanup and partial-failure behavior.
+    /// See [`PageTableCursorLike::map`] for leaf selection, cleanup, and partial-failure behavior.
     pub fn map(
         &mut self,
         vaddr: M::VirtAddr,
@@ -642,15 +649,15 @@ where
 
     /// Removes mappings from a virtual address range.
     ///
-    /// The range is rounded to base-page boundaries. Existing huge mappings may
+    /// The range expands outward to base-page boundaries. Existing huge mappings may
     /// be split or cleared as needed, and any affected TLB entries are recorded
     /// for this cursor's next cleanup.
     ///
-    /// Unmapping a range of zero size is no-op.
+    /// A zero-size request succeeds without validating addresses or recording cleanup.
     ///
     /// Data frames are not deallocated. Intermediate tables remain allocated, and
     /// absent paths may allocate tables. An error can leave earlier changes
-    /// applied. See [PageTableCursorLike::unmap] for cleanup behavior.
+    /// applied. See [`PageTableCursorLike::unmap`] for cleanup behavior.
     pub fn unmap(&mut self, vaddr: M::VirtAddr, size: usize) -> PagingResult<M::VirtAddr> {
         if size == 0 {
             return Ok(());
@@ -705,6 +712,8 @@ where
         Self: 'a;
 
     /// Constructs a single-root multi-level page table from an existing root.
+    ///
+    /// # Safety
     ///
     /// The caller must meet the safety requirements of [`PageTable::new_at`].
     unsafe fn new_at(root: Self::Root) -> Self {
@@ -796,10 +805,7 @@ where
     ///
     /// # Safety
     ///
-    /// The caller must handle the returned cleanup properly after calling this
-    /// function, and before any other operations on the cursor.
-    ///
-    /// See [`PendingCleanup`] for synchronization requirements.
+    /// The caller must meet the safety requirements of [`PageTableCursor::take_cleanup`].
     unsafe fn take_cleanup(&mut self) -> PendingCleanup<Self::VirtAddr> {
         // Safety: the user promised it.
         unsafe { self.take_cleanup() }

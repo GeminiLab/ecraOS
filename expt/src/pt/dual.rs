@@ -38,8 +38,9 @@ pub struct DualPageTableRoot {
 /// The type-level constraints prevent combining symmetric roots or roots with
 /// different virtual-address types. The hierarchies may use different geometries
 /// and entry types. Both must form valid trees with disjoint table-frame
-/// allocations. Both roots use `AL` for their table frames. See the crate-level
-/// documentation for table-frame deallocation and hardware-use requirements.
+/// allocations. Both roots use `AL` for their table frames, and `F` handles cleanup for both. See
+/// [table-frame lifetime](crate#table-frame-lifetime) and the
+/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 ///
 /// Each `map` and `unmap` operation is routed to the root selected by its
 /// starting virtual address. An individual range must remain within one
@@ -278,6 +279,8 @@ where
 
     /// Constructs a dual-root multi-level page table from existing lower and upper hierarchies.
     ///
+    /// # Safety
+    ///
     /// The caller must meet the safety requirements of [`DualPageTable::new_at`].
     unsafe fn new_at(root: Self::Root) -> Self {
         unsafe { Self::new_at(root) }
@@ -314,7 +317,7 @@ where
 
 /// The side of dual page table hierarchies that a virtual address belongs to.
 ///
-/// For internal use only.
+/// Selection is based on the coverage policies of the two roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DualPageTableSide {
     /// The lower-address page table hierarchy.
@@ -365,7 +368,8 @@ where
     /// Maps a virtual range through the root selected by its starting address.
     ///
     /// Same as [`PageTableCursor::map`] for the selected hierarchy. See [`DualPageTable`] for
-    /// range coverage requirements.
+    /// range coverage requirements. The starting address must select exactly one root, even
+    /// for a zero-size request.
     pub fn map(
         &mut self,
         vaddr: A,
@@ -382,7 +386,8 @@ where
     /// Removes mappings through the root selected by the starting address.
     ///
     /// Same as [`PageTableCursor::unmap`] for the selected hierarchy. See [`DualPageTable`] for
-    /// range coverage requirements.
+    /// range coverage requirements. The starting address must select exactly one root, even
+    /// for a zero-size request.
     pub fn unmap(&mut self, vaddr: A, size: usize) -> PagingResult<A> {
         match self.side(vaddr)? {
             DualPageTableSide::Lower => self.lower.unmap(vaddr, size),
@@ -394,10 +399,7 @@ where
     ///
     /// # Safety
     ///
-    /// The caller must handle the returned cleanup properly after calling this
-    /// function, and before any other operations on the cursor.
-    ///
-    /// See [`PendingCleanup`] for synchronization requirements.
+    /// The caller must meet the cleanup requirements of [`PageTableCursorLike::take_cleanup`].
     pub unsafe fn take_cleanup(&mut self) -> PendingCleanup<A> {
         // SAFETY: the user promised it.
         let mut cleanup = unsafe { self.lower.take_cleanup() };
@@ -468,7 +470,9 @@ where
 
     /// Transfers both roots' pending cleanup without processing it.
     ///
-    /// Same as [DualPageTableCursor::take_cleanup].
+    /// # Safety
+    ///
+    /// The caller must meet the safety requirements of [`DualPageTableCursor::take_cleanup`].
     unsafe fn take_cleanup(&mut self) -> PendingCleanup<A> {
         // SAFETY: the user promised it.
         unsafe { self.take_cleanup() }
