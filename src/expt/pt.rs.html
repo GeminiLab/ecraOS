@@ -80,7 +80,7 @@
 <a href=#80 id=80 data-nosnippet>80</a>
 <a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// Creates a cursor for batched mutations.
 <a href=#82 id=82 data-nosnippet>82</a>    ///
-<a href=#83 id=83 data-nosnippet>83</a>    /// See [PageTableCursorLike] for batching and cleanup behavior.
+<a href=#83 id=83 data-nosnippet>83</a>    /// See [`PageTableCursorLike`] for batching and cleanup behavior.
 <a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">fn </span>cursor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Cursor&lt;<span class="lifetime">'_</span>&gt;;
 <a href=#85 id=85 data-nosnippet>85</a>}
 <a href=#86 id=86 data-nosnippet>86</a>
@@ -94,60 +94,68 @@
 <a href=#94 id=94 data-nosnippet>94</a>/// Map and unmap round ranges outward to base-page boundaries. A successful return means the PTE
 <a href=#95 id=95 data-nosnippet>95</a>/// mutations and any table-frame deallocations are complete, with TLB invalidations still pending.
 <a href=#96 id=96 data-nosnippet>96</a>/// Errors retain earlier mutations, including any intermediate tables already installed and any
-<a href=#97 id=97 data-nosnippet>97</a>/// table frames already deallocated. Operations are not transactional. See the crate-level
-<a href=#98 id=98 data-nosnippet>98</a>/// documentation for access coordination requirements.
+<a href=#97 id=97 data-nosnippet>97</a>/// table frames already deallocated. Operations are not transactional. See the
+<a href=#98 id=98 data-nosnippet>98</a>/// [safety requirements for page table updates](crate#safely-updating-page-tables).
 <a href=#99 id=99 data-nosnippet>99</a>///
-<a href=#100 id=100 data-nosnippet>100</a>/// Cleanup remains pending until [`Self::clean_up`] processes it or [`Self::take_cleanup`]
-<a href=#101 id=101 data-nosnippet>101</a>/// transfers it to the caller. Implementations also process any remaining cleanup automatically
-<a href=#102 id=102 data-nosnippet>102</a>/// when the cursor leaves scope.
-<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">pub trait </span>PageTableCursorLike {
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// The semantic virtual-address type accepted by this cursor.
-<a href=#105 id=105 data-nosnippet>105</a>    ///
-<a href=#106 id=106 data-nosnippet>106</a>    /// It matches the virtual-address type of the borrowed multi-level page table.
-<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">type </span>VirtAddr: VirtAddr;
-<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// The allocator used by this cursor.
+<a href=#100 id=100 data-nosnippet>100</a>/// A single-root cursor treats zero-size requests as no-ops before validating their addresses.
+<a href=#101 id=101 data-nosnippet>101</a>/// A dual-root cursor first validates the starting address to select a root, even for zero-size
+<a href=#102 id=102 data-nosnippet>102</a>/// requests.
+<a href=#103 id=103 data-nosnippet>103</a>///
+<a href=#104 id=104 data-nosnippet>104</a>/// Cleanup remains pending until [`Self::clean_up`] processes it or [`Self::take_cleanup`]
+<a href=#105 id=105 data-nosnippet>105</a>/// transfers it to the caller. Implementations also process any remaining cleanup automatically
+<a href=#106 id=106 data-nosnippet>106</a>/// when the cursor leaves scope.
+<a href=#107 id=107 data-nosnippet>107</a></span><span class="kw">pub trait </span>PageTableCursorLike {
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// The semantic virtual-address type accepted by this cursor.
 <a href=#109 id=109 data-nosnippet>109</a>    ///
-<a href=#110 id=110 data-nosnippet>110</a>    /// Intermediate page tables are allocated through the borrowed multi-level page table's
-<a href=#111 id=111 data-nosnippet>111</a>    /// allocator.
-<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="kw">type </span>Allocator: PageAllocator;
-<a href=#113 id=113 data-nosnippet>113</a>    <span class="doccomment">/// The multi-level page table type being mutated by this cursor.
-<a href=#114 id=114 data-nosnippet>114</a>    ///
-<a href=#115 id=115 data-nosnippet>115</a>    /// The cursor borrows the multi-level page table mutably during mutation.
-<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">type </span>PageTable: PageTableLike;
-<a href=#117 id=117 data-nosnippet>117</a>
-<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Maps a virtual range to physical memory.
-<a href=#119 id=119 data-nosnippet>119</a>    ///
-<a href=#120 id=120 data-nosnippet>120</a>    /// This operation changes page table entries while mapped data frames remain
-<a href=#121 id=121 data-nosnippet>121</a>    /// caller-managed. Replacing a child-table descriptor immediately deallocates its subtree's
-<a href=#122 id=122 data-nosnippet>122</a>    /// table frames. See the trait-level contract for partial failure and cleanup.
-<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">fn </span>map(
-<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#125 id=125 data-nosnippet>125</a>        vaddr: <span class="self">Self</span>::VirtAddr,
-<a href=#126 id=126 data-nosnippet>126</a>        paddr: PhysAddr,
-<a href=#127 id=127 data-nosnippet>127</a>        size: usize,
-<a href=#128 id=128 data-nosnippet>128</a>        flags: MappingFlags,
-<a href=#129 id=129 data-nosnippet>129</a>    ) -&gt; PagingResult&lt;<span class="self">Self</span>::VirtAddr&gt;;
-<a href=#130 id=130 data-nosnippet>130</a>
-<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// Removes mappings from a virtual address range.
-<a href=#132 id=132 data-nosnippet>132</a>    ///
-<a href=#133 id=133 data-nosnippet>133</a>    /// This operation clears mappings but does not deallocate their data frames.
-<a href=#134 id=134 data-nosnippet>134</a>    /// Intermediate tables remain allocated. See the trait-level contract for partial failure
-<a href=#135 id=135 data-nosnippet>135</a>    /// and cleanup.
-<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="kw">fn </span>unmap(<span class="kw-2">&amp;mut </span><span class="self">self</span>, vaddr: <span class="self">Self</span>::VirtAddr, size: usize) -&gt; PagingResult&lt;<span class="self">Self</span>::VirtAddr&gt;;
-<a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Processes pending invalidations using the selected TLB flushing strategy.
-<a href=#139 id=139 data-nosnippet>139</a>    ///
-<a href=#140 id=140 data-nosnippet>140</a>    /// See [`PendingCleanup`] for synchronization requirements.
-<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">fn </span>clean_up(<span class="kw-2">&amp;mut </span><span class="self">self</span>);
-<a href=#142 id=142 data-nosnippet>142</a>
-<a href=#143 id=143 data-nosnippet>143</a>    <span class="doccomment">/// Transfers all pending cleanup out of the cursor without processing it.
-<a href=#144 id=144 data-nosnippet>144</a>    ///
-<a href=#145 id=145 data-nosnippet>145</a>    /// # Safety
+<a href=#110 id=110 data-nosnippet>110</a>    /// It matches the virtual-address type of the borrowed multi-level page table.
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">type </span>VirtAddr: VirtAddr;
+<a href=#112 id=112 data-nosnippet>112</a>    <span class="doccomment">/// The allocator used by this cursor.
+<a href=#113 id=113 data-nosnippet>113</a>    ///
+<a href=#114 id=114 data-nosnippet>114</a>    /// Intermediate page tables are allocated through the borrowed multi-level page table's
+<a href=#115 id=115 data-nosnippet>115</a>    /// allocator.
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">type </span>Allocator: PageAllocator;
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// The multi-level page table type being mutated by this cursor.
+<a href=#118 id=118 data-nosnippet>118</a>    ///
+<a href=#119 id=119 data-nosnippet>119</a>    /// The cursor borrows the multi-level page table mutably during mutation.
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="kw">type </span>PageTable: PageTableLike;
+<a href=#121 id=121 data-nosnippet>121</a>
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// Maps a virtual range to physical memory.
+<a href=#123 id=123 data-nosnippet>123</a>    ///
+<a href=#124 id=124 data-nosnippet>124</a>    /// Expands the virtual range outward to base-page boundaries and rounds `paddr` down to a
+<a href=#125 id=125 data-nosnippet>125</a>    /// base-page boundary independently. It replaces existing mappings, choosing the largest
+<a href=#126 id=126 data-nosnippet>126</a>    /// supported leaf size allowed by the range and the virtual-to-physical offset. Mapped data
+<a href=#127 id=127 data-nosnippet>127</a>    /// frames remain caller-managed. Replacing a child-table descriptor immediately deallocates
+<a href=#128 id=128 data-nosnippet>128</a>    /// its subtree's table frames. See the trait-level contract for partial failure and cleanup.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">fn </span>map(
+<a href=#130 id=130 data-nosnippet>130</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#131 id=131 data-nosnippet>131</a>        vaddr: <span class="self">Self</span>::VirtAddr,
+<a href=#132 id=132 data-nosnippet>132</a>        paddr: PhysAddr,
+<a href=#133 id=133 data-nosnippet>133</a>        size: usize,
+<a href=#134 id=134 data-nosnippet>134</a>        flags: MappingFlags,
+<a href=#135 id=135 data-nosnippet>135</a>    ) -&gt; PagingResult&lt;<span class="self">Self</span>::VirtAddr&gt;;
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// Removes mappings from a virtual address range.
+<a href=#138 id=138 data-nosnippet>138</a>    ///
+<a href=#139 id=139 data-nosnippet>139</a>    /// Expands the range outward to base-page boundaries and splits huge mappings when needed.
+<a href=#140 id=140 data-nosnippet>140</a>    /// Mapped data frames and existing intermediate tables remain allocated. Missing paths may
+<a href=#141 id=141 data-nosnippet>141</a>    /// allocate intermediate tables, so unmapping can fail with an allocation error. See the
+<a href=#142 id=142 data-nosnippet>142</a>    /// trait-level contract for partial failure and cleanup.
+<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">fn </span>unmap(<span class="kw-2">&amp;mut </span><span class="self">self</span>, vaddr: <span class="self">Self</span>::VirtAddr, size: usize) -&gt; PagingResult&lt;<span class="self">Self</span>::VirtAddr&gt;;
+<a href=#144 id=144 data-nosnippet>144</a>
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="doccomment">/// Processes pending invalidations using the selected TLB flushing strategy.
 <a href=#146 id=146 data-nosnippet>146</a>    ///
-<a href=#147 id=147 data-nosnippet>147</a>    /// The caller must handle the returned cleanup properly after calling this
-<a href=#148 id=148 data-nosnippet>148</a>    /// function, and before any other operations on the cursor.
-<a href=#149 id=149 data-nosnippet>149</a>    ///
-<a href=#150 id=150 data-nosnippet>150</a>    /// See [`PendingCleanup`] for synchronization requirements.
-<a href=#151 id=151 data-nosnippet>151</a>    </span><span class="kw">unsafe fn </span>take_cleanup(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; PendingCleanup&lt;<span class="self">Self</span>::VirtAddr&gt;;
-<a href=#152 id=152 data-nosnippet>152</a>}
+<a href=#147 id=147 data-nosnippet>147</a>    /// See [`PendingCleanup`] for synchronization requirements.
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">fn </span>clean_up(<span class="kw-2">&amp;mut </span><span class="self">self</span>);
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="doccomment">/// Transfers all pending cleanup out of the cursor without processing it.
+<a href=#151 id=151 data-nosnippet>151</a>    ///
+<a href=#152 id=152 data-nosnippet>152</a>    /// # Safety
+<a href=#153 id=153 data-nosnippet>153</a>    ///
+<a href=#154 id=154 data-nosnippet>154</a>    /// The caller must process the returned cleanup before any further cursor
+<a href=#155 id=155 data-nosnippet>155</a>    /// operation and before resuming accesses excluded by the
+<a href=#156 id=156 data-nosnippet>156</a>    /// [safety requirements for page table updates](crate#safely-updating-page-tables).
+<a href=#157 id=157 data-nosnippet>157</a>    ///
+<a href=#158 id=158 data-nosnippet>158</a>    /// See [`PendingCleanup`] for synchronization requirements.
+<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">unsafe fn </span>take_cleanup(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; PendingCleanup&lt;<span class="self">Self</span>::VirtAddr&gt;;
+<a href=#160 id=160 data-nosnippet>160</a>}
 </code></pre></div></section></main></body></html>

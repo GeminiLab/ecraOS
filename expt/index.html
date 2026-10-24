@@ -1,44 +1,197 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Architecture-flexible multi-level page table management."><title>expt - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="expt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate expt</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../expt/index.html">expt</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#access-coordination" title="Access coordination">Access coordination</a></li><li><a href="#terminology" title="Terminology">Terminology</a></li><li><a href="#known-issues" title="Known issues">Known issues</a></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>expt</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/expt/lib.rs.html#1-93">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Architecture-flexible multi-level page table management.</p>
-<p>This crate builds and mutates page table hierarchies described by
-<a href="meta/trait.PageTableMeta.html" title="trait expt::meta::PageTableMeta"><code>crate::meta::PageTableMeta</code></a> and entries implementing <a href="pte/trait.GenericPTE.html" title="trait expt::pte::GenericPTE"><code>crate::pte::GenericPTE</code></a>.
-<a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>crate::pt::PageTable</code></a> keeps the concrete representation available for compile-time dispatch,
-while the <a href="opaque/index.html" title="mod expt::opaque"><code>opaque</code></a> module offers runtime selection among page table hierarchy formats.</p>
-<p>Mutations are performed through <a href="pt/single/struct.PageTableCursor.html" title="struct expt::pt::single::PageTableCursor"><code>crate::pt::PageTableCursor</code></a>. See
-<a href="pt/trait.PageTableCursorLike.html" title="trait expt::pt::PageTableCursorLike"><code>crate::pt::PageTableCursorLike</code></a> for range expansion, partial failure, and cleanup behavior.
-<a href="pt/cleanup/struct.PendingCleanup.html" title="struct expt::pt::cleanup::PendingCleanup"><code>crate::pt::cleanup::PendingCleanup</code></a> groups pending TLB invalidations with the selected
-<a href="pt/cleanup/trait.TlbFlusher.html" title="trait expt::pt::cleanup::TlbFlusher"><code>crate::pt::cleanup::TlbFlusher</code></a>, which determines invalidation scope and completion guarantees.
-Callers can transfer pending cleanup out of a cursor to process it themselves.</p>
-<p>Multi-level page table values deallocate all table frames in their page table hierarchies
-when dropped. Replacing a child-table descriptor deallocates its subtree’s table frames during
-the mutation, without waiting for pending TLB invalidations. Mapped data frames remain
-caller-managed. Callers must quiesce hardware users before dropping a multi-level page table.
-A mutable Rust borrow does not exclude hardware page walks.</p>
-<h2 id="access-coordination"><a class="doc-anchor" href="#access-coordination">§</a>Access coordination</h2>
-<p>Page table mutation operations such as <code>map</code> and <code>unmap</code> do not coordinate software or hardware
-accesses during mutation. Before a mutation begins, the caller must ensure that all existing
-accesses to potentially affected virtual address ranges and to page tables at any level that may
-be modified or deallocated have completed. From the start of the mutation until both the operation
-has ended and <a href="pt/cleanup/struct.PendingCleanup.html" title="struct expt::pt::cleanup::PendingCleanup"><code>crate::pt::cleanup::PendingCleanup</code></a> has been correctly processed, software and
-hardware on all processors must not access those ranges or page table memory in any form, except
-as part of the mutation itself or the processing of pending cleanup.</p>
-<p>This requirement covers software and hardware accesses on all processors and must be upheld by
-the caller in the system design. It is not expressed by marking each page table mutation method
-as <code>unsafe</code>. The caller is responsible for enforcing it at the boundaries where the page table
-hierarchy is put into hardware use and subsequent accesses are coordinated.</p>
-<h2 id="terminology"><a class="doc-anchor" href="#terminology">§</a>Terminology</h2>
-<p>The terms <strong>multi-level page table</strong> and <strong>multi-level page table structure</strong> refer to the
-Rust abstraction representing translation across all levels, such as <a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>crate::pt::PageTable</code></a>
-or <a href="pt/dual/struct.DualPageTable.html" title="struct expt::pt::dual::DualPageTable"><code>crate::pt::DualPageTable</code></a>, and to values of those types. A <strong>page table hierarchy</strong> is the
-corresponding in-memory data structure traversed by hardware. A single-root multi-level
-page table represents one hierarchy, while a dual-root value represents two independent
-hierarchies. A <strong>page table</strong> is one table at a single level within a hierarchy.
-<strong>Table frames</strong>, also called <strong>page table frames</strong>, are the physical frames storing those
-tables. One page table may occupy one or more table frames.</p>
-<h2 id="known-issues"><a class="doc-anchor" href="#known-issues">§</a>Known issues</h2>
-<p>RISC-V mapping flags are not validated. Leaf permissions must include <code>READ</code> or <code>EXECUTE</code>,
-and <code>WRITE</code> requires <code>READ</code>. With debug assertions enabled, constructing a leaf without
-<code>READ</code> or <code>EXECUTE</code> panics. With debug assertions disabled, such an entry above level zero can
-be mistaken for a child-table descriptor. Traversal can then access mapped data as a page
-table and deallocate data frames as table frames. Callers must supply valid RISC-V leaf
-permissions until validation is implemented.</p>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`expt`"><title>expt - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="expt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate expt</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../expt/index.html">expt</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#expt" title="`expt`"><code>expt</code></a><ul><li><a href="#defining-page-table-formats" title="Defining Page Table Formats">Defining Page Table Formats</a></li><li><a href="#constructing-page-table-types" title="Constructing Page Table Types">Constructing Page Table Types</a></li><li><a href="#mutation-and-cleanup" title="Mutation and cleanup">Mutation and cleanup</a></li><li><a href="#table-frame-lifetime" title="Table-frame lifetime">Table-frame lifetime</a></li><li><a href="#safely-updating-page-tables" title="Safely Updating Page Tables">Safely Updating Page Tables</a></li><li><a href="#terminology" title="Terminology">Terminology</a></li><li><a href="#known-issues" title="Known issues">Known issues</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>expt</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/expt/lib.rs.html#1-36">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="expt"><a class="doc-anchor" href="#expt">§</a><code>expt</code></h2>
+<p>Multi-level page table structures and operations for ecraOS.</p>
+<p>This crate provides:</p>
+<ul>
+<li><a href="meta/trait.PageTableMeta.html" title="trait expt::meta::PageTableMeta"><code>PageTableMeta</code></a> and <a href="pte/trait.GenericPTE.html" title="trait expt::pte::GenericPTE"><code>GenericPTE</code></a> for describing page
+table formats in a static and type-safe manner.</li>
+<li><a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>PageTable</code></a> and <a href="pt/dual/struct.DualPageTable.html" title="struct expt::pt::dual::DualPageTable"><code>DualPageTable</code></a> for representing page table
+hierarchies.</li>
+<li><a href="pt/cleanup/struct.PendingCleanup.html" title="struct expt::pt::cleanup::PendingCleanup"><code>PendingCleanup</code></a> and <a href="pt/cleanup/trait.TlbFlusher.html" title="trait expt::pt::cleanup::TlbFlusher"><code>TlbFlusher</code></a> for
+tracking and processing TLB invalidations.</li>
+<li>predefined metadata and TLB flushing strategies for <a href="arch/index.html" title="mod expt::arch">supported architectures</a>.</li>
+</ul>
+<p>This crate is <code>no_std</code> and uses a caller-supplied <a href="../expalloc_trait/trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a>
+for table frame allocation and deallocation. It requires nightly Rust and is developed with the
+toolchain pinned in the repository’s <code>rust-toolchain.toml</code>.</p>
+<h3 id="defining-page-table-formats"><a class="doc-anchor" href="#defining-page-table-formats">§</a>Defining Page Table Formats</h3>
+<p>The format of a page table hierarchy is described by <a href="meta/trait.PageTableMeta.html" title="trait expt::meta::PageTableMeta"><code>PageTableMeta</code></a>,
+including the base page size, number of levels, bits per level, huge-page support, and
+virtual-address coverage. The format of a page table entry is described by <a href="pte/trait.GenericPTE.html" title="trait expt::pte::GenericPTE"><code>GenericPTE</code></a>.</p>
+<p>For example, the following code defines the RISC-V 64 Sv48 page table format:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expt::meta::{PageTableMeta, SymmetricCoverage};
+<span class="kw">use </span>memory_addr::VirtAddr;
+
+<span class="kw">struct </span>Sv48PageTableMeta;
+
+<span class="kw">impl </span>PageTableMeta <span class="kw">for </span>Sv48PageTableMeta {
+    <span class="kw">type </span>VirtAddr = VirtAddr;
+    <span class="kw">const </span>LEVELS: usize = <span class="number">4</span>;
+    <span class="kw">const </span>PAGE_OFFSET_BITS: usize = <span class="number">12</span>;
+    <span class="kw">const </span>LEVEL_BITS: [usize; <span class="self">Self</span>::LEVELS] = [<span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>];
+    <span class="kw">type </span>Coverage = SymmetricCoverage&lt;<span class="self">Self</span>::VirtAddr&gt;;
+    <span class="kw">const </span>MAX_PAGE_LEVEL: usize = <span class="number">3</span>;
+}</code></pre></div>
+<p>The <a href="arch/index.html" title="mod expt::arch"><code>arch</code></a> module supplies metadata and local TLB flushing strategies for the current target:</p>
+<div><table><thead><tr><th>Architecture</th><th>Metadata</th><th>Base page sizes</th><th>Virtual-address coverage</th></tr></thead><tbody>
+<tr><td>x86-64</td><td><code>X86Level4PageTableMeta</code>, <code>X86Level5PageTableMeta</code></td><td>4 KiB</td><td>Symmetric</td></tr>
+<tr><td>RISC-V 64</td><td><code>Sv39PageTableMeta</code>, <code>Sv48PageTableMeta</code>, <code>Sv57PageTableMeta</code></td><td>4 KiB</td><td>Symmetric</td></tr>
+<tr><td>AArch64</td><td><code>AArch64PageTableMeta</code> and granule aliases</td><td>4, 16, or 64 KiB</td><td>Lower or upper</td></tr>
+</tbody></table>
+</div>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expt::{arch::x86_64::X86Level4PageTableMeta, meta::PageTableMeta};
+
+<span class="kw">type </span>Meta = X86Level4PageTableMeta;
+
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::LEVELS, <span class="number">4</span>);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::PAGE_OFFSET_BITS, <span class="number">12</span>);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::LEVEL_BITS, [<span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>]);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::MAX_PAGE_LEVEL, <span class="number">2</span>);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::PAGE_SIZE, <span class="number">1 </span>&lt;&lt; <span class="number">12</span>);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::VA_BITS, <span class="number">48</span>);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::LEVEL_BIT_RANGES, [(<span class="number">12</span>, <span class="number">21</span>), (<span class="number">21</span>, <span class="number">30</span>), (<span class="number">30</span>, <span class="number">39</span>), (<span class="number">39</span>, <span class="number">48</span>)]);
+<span class="macro">assert_eq!</span>(&lt;Meta <span class="kw">as </span>PageTableMeta&gt;::LEVEL_TABLE_SIZE, [<span class="number">1 </span>&lt;&lt; <span class="number">9</span>; <span class="number">4</span>]);
+<span class="macro">assert_eq!</span>(
+    &lt;Meta <span class="kw">as </span>PageTableMeta&gt;::LEVEL_PAGE_SIZE,
+    [<span class="number">1 </span>&lt;&lt; <span class="number">12</span>, <span class="number">1 </span>&lt;&lt; <span class="number">21</span>, <span class="number">1 </span>&lt;&lt; <span class="number">30</span>, <span class="number">1 </span>&lt;&lt; <span class="number">39</span>]
+);</code></pre></div><h3 id="constructing-page-table-types"><a class="doc-anchor" href="#constructing-page-table-types">§</a>Constructing Page Table Types</h3>
+<p>The <a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>PageTable</code></a> struct is the primary type for representing a page table hierarchy.
+It is parameterized by:</p>
+<ul>
+<li>The metadata type, which describes the page table format.</li>
+<li>The page table entry type, which describes the page table entries.</li>
+<li>The allocator type, which is used to allocate and deallocate the page table frames.</li>
+<li>The TLB flusher type, which is used to flush the TLB.</li>
+</ul>
+<p>For example, the following code defines the x86-64 level 4 and level 5 page table types.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expt::{
+    arch::x86_64::{
+        X86Level4PageTableMeta,
+        X86Level5PageTableMeta,
+        X86LocalTlbFlusher,
+    },
+    pt::PageTable,
+    pte::x86_64::X64PTE,
+};
+
+<span class="kw">type </span>X86Level4PageTable&lt;AL&gt; =
+    PageTable&lt;X86Level4PageTableMeta, X64PTE, AL, X86LocalTlbFlusher&gt;;
+<span class="kw">type </span>X86Level5PageTable&lt;AL&gt; =
+    PageTable&lt;X86Level5PageTableMeta, X64PTE, AL, X86LocalTlbFlusher&gt;;</code></pre></div>
+<p>For AArch64 where two hierarchies are used for lower and upper address spaces respectively, this
+crate provides <a href="pt/dual/struct.DualPageTable.html" title="struct expt::pt::dual::DualPageTable"><code>DualPageTable</code></a> for representing two independent hierarchies.
+It’s basically a wrapper around two <a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>PageTable</code></a>s, one for the lower address space
+and one for the upper address space, and provides a unified interface for both hierarchies.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expt::pt::DualPageTable;
+<span class="kw">use </span>memory_addr::VirtAddr;
+
+<span class="kw">type </span>AArch64PageTables&lt;ML, PTEL, MU, PTEU, AL, F&gt; = DualPageTable&lt;
+    VirtAddr,
+    ML,
+    PTEL,
+    MU,
+    PTEU,
+    AL,
+    F,
+&gt;;</code></pre></div>
+<p>For scenarios where the page table format should be selected at runtime, this crate provides
+<a href="opaque/struct.OpaquePageTableType.html" title="struct expt::opaque::OpaquePageTableType"><code>OpaquePageTableType</code></a> for capturing and storing concrete page table
+formats in a single type and <a href="opaque/struct.OpaquePageTable.html" title="struct expt::opaque::OpaquePageTable"><code>OpaquePageTable</code></a> for creating a page table
+hierarchy from a type captured by <a href="opaque/struct.OpaquePageTableType.html" title="struct expt::opaque::OpaquePageTableType"><code>OpaquePageTableType</code></a>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expalloc_trait::PageAllocator;
+<span class="kw">use </span>expt::{
+    arch::x86_64::{
+        X86Level4PageTableMeta,
+        X86Level5PageTableMeta,
+        X86LocalTlbFlusher,
+    },
+    opaque::OpaquePageTableType,
+    pte::x86_64::X64PTE,
+};
+<span class="kw">use </span>memory_addr::VirtAddr;
+
+<span class="kw">fn </span>select_x86_page_table_type&lt;AL&gt;(la57: bool) -&gt; OpaquePageTableType&lt;VirtAddr&gt;
+<span class="kw">where
+    </span>AL: PageAllocator,
+{
+    <span class="kw">if </span>la57 {
+        OpaquePageTableType::&lt;VirtAddr&gt;::new::&lt;
+            X86Level5PageTableMeta,
+            X64PTE,
+            AL,
+            X86LocalTlbFlusher,
+        &gt;()
+    } <span class="kw">else </span>{
+        OpaquePageTableType::&lt;VirtAddr&gt;::new::&lt;
+            X86Level4PageTableMeta,
+            X64PTE,
+            AL,
+            X86LocalTlbFlusher,
+        &gt;()
+    }
+}</code></pre></div><h3 id="mutation-and-cleanup"><a class="doc-anchor" href="#mutation-and-cleanup">§</a>Mutation and cleanup</h3>
+<p>Both <a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>PageTable</code></a> and <a href="pt/dual/struct.DualPageTable.html" title="struct expt::pt::dual::DualPageTable"><code>DualPageTable</code></a> use a cursor-based
+interface for mutation. <a href="pt/trait.PageTableCursorLike.html" title="trait expt::pt::PageTableCursorLike"><code>PageTableCursorLike</code></a> defines the common
+interface for cursors. A cursor batches mappings and unmappings, accumulating TLB invalidations
+until <code>clean_up</code> processes them or <code>take_cleanup</code> transfers them to the caller. Dropping a cursor
+processes any remaining cleanup.</p>
+<p>Ranges expand outward to base-page boundaries. Mapping replaces existing mappings and chooses the
+largest supported leaves allowed by the range and physical-address alignment. Unmapping can split
+huge leaves and may allocate intermediate tables even along previously absent paths. Errors retain
+earlier mutations. Operations are not transactional.</p>
+<p>Opaque <code>map</code>, <code>unmap</code>, and <code>apply_actions</code> process pending cleanup before returning, including
+after an action error.
+<a href="opaque/struct.OpaquePageTable.html#method.apply_actions_with_cleanup" title="method expt::opaque::OpaquePageTable::apply_actions_with_cleanup"><code>OpaquePageTable::apply_actions_with_cleanup</code></a>
+transfers pending cleanup to the caller only on success. An action error or iterator panic causes
+the temporary cursor to process pending cleanup before returning the error or unwinding. The
+calling context must therefore permit automatic cleanup on these paths.</p>
+<h3 id="table-frame-lifetime"><a class="doc-anchor" href="#table-frame-lifetime">§</a>Table-frame lifetime</h3>
+<p>Multi-level page table structure instances deallocate all table frames in their hierarchies when
+dropped. Replacing a child-table entry deallocates its subtree’s table frames during the mutation,
+without waiting for pending TLB invalidations. Mapped memory ranges remain caller-managed.</p>
+<p>Copying a root address does not extend the table frames’ lifetime. <code>leak</code> consumes a value while
+retaining its frames, allowing another compatible value to adopt the hierarchy with <code>new_at</code>. Its
+allocator must be able to access and deallocate every retained table frame. Callers must quiesce
+hardware users before dropping a multi-level page table. Destruction does not invalidate TLBs, and
+a mutable Rust borrow does not exclude hardware page walks.</p>
+<h3 id="safely-updating-page-tables"><a class="doc-anchor" href="#safely-updating-page-tables">§</a>Safely Updating Page Tables</h3>
+<p>Page table updates such as <code>map</code> and <code>unmap</code> do not synchronize with software accesses or
+hardware page walks. The caller must enforce the following requirements across all processors
+that may use the affected mappings or page tables:</p>
+<ol>
+<li>Before starting an update, prevent new accesses to the affected virtual-address ranges and
+any page table memory that may be modified or deallocated. Wait for existing accesses to
+complete.</li>
+<li>During the update, allow accesses to those ranges and page table memory only as needed to
+perform the update or process pending cleanup.</li>
+<li>Before allowing other accesses again, finish the update and process all pending cleanup,
+including the required TLB invalidations and synchronization. This requirement also applies
+when an update fails after making partial changes.</li>
+</ol>
+<p>A mutable Rust borrow prevents conflicting Rust accesses through the borrowed value, but it
+does not stop hardware page walks or accesses on other processors. The selected
+<a href="pt/cleanup/trait.TlbFlusher.html" title="trait expt::pt::cleanup::TlbFlusher"><code>TlbFlusher</code></a> must provide the invalidation scope and completion
+guarantees required by the hierarchy’s users.</p>
+<p>The mutation methods are not marked <code>unsafe</code>. These requirements must instead be upheld by the
+system design where the hierarchy is installed for hardware use and subsequent accesses are
+controlled.</p>
+<h3 id="terminology"><a class="doc-anchor" href="#terminology">§</a>Terminology</h3>
+<p>The terms <strong>multi-level page table</strong> and <strong>multi-level page table structure</strong> refer to the Rust
+abstraction representing translation across all levels, such as <a href="pt/single/struct.PageTable.html" title="struct expt::pt::single::PageTable"><code>PageTable</code></a> or
+<a href="pt/dual/struct.DualPageTable.html" title="struct expt::pt::dual::DualPageTable"><code>DualPageTable</code></a>, and to values of those types. A <strong>page table hierarchy</strong> is
+the corresponding in-memory data structure traversed by hardware. A <strong>page table</strong> is one table at a
+single level within a hierarchy. <strong>Table frames</strong>, also called <strong>page table frames</strong>, are the
+physical frames storing those tables. One page table may occupy one or more table frames.</p>
+<p>The convention above does not affect the meaning of the architecture-specific terms, e.g. Sv39 page
+table, x86-64 5-level page table, etc.</p>
+<h3 id="known-issues"><a class="doc-anchor" href="#known-issues">§</a>Known issues</h3>
+<p>RISC-V mapping flags are not validated. Leaf permissions must include <code>READ</code> or <code>EXECUTE</code>, and
+<code>WRITE</code> requires <code>READ</code>. With debug assertions enabled, constructing a leaf without <code>READ</code> or
+<code>EXECUTE</code> panics. With debug assertions disabled, such an entry above level zero can be mistaken
+for a child-table descriptor. Traversal can then access mapped data as a page table and deallocate
+data frames as table frames. Callers must supply valid RISC-V leaf permissions until validation
+is implemented.</p>
 </div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="arch/index.html" title="mod expt::arch">arch</a></dt><dd>Architecture-specific functions and types.</dd><dt><a class="mod" href="error/index.html" title="mod expt::error">error</a></dt><dd>Error and result types for page table hierarchy operations.</dd><dt><a class="mod" href="meta/index.html" title="mod expt::meta">meta</a></dt><dd>Page table hierarchy geometry and address-space metadata.</dd><dt><a class="mod" href="opaque/index.html" title="mod expt::opaque">opaque</a></dt><dd>Runtime type-erased multi-level page table types.</dd><dt><a class="mod" href="pt/index.html" title="mod expt::pt">pt</a></dt><dd>Common multi-level page table interfaces and concrete implementations.</dd><dt><a class="mod" href="pte/index.html" title="mod expt::pte">pte</a></dt><dd>Page table entry types and flags.</dd></dl></section></div></main></body></html>
