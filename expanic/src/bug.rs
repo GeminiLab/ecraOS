@@ -11,6 +11,8 @@ use crate::{TerminateLocation, TerminateReason, terminate};
 /// Use this when an internal assumption is violated. Accepts a format string and optional
 /// arguments, then passes the formatted message and the macro call's module path, file, line, and
 /// column to [`terminate`] with [`TerminateReason::Bug`].
+///
+/// This macro also marks the code path as cold.
 #[macro_export]
 macro_rules! bug {
     ($($arg:tt)*) => {{

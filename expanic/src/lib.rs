@@ -1,17 +1,4 @@
-//! Kernel panics and bug reports.
-//!
-//! Use [`kpanic!`] to report a fatal kernel error, or [`bug!`] to report an unexpected internal
-//! error. Both call [`terminate`] with a formatted message and the module path, file, line, and
-//! column of the macro call. [`UnwrapOrBug`] adds methods to [`Option`] and [`Result`] that report
-//! missing values and errors as bugs.
-//!
-//! By default, [`terminate`] calls [`core::panic!`] with the supplied information. An application
-//! can replace this function by applying `#[expanic::terminate_handler]` to a function with the
-//! same signature. A kernel can use its replacement to log the error and shut down.
-//!
-//! This crate is `no_std` and requires nightly Rust for `extern_item_impls`. It does not define a
-//! panic handler or provide platform shutdown code.
-
+#![doc = include_str!("../README.md")]
 #![no_std]
 #![feature(extern_item_impls)]
 
@@ -25,6 +12,8 @@ pub use bug::UnwrapOrBug;
 ///
 /// Accepts a format string and optional arguments. Passes the formatted message and the macro
 /// call's module path, file, line, and column to [`terminate`] with [`TerminateReason::KPanic`].
+///
+/// This macro also marks the code path as cold.
 #[macro_export]
 macro_rules! kpanic {
     ($($arg:tt)*) => {{
@@ -173,14 +162,16 @@ impl<'a> TerminateLocation<'a> {
     }
 }
 
-/// Terminates execution with a reason, source location, and message.
+/// The actual execution termination function.
 ///
-/// The default implementation calls [`core::panic!`] with the supplied information in its message.
-/// Whether this unwinds or aborts depends on the application's panic strategy and panic handler.
+/// `expanic` uses this function to terminate the execution. [`terminate`] is the default
+/// implementation that calls `core::panic!` with the supplied information in its message. Actual
+/// kernels should provide their own implementation with the same signature as the default and mark
+/// it with the [`#[terminate_handler]`](terminate_handler) attribute.
 ///
-/// To change this behavior, apply `#[expanic::terminate_handler]` to a function with the same
-/// signature. A kernel can forward ordinary Rust panics to that function from its panic handler.
-/// Calling the default implementation from a panic handler would cause another panic.
+/// With a replacement registered, a panic handler can forward ordinary Rust panics through this
+/// `terminate` interface. Without a replacement, the default implementation calls `core::panic!`,
+/// so invoking that fallback from a panic handler would start another panic.
 #[eii(terminate_handler)]
 pub fn terminate(
     reason: TerminateReason,

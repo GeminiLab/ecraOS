@@ -1,6 +1,13 @@
 [package]
 name = "expanic"
+description = "Kernel panic and bug reporting support for no_std applications."
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/expanic"
+readme = "README.md"
+keywords = ["panic", "bug-reporting", "kernel", "no-std"]
+categories = ["no-std", "os"]
 
 [dependencies]
