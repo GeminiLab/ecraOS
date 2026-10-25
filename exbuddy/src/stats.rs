@@ -1,6 +1,26 @@
+//! Aggregate allocator statistics.
+//!
+//! The statistics type tracks section capacity and current free-page usage.
+
 use core::{iter::Sum, ops::Add};
 
-/// Statistics of the allocator.
+/// Aggregate allocator statistics.
+///
+/// # About all values
+///
+/// - "Total pages" ([`total_pages()`](Self::total_pages)) is the total number
+///   of all pages in all sections managed by the allocator.
+/// - "Metadata pages" ([`meta_pages()`](Self::meta_pages)) is the total number
+///   of pages used for metadata.
+/// - "Heap pages" ([`heap_pages()`](Self::heap_pages)) is the total number of
+///   allocatable pages, no matter if they are free or allocated.
+/// - "Free pages" ([`free_pages()`](Self::free_pages)) is the total number of
+///   allocatable and free pages.
+/// - "Used pages" ([`used_pages()`](Self::used_pages)) is the total number of
+///   allocatable and allocated pages.
+/// - "Unused pages" ([`unused_pages()`](Self::unused_pages)) is the total
+///   number of unused pages, which are outside both the metadata region and the
+///   heap.
 #[derive(Debug, Clone, Default)]
 #[repr(C)]
 pub struct AllocatorStats {
@@ -14,6 +34,7 @@ pub struct AllocatorStats {
     pub free_pages: usize,
 }
 
+/// Allocator-statistics accessors.
 impl AllocatorStats {
     /// Returns the total number of pages in the allocator.
     pub fn total_pages(&self) -> usize {
@@ -40,16 +61,20 @@ impl AllocatorStats {
         self.heap_pages - self.free_pages
     }
 
-    /// Returns the number of unused pages in the allocator, which is pages that
-    /// are not used for metadata or the heap.
+    /// Returns the number of unused pages in the allocator.
+    ///
+    /// Unused pages are outside both the metadata region and the heap.
     pub fn unused_pages(&self) -> usize {
         self.total_pages - self.meta_pages - self.heap_pages
     }
 }
 
+/// Adds allocator statistics field by field.
 impl Add for AllocatorStats {
+    /// The combined statistics type.
     type Output = Self;
 
+    /// Adds two statistics values field by field.
     fn add(self, other: Self) -> Self {
         Self {
             total_pages: self.total_pages + other.total_pages,
@@ -60,7 +85,9 @@ impl Add for AllocatorStats {
     }
 }
 
+/// Sums allocator statistics field by field.
 impl Sum for AllocatorStats {
+    /// Sums all statistics values in the iterator.
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::default(), Add::add)
     }

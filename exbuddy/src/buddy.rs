@@ -1,7 +1,6 @@
-//! Buddy page allocator.
+//! Buddy page allocation.
 //!
-//! Provides a page-level physical memory allocator using the buddy system
-//! algorithm.
+//! Provides a page-level physical memory allocator using the buddy system algorithm.
 
 use core::{hint::unlikely, ptr};
 
@@ -15,8 +14,7 @@ use crate::{
     stats::AllocatorStats,
 };
 
-/// Buddy allocator for physical memory pages with configurable page size and
-/// virtual-physical address offset.
+/// A buddy allocator for physical memory pages.
 ///
 /// Requires a fixed-offset mapping (like direct mapping area in Linux) for
 /// conversions between physical and virtual addresses.
@@ -71,19 +69,19 @@ use crate::{
 /// Such arrangement is useful as it ensures that all blocks are naturally aligned to its maximal
 /// possible order (and therefore all possible orders).
 pub struct BuddyAllocator {
-    /// Page size shift.
+    /// Page-size shift.
     ///
     /// Must be greater than 0. 0 is reserved for uninitialized state.
     page_size_shift: usize,
-    /// Offset added to a physical address to obtain the corresponding virtual address.
+    /// Offset added to a physical address to obtain its corresponding virtual address.
     virt_phys_offset: usize,
     /// Head of the linked list of managed sections.
     ///
-    /// `BuddyAllocator` itself is **NOT** a node of the linked list.
+    /// `BuddyAllocator` itself is not a node of the linked list.
     sections_head: *mut BuddySection,
     /// Tail of the linked list of managed sections.
     ///
-    /// `BuddyAllocator` itself is **NOT** a node of the linked list.
+    /// `BuddyAllocator` itself is not a node of the linked list.
     sections_tail: *mut BuddySection,
     /// Number of managed sections.
     section_count: usize,
@@ -94,7 +92,9 @@ pub struct BuddyAllocator {
 // is managed externally.
 unsafe impl Send for BuddyAllocator {}
 
+/// Provides an uninitialized default allocator.
 impl Default for BuddyAllocator {
+    /// Creates an uninitialized allocator.
     fn default() -> Self {
         Self::new()
     }
@@ -118,12 +118,13 @@ impl BuddyAllocator {
     /// Initializes the allocator with the given page size and virtual-physical
     /// address offset.
     ///
-    /// The page size must be larger than 1 (page size shift must be greater
-    /// than 0).
+    /// The page-size shift must be greater than zero.
     ///
     /// # Safety
     ///
-    /// - The `virt_phys_offset` must be valid.
+    /// - The `virt_phys_offset` must map every physical address in every section to
+    ///   a valid writable virtual address.
+    /// - The `page_size_shift` must produce the page size used by every section.
     pub unsafe fn init(&mut self, page_size_shift: usize, virt_phys_offset: usize) -> BuddyResult {
         if page_size_shift == 0 {
             return Err(BuddyError::InvalidPageSize);
@@ -161,7 +162,8 @@ impl BuddyAllocator {
     ///
     /// # Safety
     ///
-    /// - The physical memory region must be valid and writable for the lifetime of this allocator.
+    /// - The physical memory region must be valid and writable through the
+    ///   configured fixed mapping for the lifetime of this allocator.
     pub unsafe fn add_section(&mut self, mem_region: PhysAddrRange) -> BuddyResult {
         self.ensure_initialized()?;
 
@@ -183,7 +185,7 @@ impl BuddyAllocator {
         let start_virt = va!(mem_region.start.as_usize() + self.virt_phys_offset);
         let section = start_virt.as_mut_ptr_of();
 
-        // SAFETY: the validity of the `section` and `region_virt` is guaranteed
+        // SAFETY: the validity of the `section` and `mem_region` is guaranteed
         // by the caller.
         unsafe { BuddySection::init_at(section, mem_region, layout, self.page_size_shift) };
 
@@ -229,8 +231,7 @@ impl BuddyAllocator {
         self.section_count
     }
 
-    /// Returns an [immutable iterator](BuddySectionIter) over the managed
-    /// sections.
+    /// Returns an immutable iterator over the managed sections.
     pub fn section_iter(&self) -> BuddySectionIter<'_> {
         BuddySectionIter {
             _allocator: self,
@@ -238,8 +239,7 @@ impl BuddyAllocator {
         }
     }
 
-    /// Returns a [mutable iterator](BuddySectionIterMut) over the managed
-    /// sections.
+    /// Returns a mutable iterator over the managed sections.
     pub fn section_iter_mut(&mut self) -> BuddySectionIterMut<'_> {
         let head = self.sections_head;
         BuddySectionIterMut {
@@ -248,14 +248,20 @@ impl BuddyAllocator {
         }
     }
 
-    /// Finds the section whose heap contains the given virtual address.
+    /// Finds the section whose heap contains the given physical address.
+    ///
+    /// Physical addresses used by section headers or metadata are not
+    /// considered to be part of the section's heap.
     pub fn find_section_by_addr(&self, addr: PhysAddr) -> Option<&BuddySection> {
         self.section_iter()
             .find(|section| section.contains_heap_addr(addr))
     }
 
-    /// Finds the section whose heap contains the given virtual address and
+    /// Finds the section whose heap contains the given physical address and
     /// returns a mutable reference to it.
+    ///
+    /// Physical addresses used by section headers or metadata are not
+    /// considered to be part of the section's heap.
     pub fn find_section_by_addr_mut(&mut self, addr: PhysAddr) -> Option<&mut BuddySection> {
         self.section_iter_mut()
             .find(|section| section.contains_heap_addr(addr))
@@ -298,7 +304,7 @@ impl BuddyAllocator {
         1usize << self.page_size_shift
     }
 
-    /// The maximal number of heap pages in a section.
+    /// The maximum number of heap pages in a section.
     pub const MAX_HEAP_PAGES_IN_SECTION: usize = SectionFrameNumber::MAX_VALID_SFN.as_usize() + 1;
 }
 
@@ -333,14 +339,14 @@ impl BuddyAllocator {
     }
 
     /// Allocates multiple contiguous buddy blocks starting at the given
-    /// physical address and having the given total page count.
+    /// physical address and having the given total page count exactly.
     ///
     /// The target range may span multiple buddy blocks and may exceed the size
     /// of a single maximum-order buddy block.
     ///
-    /// The `addr` must be aligned to the page size, or this function will return an error.
+    /// The `addr` must be aligned to the page size.
     ///
-    /// The specified address range must be free, or this function will return an error.
+    /// The specified address range must be free.
     pub fn alloc_blocks_at(&mut self, addr: PhysAddr, page_count: usize) -> BuddyResult {
         let page_size_shift = self.page_size_shift;
         let section = self
@@ -350,15 +356,15 @@ impl BuddyAllocator {
     }
 
     /// Deallocates multiple contiguous buddy blocks starting at the given
-    /// physical address and having the given total page count.
+    /// physical address and having the given total page count exactly.
     ///
     /// The target range may span multiple buddy blocks and may exceed the size
     /// of a single maximum-order buddy block.
     ///
-    /// The `addr` must be aligned to the page size, or this function will return an error.
+    /// The `addr` must be aligned to the page size.
     ///
-    /// The specified address range must be allocated, and must match the block border of the
-    /// allocated blocks, or this function will return an error.
+    /// The specified address range must be allocated and must match the block
+    /// boundaries of the allocated blocks.
     pub fn dealloc_blocks_at(&mut self, addr: PhysAddr, page_count: usize) -> BuddyResult {
         let page_size_shift = self.page_size_shift;
         let section = self
@@ -412,7 +418,7 @@ impl BuddyAllocator {
         Ok(addr)
     }
 
-    /// Frees physical frames previously obtained via `alloc_frames`.
+    /// Frees physical frames previously obtained from `alloc_frames`.
     ///
     /// The `addr` and `count` arguments must match the corresponding
     /// `alloc_frames` call exactly.
@@ -427,7 +433,7 @@ impl BuddyAllocator {
         self.alloc_block(0, self.page_size())
     }
 
-    /// Frees a single physical frame previously obtained via `alloc_frame`.
+    /// Frees a single physical frame previously obtained from `alloc_frame`.
     pub fn dealloc_frame(&mut self, addr: PhysAddr) -> BuddyResult<()> {
         self.dealloc_block(addr, 0)
     }
@@ -469,9 +475,12 @@ pub struct BuddySectionIter<'a> {
     current: *const BuddySection,
 }
 
+/// Iterates over managed sections immutably.
 impl<'a> Iterator for BuddySectionIter<'a> {
+    /// The managed section reference type.
     type Item = &'a BuddySection;
 
+    /// Returns the next managed section.
     fn next(&mut self) -> Option<Self::Item> {
         // SAFETY: We DO know that `self.current` is either null (when the iterator is exhausted)
         // or a valid pointer to a `BuddySection` (the caller to `BuddyAllocator::add_section`
@@ -492,9 +501,12 @@ pub struct BuddySectionIterMut<'a> {
     current: *mut BuddySection,
 }
 
+/// Iterates over managed sections mutably.
 impl<'a> Iterator for BuddySectionIterMut<'a> {
+    /// The mutable managed section reference type.
     type Item = &'a mut BuddySection;
 
+    /// Returns the next mutable managed section.
     fn next(&mut self) -> Option<Self::Item> {
         // SAFETY: We DO know that `self.current` is either null (when the iterator is exhausted)
         // or a valid pointer to a `BuddySection` (the caller to `BuddyAllocator::add_section`

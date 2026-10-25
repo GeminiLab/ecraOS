@@ -1,17 +1,17 @@
-//! Per-page metadata stored in the external metadata region.
+//! Per-page metadata stored in the metadata region of each section.
 //!
 //! Each page frame in the heap has a corresponding [`PageMeta`] entry.
 //! Free pages are linked together via intrusive doubly-linked lists using PFN indices.
 
 use crate::pfn::{OptionSectionFrameNumber, SectionFrameNumber};
 
-/// Page state flags.
+/// Flags describing a page's block state.
 ///
 /// It can be considered to have the following bitfield layout:
-/// - Bit 0: **Head**. Whether the page is the head of a buddy block.
-/// - Bit 1: **Allocated**. Whether the block is allocated.
+/// - Bit 0: **Allocated**. Whether the block is allocated.
+/// - Bit 1: **Head**. Whether the page is the head of a buddy block.
 ///
-/// It's designed such that zero-initialization is safe for pages that are not block heads.
+/// The representation makes zero-initialization safe for pages that are not block heads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum PageFlags {
@@ -31,7 +31,7 @@ pub enum PageFlags {
 /// For free or allocated blocks, only the head page carries the `flags` and
 /// `order` of the whole block, while other pages are marked as `InBlock`.
 ///
-/// It's designed such that zero-initialization is safe for pages that are not
+/// The representation makes zero-initialization safe for pages that are not
 /// block heads.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -59,14 +59,17 @@ const _: () = assert!(core::mem::size_of::<PageMeta>() == 12);
 /// Compile-time assertions to ensure `PageMeta` is 4-byte aligned.
 const _: () = assert!(core::mem::align_of::<PageMeta>() == 4);
 
+/// Provides a free order-0 page-meta entry.
 impl Default for PageMeta {
+    /// Creates a free order-0 page-meta entry.
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// Page metadata operations.
 impl PageMeta {
-    /// Creates a zeroed (free, order-0) page meta.
+    /// Creates a free order-0 page-meta entry.
     pub const fn new() -> Self {
         Self {
             flags: PageFlags::Free,

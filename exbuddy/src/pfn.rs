@@ -1,4 +1,4 @@
-//! Frame number types.
+//! Physical frame number types.
 //!
 //! Defines semantic frame-number wrappers used to keep the code readable and understandable.
 
@@ -15,11 +15,12 @@ pub struct PhysFrameNumber(usize);
 
 /// A section-local frame number.
 ///
-/// Represents a page index inside a [`crate::section::BuddySection`] heap.
+/// Represents a page index inside a [`BuddySection`](crate::section::BuddySection) heap.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct SectionFrameNumber(u32);
 
+/// Absolute physical frame-number operations.
 impl PhysFrameNumber {
     /// Creates an absolute physical frame number.
     ///
@@ -53,7 +54,8 @@ impl PhysFrameNumber {
 
     /// Creates an absolute physical frame number from a physical address.
     ///
-    /// The `page_size_shift` is the number of bits to shift the address right by to get the frame number.
+    /// The `page_size_shift` is the number of bits to shift the address right
+    /// by to get the frame number.
     ///
     /// # Examples
     ///
@@ -163,6 +165,7 @@ impl PhysFrameNumber {
     }
 }
 
+/// Section-local frame-number operations.
 impl SectionFrameNumber {
     /// The maximal valid section-local frame number.
     ///
@@ -341,81 +344,110 @@ impl SectionFrameNumber {
     }
 }
 
+/// Adds a frame offset to an absolute physical frame number.
 impl Add<usize> for PhysFrameNumber {
+    /// The result of adding a frame offset.
     type Output = Self;
 
+    /// Returns the frame number advanced by the given offset.
     fn add(self, rhs: usize) -> Self::Output {
         Self(self.0 + rhs)
     }
 }
 
+/// Subtracts a frame offset from an absolute physical frame number.
 impl Sub<usize> for PhysFrameNumber {
+    /// The result of subtracting a frame offset.
     type Output = Self;
 
+    /// Returns the frame number reduced by the given offset.
     fn sub(self, rhs: usize) -> Self::Output {
         Self(self.0 - rhs)
     }
 }
 
+/// Computes the distance between two absolute physical frame numbers.
 impl Sub<PhysFrameNumber> for PhysFrameNumber {
+    /// The frame distance between two absolute frame numbers.
     type Output = usize;
 
+    /// Returns the number of frames between the operands.
     fn sub(self, rhs: PhysFrameNumber) -> Self::Output {
         self.0 - rhs.0
     }
 }
 
+/// Advances an absolute physical frame number by a frame offset.
 impl AddAssign<usize> for PhysFrameNumber {
+    /// Adds the given offset in place.
     fn add_assign(&mut self, rhs: usize) {
         self.0 += rhs;
     }
 }
 
+/// Reduces an absolute physical frame number by a frame offset.
 impl SubAssign<usize> for PhysFrameNumber {
+    /// Subtracts the given offset in place.
     fn sub_assign(&mut self, rhs: usize) {
         self.0 -= rhs;
     }
 }
 
+/// Adds a frame offset to a section-local frame number.
 impl Add<usize> for SectionFrameNumber {
+    /// The result of adding a frame offset.
     type Output = Self;
 
+    /// Returns the frame number advanced by the given offset.
     fn add(self, rhs: usize) -> Self::Output {
         Self(self.0 + rhs as u32)
     }
 }
 
+/// Subtracts a frame offset from a section-local frame number.
 impl Sub<usize> for SectionFrameNumber {
+    /// The result of subtracting a frame offset.
     type Output = Self;
 
+    /// Returns the frame number reduced by the given offset.
     fn sub(self, rhs: usize) -> Self::Output {
         Self(self.0 - rhs as u32)
     }
 }
 
+/// Computes the distance between two section-local frame numbers.
 impl Sub<SectionFrameNumber> for SectionFrameNumber {
+    /// The frame distance between two section-local frame numbers.
     type Output = usize;
 
+    /// Returns the number of frames between the operands.
     fn sub(self, rhs: SectionFrameNumber) -> Self::Output {
         (self.0 - rhs.0) as usize
     }
 }
 
+/// Computes a section-local buddy frame number with an XOR operation.
 impl BitXor<usize> for SectionFrameNumber {
+    /// The result of toggling a buddy-order bit.
     type Output = Self;
 
+    /// Returns the frame number with the requested buddy bit toggled.
     fn bitxor(self, rhs: usize) -> Self::Output {
         Self(self.0 ^ rhs as u32)
     }
 }
 
+/// Advances a section-local frame number by a frame offset.
 impl AddAssign<usize> for SectionFrameNumber {
+    /// Adds the given offset in place.
     fn add_assign(&mut self, rhs: usize) {
         self.0 += rhs as u32;
     }
 }
 
+/// Reduces a section-local frame number by a frame offset.
 impl SubAssign<usize> for SectionFrameNumber {
+    /// Subtracts the given offset in place.
     fn sub_assign(&mut self, rhs: usize) {
         self.0 -= rhs as u32;
     }
@@ -432,20 +464,25 @@ const SFN_NONE: u32 = u32::MAX;
 #[repr(transparent)]
 pub struct OptionSectionFrameNumber(u32);
 
+/// Converts an optional section-local frame number to its compact form.
 impl From<Option<SectionFrameNumber>> for OptionSectionFrameNumber {
+    /// Converts the optional frame number.
     #[inline]
     fn from(value: Option<SectionFrameNumber>) -> Self {
         Self::from_option_sfn(value)
     }
 }
 
+/// Converts the compact optional frame number to an ordinary option.
 impl From<OptionSectionFrameNumber> for Option<SectionFrameNumber> {
+    /// Converts the compact representation.
     #[inline]
     fn from(value: OptionSectionFrameNumber) -> Self {
         value.into_option_sfn()
     }
 }
 
+/// Compact optional frame-number operations.
 impl OptionSectionFrameNumber {
     /// The sentinel value indicating `None`.
     pub const NONE: Self = Self(SFN_NONE);
@@ -496,10 +533,13 @@ impl OptionSectionFrameNumber {
 
 #[cfg(test)]
 mod tests {
+    //! Frame-number tests.
+
     use memory_addr::{pa, va};
 
     use super::*;
 
+    /// Checks conversion from a physical address to a frame number.
     #[test]
     fn phys_pfn_from_phys_addr_uses_shift() {
         let pfn = PhysFrameNumber::from_phys_addr(pa!(0x1234_5000), 12);
@@ -507,6 +547,7 @@ mod tests {
         assert_eq!(pfn.as_usize(), 0x12345);
     }
 
+    /// Checks conversion from a virtually mapped address to a frame number.
     #[test]
     fn phys_pfn_from_virt_addr_removes_offset() {
         let pfn =
@@ -515,6 +556,7 @@ mod tests {
         assert_eq!(pfn.as_usize(), 0x123);
     }
 
+    /// Checks arithmetic on section-local frame numbers.
     #[test]
     fn section_pfn_arithmetic_keeps_section_semantics() {
         let start = SectionFrameNumber::new(10);
@@ -524,6 +566,7 @@ mod tests {
         assert_eq!(end - start, 4);
     }
 
+    /// Checks the compact storage size of section-local frame numbers.
     #[test]
     fn section_pfn_has_u32_storage_size() {
         assert_eq!(
@@ -532,6 +575,7 @@ mod tests {
         );
     }
 
+    /// Checks buddy calculation with an absolute heap base.
     #[test]
     fn section_pfn_buddy_uses_absolute_heap_base() {
         let base = PhysFrameNumber::new(5);
@@ -542,6 +586,7 @@ mod tests {
         );
     }
 
+    /// Checks that a buddy before the section is rejected.
     #[test]
     fn section_pfn_buddy_returns_none_outside_section_prefix() {
         let base = PhysFrameNumber::new(5);
@@ -549,6 +594,7 @@ mod tests {
         assert_eq!(SectionFrameNumber::new(0).buddy(2, base, 8), None);
     }
 
+    /// Checks that a buddy beyond the heap is rejected.
     #[test]
     fn section_pfn_buddy_returns_none_outside_heap_pages() {
         let base = PhysFrameNumber::new(5);
@@ -556,6 +602,7 @@ mod tests {
         assert_eq!(SectionFrameNumber::new(1).buddy(0, base, 2), None);
     }
 
+    /// Checks subtraction between absolute frame numbers.
     #[test]
     fn phys_pfn_subtraction_returns_distance() {
         let high = PhysFrameNumber::new(100);

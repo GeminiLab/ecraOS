@@ -1,3 +1,8 @@
+//! Section metadata and buddy-list operations.
+//!
+//! A section stores its header, page metadata, free lists, and allocatable heap
+//! in one caller-provided physical memory region.
+
 use core::{mem, ptr, slice};
 
 use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, align_up, pa};
@@ -11,7 +16,11 @@ use crate::{
     stats::AllocatorStats,
 };
 
-/// Layout of a section.
+/// The layout of a managed section.
+///
+/// Usually, it has `total_pages` equals to `metadata_pages + heap_pages`, but
+/// for some rare cases, it can be one less than that (when adding the last page
+/// to heap requires one more page for metadata).
 pub struct SectionLayout {
     /// Total number of pages in the section.
     pub total_pages: usize,
@@ -38,6 +47,7 @@ fn checked_page_range(
     Ok(PhysAddrRange::new(addr, pa!(end)))
 }
 
+/// Heap range calculations.
 impl SectionLayout {
     /// Returns the range of the heap in physical addresses.
     pub fn heap_region(&self, base_addr: PhysAddr, page_size_shift: usize) -> PhysAddrRange {
@@ -48,15 +58,21 @@ impl SectionLayout {
     }
 }
 
+/// A read-only view of section metadata.
 pub struct BuddySectionVisitor<'a> {
+    /// Page metadata for the section heap.
     metas: &'a [PageMeta],
+    /// Heads of the per-order free lists.
     free_list_heads: &'a [OptionSectionFrameNumber; MAX_ORDER + 1],
+    /// Aggregate statistics for the section.
     stats: &'a AllocatorStats,
+    /// Absolute physical frame number of the heap start.
     heap_base_pfn: PhysFrameNumber,
 }
 
+/// Read-only section metadata access.
 impl<'a> BuddySectionVisitor<'a> {
-    /// Returns a read-only reference to the page metadata at given
+    /// Returns a read-only reference to the page metadata at the given
     /// [`SectionFrameNumber`].
     #[inline]
     pub fn meta(&self, sfn: SectionFrameNumber) -> &PageMeta {
@@ -90,9 +106,15 @@ impl<'a> BuddySectionVisitor<'a> {
                 return Ok(order_head);
             }
 
-            let order_buddy = order_head.buddy(order, self.heap_base_pfn, self.stats.heap_pages).unwrap_or_else(|| {
-                internal_error!("find_block_containing: buddy-less block {} (order {}) should never marked as in-block", order_head.as_usize(), order);
-            });
+            let order_buddy = order_head
+                .buddy(order, self.heap_base_pfn, self.stats.heap_pages)
+                .unwrap_or_else(|| {
+                    internal_error!(
+                        "find_block_containing: buddy-less block {} (order {}) should never be marked as in-block",
+                        order_head.as_usize(),
+                        order
+                    );
+                });
             order_head = order_head.min(order_buddy);
         }
 
@@ -104,13 +126,19 @@ impl<'a> BuddySectionVisitor<'a> {
     }
 }
 
+/// A mutable view of section metadata.
 pub struct BuddySectionVisitorMut<'a> {
+    /// Mutable page metadata for the section heap.
     metas: &'a mut [PageMeta],
+    /// Mutable heads of the per-order free lists.
     free_list_heads: &'a mut [OptionSectionFrameNumber; MAX_ORDER + 1],
+    /// Mutable aggregate statistics for the section.
     stats: &'a mut AllocatorStats,
+    /// Absolute physical frame number of the heap start.
     heap_base_pfn: PhysFrameNumber,
 }
 
+/// Mutable section metadata access.
 impl<'a> BuddySectionVisitorMut<'a> {
     /// Returns a read-only visitor.
     #[inline]
@@ -126,7 +154,7 @@ impl<'a> BuddySectionVisitorMut<'a> {
         }
     }
 
-    /// Returns a mutable reference to the page metadata at given
+    /// Returns a mutable reference to the page metadata at the given
     /// [`SectionFrameNumber`].
     #[inline]
     pub fn meta_mut(&mut self, sfn: SectionFrameNumber) -> &mut PageMeta {
@@ -152,16 +180,19 @@ impl<'a> BuddySectionVisitorMut<'a> {
         }
     }
 
+    /// Sets the state and order of a page-meta entry.
     pub fn set_page_meta(&mut self, sfn: SectionFrameNumber, flags: PageFlags, order: usize) {
         let m = &mut self.metas[sfn.as_usize()];
         m.flags = flags;
         m.order = order as _;
     }
 
+    /// Returns the head of the mutable free list for the given order.
     pub fn free_list_head(&self, order: usize) -> Option<SectionFrameNumber> {
         self.free_list_heads[order].into_option_sfn()
     }
 
+    /// Pushes a block head onto the free list for its order.
     #[inline]
     pub(super) fn free_list_push(&mut self, sfn: SectionFrameNumber, order: usize) {
         let old_head = self.free_list_heads[order].into_option_sfn();
@@ -174,6 +205,7 @@ impl<'a> BuddySectionVisitorMut<'a> {
         self.free_list_heads[order] = Some(sfn).into();
     }
 
+    /// Removes a block head from the free list for its order.
     #[inline]
     pub(super) fn free_list_remove(&mut self, sfn: SectionFrameNumber, order: usize) {
         let m = &mut self.metas[sfn.as_usize()];
@@ -294,9 +326,7 @@ pub struct BuddySection {
     pub free_list_heads: [OptionSectionFrameNumber; MAX_ORDER + 1],
 }
 
-/// Asserts that the section header is aligned to the page meta alignment, which
-/// means, no padding bytes are needed between the section header and the
-/// metadata array.
+/// Ensures that the section header needs no padding before the metadata array.
 const _: () = assert!(mem::size_of::<BuddySection>().is_multiple_of(mem::align_of::<PageMeta>()));
 
 /// Layout calculation.
@@ -390,8 +420,9 @@ impl BuddySection {
     /// # Safety
     ///
     /// - The `ptr` must be a valid pointer to a `BuddySection`.
-    /// - The `region` must be a valid and readable-writable virtual address
-    ///   range.
+    /// - The `region` must be a valid and readable-writable physical address
+    ///   range and it must be mapped to a valid and readable-writable virtual
+    ///   address range starting at `ptr` with a fixed offset.
     pub unsafe fn init_at(
         ptr: *mut BuddySection,
         region: PhysAddrRange,
@@ -441,6 +472,7 @@ impl BuddySection {
         }
     }
 
+    /// Creates a read-only view of this section's metadata.
     pub fn visitor(&self) -> BuddySectionVisitor<'_> {
         let meta = {
             let self_ptr = self as *const _ as *const u8;
@@ -457,6 +489,7 @@ impl BuddySection {
         }
     }
 
+    /// Creates a mutable view of this section's metadata.
     pub fn visitor_mut(&mut self) -> BuddySectionVisitorMut<'_> {
         let meta = {
             let self_ptr = self as *mut _ as *mut u8;
@@ -845,7 +878,8 @@ impl BuddySection {
         )
     }
 
-    /// Deallocates a range of allocated blocks allocated by [`alloc_blocks_at`](Self::alloc_blocks_at).
+    /// Deallocates a range of allocated blocks created by
+    /// [`alloc_blocks_at`](Self::alloc_blocks_at).
     pub fn dealloc_blocks_at(
         &mut self,
         addr: PhysAddr,
@@ -900,7 +934,7 @@ impl BuddySection {
         Ok(visitor.meta(head).flags == PageFlags::Allocated)
     }
 
-    /// Checks if the given virtual address falls within this section's heap.
+    /// Checks whether the given physical address falls within this section's heap.
     #[inline]
     pub fn contains_heap_addr(&self, addr: PhysAddr) -> bool {
         self.heap_region.contains(addr)

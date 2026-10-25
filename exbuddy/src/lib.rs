@@ -1,7 +1,4 @@
-//! Buddy page allocator.
-//!
-//! Provides a page-level memory allocator using the buddy system algorithm.
-
+#![doc = include_str!("../README.md")]
 #![no_std]
 #![deny(stable_features)]
 #![feature(likely_unlikely)]
@@ -9,9 +6,9 @@
 #[cfg(test)]
 extern crate std;
 
-/// Maximum buddy order.
+/// The maximum buddy order.
 ///
-/// It determines the maximum size of buddy blocks - with 4 KiB pages this gives
+/// It determines the maximum size of buddy blocks. With 4 KiB pages this gives
 /// 2^20 x 4 KiB = 4 GiB blocks. No single allocation can exceed this size.
 /// Note that the buddy allocator can handle sections larger than this.
 pub const MAX_ORDER: usize = 20;
@@ -35,7 +32,7 @@ pub use section::BuddySection;
 #[doc(inline)]
 pub use stats::AllocatorStats;
 
-/// Mark the current code path as unreachable with a internal error message.
+/// Marks the current code path as unreachable with an internal error message.
 macro_rules! internal_error {
     ($msg:literal $($args:tt)*) => {
         unreachable!(concat!("[Buddy Allocator Internal Error] ", $msg) $($args)*);
@@ -46,8 +43,8 @@ pub(crate) use internal_error;
 
 /// Converts a page count to the smallest order that can contain it.
 ///
-/// Returns `Err(BuddyError::InvalidPageCount)` if the page count is too
-/// large that even the largest order cannot contain it.
+/// Returns `Err(BuddyError::InvalidPageCount)` when the page count is too large
+/// for the largest supported order.
 ///
 /// # Examples
 ///
@@ -61,7 +58,10 @@ pub(crate) use internal_error;
 /// assert_eq!(page_count_to_order_ceiling(4), Ok(2));
 ///
 /// assert_eq!(page_count_to_order_ceiling(1usize << MAX_ORDER), Ok(MAX_ORDER));
-/// assert_eq!(page_count_to_order_ceiling(1usize << MAX_ORDER + 1), Err(BuddyError::InvalidPageCount));
+/// assert_eq!(
+///     page_count_to_order_ceiling(1usize << MAX_ORDER + 1),
+///     Err(BuddyError::InvalidPageCount),
+/// );
 /// ```
 #[inline]
 pub const fn page_count_to_order_ceiling(page_count: usize) -> BuddyResult<usize> {
@@ -77,8 +77,7 @@ pub const fn page_count_to_order_ceiling(page_count: usize) -> BuddyResult<usize
 
 /// Converts a page count to the largest order that can fit in it.
 ///
-/// Returns `Err(BuddyError::InvalidPageCount)` if the page count is too
-/// small that even the smallest order cannot fit in it (i.e. 0).
+/// Returns `Err(BuddyError::InvalidPageCount)` when the page count is zero.
 ///
 /// # Examples
 ///

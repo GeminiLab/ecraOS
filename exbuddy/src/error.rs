@@ -15,16 +15,16 @@ pub enum BuddyError {
     /// The provided order is invalid.
     #[error("invalid order")]
     InvalidOrder,
-    /// The section is too small for buddy allocator.
+    /// The section is too small for the buddy allocator.
     #[error("section too small")]
     SectionTooSmall,
-    /// The section is too large for buddy allocator.
+    /// The section is too large for the buddy allocator.
     #[error("section too large")]
     SectionTooLarge,
     /// The section overlaps with another section.
     #[error("section overlaps with another section")]
     SectionOverlap,
-    /// No suitable memory found for operation.
+    /// No suitable memory was found for the operation.
     #[error("no suitable memory")]
     NoMemory,
     /// The specified address is not in any managed section.
