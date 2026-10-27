@@ -49,7 +49,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
 - [ ] [ecraos](ecraos)
 - [ ] [exarch](exarch)
 - [x] [exbuddy](exbuddy)
-- [ ] [expalloc_trait](expalloc_trait)
+- [x] [expalloc_trait](expalloc_trait)
 - [x] [expanic](expanic)
 - [x] [expercpu/expercpu](expercpu/expercpu)
 - [x] [expercpu/expercpu_macros](expercpu/expercpu_macros)
