@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["alloc_large","alloc_small","dealloc_large","dealloc_small","init_malloc_current_cpu","with_current_slab"],"static":["CURRENT_SLAB","GLOBAL_ALLOCATOR","__PERCPU_CURRENT_SLAB"],"struct":["CURRENT_SLAB_WRAPPER","EcraosGlobalAlloc","PerCpuSlab"]};
+window.SIDEBAR_ITEMS = {"fn":["alloc_large","alloc_small","dealloc_large","dealloc_small","init_malloc_current_cpu","with_current_slab"],"static":["CURRENT_SLAB","GLOBAL_ALLOCATOR"],"struct":["CURRENT_SLAB_WRAPPER","EcraosGlobalAlloc","PerCpuSlab"]};

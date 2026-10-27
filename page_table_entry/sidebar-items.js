@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["aarch64","arch","arm","loongarch64","riscv","x86_64"],"struct":["MappingFlags"],"trait":["GenericPTE"]};
+window.SIDEBAR_ITEMS = {"mod":["aarch64","arch","loongarch64","riscv","x86_64"],"struct":["MappingFlags"],"trait":["GenericPTE"]};

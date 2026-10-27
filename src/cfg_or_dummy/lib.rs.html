@@ -1,67 +1,123 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `utils/cfg_or_dummy/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="cfg_or_dummy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">cfg_or_dummy/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-2"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>std::iter;
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `utils/cfg_or_dummy/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="cfg_or_dummy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">cfg_or_dummy/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="attr">#![doc = <span class="macro">include_str!</span>(<span class="string">"../README.md"</span>)]
 <a href=#2 id=2 data-nosnippet>2</a>
-<a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>proc_macro::TokenStream <span class="kw">as </span>TokenStream1;
-<a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>proc_macro2::TokenStream;
-<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>syn::{FnArg, Ident, ItemFn, Meta, Pat, parse_macro_input, parse_quote};
-<a href=#6 id=6 data-nosnippet>6</a>
-<a href=#7 id=7 data-nosnippet>7</a><span class="kw">fn </span>collect_ident_from_pat&lt;<span class="lifetime">'a</span>&gt;(pat: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Pat) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Ident&gt; + <span class="lifetime">'a</span>&gt; {
-<a href=#8 id=8 data-nosnippet>8</a>    <span class="kw">match </span>pat {
-<a href=#9 id=9 data-nosnippet>9</a>        Pat::Ident(pat_ident) =&gt; Box::new(iter::once(<span class="kw-2">&amp;</span>pat_ident.ident)),
-<a href=#10 id=10 data-nosnippet>10</a>        Pat::Paren(pat_paren) =&gt; collect_ident_from_pat(<span class="kw-2">&amp;</span>pat_paren.pat),
-<a href=#11 id=11 data-nosnippet>11</a>        Pat::Reference(pat_reference) =&gt; collect_ident_from_pat(<span class="kw-2">&amp;</span>pat_reference.pat),
-<a href=#12 id=12 data-nosnippet>12</a>        Pat::Slice(pat_slice) =&gt; Box::new(pat_slice.elems.iter().flat_map(collect_ident_from_pat)),
-<a href=#13 id=13 data-nosnippet>13</a>        Pat::Struct(pat_struct) =&gt; Box::new(
-<a href=#14 id=14 data-nosnippet>14</a>            pat_struct
-<a href=#15 id=15 data-nosnippet>15</a>                .fields
-<a href=#16 id=16 data-nosnippet>16</a>                .iter()
-<a href=#17 id=17 data-nosnippet>17</a>                .flat_map(|f| collect_ident_from_pat(<span class="kw-2">&amp;</span>f.pat)),
-<a href=#18 id=18 data-nosnippet>18</a>        ),
-<a href=#19 id=19 data-nosnippet>19</a>        Pat::Tuple(pat_tuple) =&gt; Box::new(pat_tuple.elems.iter().flat_map(collect_ident_from_pat)),
-<a href=#20 id=20 data-nosnippet>20</a>        Pat::TupleStruct(pat_tuple_struct) =&gt; Box::new(
-<a href=#21 id=21 data-nosnippet>21</a>            pat_tuple_struct
-<a href=#22 id=22 data-nosnippet>22</a>                .elems
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::iter;
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>proc_macro::TokenStream <span class="kw">as </span>TokenStream1;
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>proc_macro2::TokenStream;
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>syn::{FnArg, Ident, ItemFn, Meta, Pat, parse_macro_input, parse_quote};
+<a href=#8 id=8 data-nosnippet>8</a>
+<a href=#9 id=9 data-nosnippet>9</a><span class="doccomment">/// Collects identifiers bound by a function parameter pattern.
+<a href=#10 id=10 data-nosnippet>10</a>///
+<a href=#11 id=11 data-nosnippet>11</a>/// The supported pattern forms cover named parameters and the destructuring forms accepted by
+<a href=#12 id=12 data-nosnippet>12</a>/// `cfg_or_dummy`. Patterns without collectable identifiers contribute no bindings to the
+<a href=#13 id=13 data-nosnippet>13</a>/// fallback body.
+<a href=#14 id=14 data-nosnippet>14</a></span><span class="kw">fn </span>collect_ident_from_pat&lt;<span class="lifetime">'a</span>&gt;(pat: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Pat) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Ident&gt; + <span class="lifetime">'a</span>&gt; {
+<a href=#15 id=15 data-nosnippet>15</a>    <span class="kw">match </span>pat {
+<a href=#16 id=16 data-nosnippet>16</a>        Pat::Ident(pat_ident) =&gt; Box::new(iter::once(<span class="kw-2">&amp;</span>pat_ident.ident)),
+<a href=#17 id=17 data-nosnippet>17</a>        Pat::Paren(pat_paren) =&gt; collect_ident_from_pat(<span class="kw-2">&amp;</span>pat_paren.pat),
+<a href=#18 id=18 data-nosnippet>18</a>        Pat::Reference(pat_reference) =&gt; collect_ident_from_pat(<span class="kw-2">&amp;</span>pat_reference.pat),
+<a href=#19 id=19 data-nosnippet>19</a>        Pat::Slice(pat_slice) =&gt; Box::new(pat_slice.elems.iter().flat_map(collect_ident_from_pat)),
+<a href=#20 id=20 data-nosnippet>20</a>        Pat::Struct(pat_struct) =&gt; Box::new(
+<a href=#21 id=21 data-nosnippet>21</a>            pat_struct
+<a href=#22 id=22 data-nosnippet>22</a>                .fields
 <a href=#23 id=23 data-nosnippet>23</a>                .iter()
-<a href=#24 id=24 data-nosnippet>24</a>                .flat_map(collect_ident_from_pat),
+<a href=#24 id=24 data-nosnippet>24</a>                .flat_map(|f| collect_ident_from_pat(<span class="kw-2">&amp;</span>f.pat)),
 <a href=#25 id=25 data-nosnippet>25</a>        ),
-<a href=#26 id=26 data-nosnippet>26</a>        <span class="kw">_ </span>=&gt; <span class="macro">todo!</span>(),
-<a href=#27 id=27 data-nosnippet>27</a>    }
-<a href=#28 id=28 data-nosnippet>28</a>}
-<a href=#29 id=29 data-nosnippet>29</a>
-<a href=#30 id=30 data-nosnippet>30</a><span class="kw">fn </span>cfg_or_dummy_impl(cond: Meta, func: ItemFn) -&gt; TokenStream {
-<a href=#31 id=31 data-nosnippet>31</a>    <span class="kw">let </span>params = func
-<a href=#32 id=32 data-nosnippet>32</a>        .sig
-<a href=#33 id=33 data-nosnippet>33</a>        .inputs
-<a href=#34 id=34 data-nosnippet>34</a>        .iter()
-<a href=#35 id=35 data-nosnippet>35</a>        .filter_map(|f| <span class="kw">match </span>f {
-<a href=#36 id=36 data-nosnippet>36</a>            FnArg::Typed(pat) =&gt; <span class="prelude-val">Some</span>(pat),
-<a href=#37 id=37 data-nosnippet>37</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#38 id=38 data-nosnippet>38</a>        })
-<a href=#39 id=39 data-nosnippet>39</a>        .flat_map(|p| collect_ident_from_pat(<span class="kw-2">&amp;</span>p.pat));
-<a href=#40 id=40 data-nosnippet>40</a>
-<a href=#41 id=41 data-nosnippet>41</a>    <span class="kw">let </span><span class="kw-2">mut </span>func_unreachable = func.clone();
-<a href=#42 id=42 data-nosnippet>42</a>    func_unreachable.block = <span class="macro">parse_quote!</span>({
-<a href=#43 id=43 data-nosnippet>43</a>        #(
-<a href=#44 id=44 data-nosnippet>44</a>            <span class="kw">let _ </span>= #params;
-<a href=#45 id=45 data-nosnippet>45</a>        )*
-<a href=#46 id=46 data-nosnippet>46</a>
-<a href=#47 id=47 data-nosnippet>47</a>        <span class="macro">unreachable!</span>()
-<a href=#48 id=48 data-nosnippet>48</a>    });
-<a href=#49 id=49 data-nosnippet>49</a>
-<a href=#50 id=50 data-nosnippet>50</a>    <span class="macro">quote::quote!</span>(
-<a href=#51 id=51 data-nosnippet>51</a>        <span class="attr">#[cfg(#cond)]
-<a href=#52 id=52 data-nosnippet>52</a>        #[cfg_attr(doc, doc(cfg(#cond)))]
-<a href=#53 id=53 data-nosnippet>53</a>        </span>#func
-<a href=#54 id=54 data-nosnippet>54</a>        <span class="attr">#[cfg(not(#cond))]
-<a href=#55 id=55 data-nosnippet>55</a>        #[cfg_attr(doc, doc(cfg(#cond)))]
-<a href=#56 id=56 data-nosnippet>56</a>        </span>#func_unreachable
-<a href=#57 id=57 data-nosnippet>57</a>    )
-<a href=#58 id=58 data-nosnippet>58</a>}
+<a href=#26 id=26 data-nosnippet>26</a>        Pat::Tuple(pat_tuple) =&gt; Box::new(pat_tuple.elems.iter().flat_map(collect_ident_from_pat)),
+<a href=#27 id=27 data-nosnippet>27</a>        Pat::TupleStruct(pat_tuple_struct) =&gt; Box::new(
+<a href=#28 id=28 data-nosnippet>28</a>            pat_tuple_struct
+<a href=#29 id=29 data-nosnippet>29</a>                .elems
+<a href=#30 id=30 data-nosnippet>30</a>                .iter()
+<a href=#31 id=31 data-nosnippet>31</a>                .flat_map(collect_ident_from_pat),
+<a href=#32 id=32 data-nosnippet>32</a>        ),
+<a href=#33 id=33 data-nosnippet>33</a>        <span class="kw">_ </span>=&gt; Box::new(iter::empty()),
+<a href=#34 id=34 data-nosnippet>34</a>    }
+<a href=#35 id=35 data-nosnippet>35</a>}
+<a href=#36 id=36 data-nosnippet>36</a>
+<a href=#37 id=37 data-nosnippet>37</a><span class="doccomment">/// Builds the conditional function expansion.
+<a href=#38 id=38 data-nosnippet>38</a>///
+<a href=#39 id=39 data-nosnippet>39</a>/// Emits the original function under `cond` and an unreachable dummy function under `not(cond)`.
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">fn </span>cfg_or_dummy_impl(cond: Meta, func: ItemFn) -&gt; TokenStream {
+<a href=#41 id=41 data-nosnippet>41</a>    <span class="kw">let </span>params = func
+<a href=#42 id=42 data-nosnippet>42</a>        .sig
+<a href=#43 id=43 data-nosnippet>43</a>        .inputs
+<a href=#44 id=44 data-nosnippet>44</a>        .iter()
+<a href=#45 id=45 data-nosnippet>45</a>        .filter_map(|f| <span class="kw">match </span>f {
+<a href=#46 id=46 data-nosnippet>46</a>            FnArg::Typed(pat) =&gt; <span class="prelude-val">Some</span>(pat),
+<a href=#47 id=47 data-nosnippet>47</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#48 id=48 data-nosnippet>48</a>        })
+<a href=#49 id=49 data-nosnippet>49</a>        .flat_map(|p| collect_ident_from_pat(<span class="kw-2">&amp;</span>p.pat));
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="kw">let </span><span class="kw-2">mut </span>func_unreachable = func.clone();
+<a href=#52 id=52 data-nosnippet>52</a>    func_unreachable.block = <span class="macro">parse_quote!</span>({
+<a href=#53 id=53 data-nosnippet>53</a>        #(
+<a href=#54 id=54 data-nosnippet>54</a>            <span class="kw">let _ </span>= #params;
+<a href=#55 id=55 data-nosnippet>55</a>        )*
+<a href=#56 id=56 data-nosnippet>56</a>
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="macro">unreachable!</span>()
+<a href=#58 id=58 data-nosnippet>58</a>    });
 <a href=#59 id=59 data-nosnippet>59</a>
-<a href=#60 id=60 data-nosnippet>60</a><span class="attr">#[proc_macro_attribute]
-<a href=#61 id=61 data-nosnippet>61</a></span><span class="kw">pub fn </span>cfg_or_dummy(attr: TokenStream1, item: TokenStream1) -&gt; TokenStream1 {
-<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">let </span>attr = <span class="macro">parse_macro_input!</span>(attr <span class="kw">as </span>Meta);
-<a href=#63 id=63 data-nosnippet>63</a>    <span class="kw">let </span>func = <span class="macro">parse_macro_input!</span>(item <span class="kw">as </span>ItemFn);
-<a href=#64 id=64 data-nosnippet>64</a>
-<a href=#65 id=65 data-nosnippet>65</a>    cfg_or_dummy_impl(attr, func).into()
-<a href=#66 id=66 data-nosnippet>66</a>}
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="macro">quote::quote!</span>(
+<a href=#61 id=61 data-nosnippet>61</a>        <span class="attr">#[cfg(#cond)]
+<a href=#62 id=62 data-nosnippet>62</a>        #[cfg_attr(doc, doc(cfg(#cond)))]
+<a href=#63 id=63 data-nosnippet>63</a>        </span>#func
+<a href=#64 id=64 data-nosnippet>64</a>        <span class="attr">#[cfg(not(#cond))]
+<a href=#65 id=65 data-nosnippet>65</a>        #[cfg_attr(doc, doc(cfg(#cond)))]
+<a href=#66 id=66 data-nosnippet>66</a>        </span>#func_unreachable
+<a href=#67 id=67 data-nosnippet>67</a>    )
+<a href=#68 id=68 data-nosnippet>68</a>}
+<a href=#69 id=69 data-nosnippet>69</a>
+<a href=#70 id=70 data-nosnippet>70</a><span class="doccomment">/// Adds a condition-specific implementation and a dummy implementation for a free function.
+<a href=#71 id=71 data-nosnippet>71</a>///
+<a href=#72 id=72 data-nosnippet>72</a>/// The attribute accepts one `cfg` metadata item, such as `target_arch = "aarch64"` or
+<a href=#73 id=73 data-nosnippet>73</a>/// `any(target_arch = "aarch64", target_arch = "riscv64")`. For a function annotated with
+<a href=#74 id=74 data-nosnippet>74</a>/// `#[cfg_or_dummy(condition)]`, the macro emits two conditional definitions:
+<a href=#75 id=75 data-nosnippet>75</a>///
+<a href=#76 id=76 data-nosnippet>76</a>/// - `#[cfg(condition)]` emits the original function and its implementation.
+<a href=#77 id=77 data-nosnippet>77</a>/// - `#[cfg(not(condition))]` emits a dummy function with the same interface.
+<a href=#78 id=78 data-nosnippet>78</a>///
+<a href=#79 id=79 data-nosnippet>79</a>/// Only the definition whose condition matches the current configuration is compiled. The dummy
+<a href=#80 id=80 data-nosnippet>80</a>/// preserves the function's signature, visibility, attributes, generics, ABI, safety, and return
+<a href=#81 id=81 data-nosnippet>81</a>/// type. Its body is unreachable, so it does not implement the target-specific operation.
+<a href=#82 id=82 data-nosnippet>82</a>///
+<a href=#83 id=83 data-nosnippet>83</a>/// # Documentation builds
+<a href=#84 id=84 data-nosnippet>84</a>///
+<a href=#85 id=85 data-nosnippet>85</a>/// This attribute is intended for functions inside modules enabled with
+<a href=#86 id=86 data-nosnippet>86</a>/// `#[cfg(any(condition, doc))]`. During a documentation build for another target, `doc` keeps the
+<a href=#87 id=87 data-nosnippet>87</a>/// module available. A function marked only with `#[cfg(condition)]` would disappear from the
+<a href=#88 id=88 data-nosnippet>88</a>/// generated documentation, while an unconditionally compiled function could fail because its
+<a href=#89 id=89 data-nosnippet>89</a>/// body refers to target-specific code. The dummy keeps the function interface available while
+<a href=#90 id=90 data-nosnippet>90</a>/// avoiding that body.
+<a href=#91 id=91 data-nosnippet>91</a>///
+<a href=#92 id=92 data-nosnippet>92</a>/// The generated definitions receive `doc(cfg(condition))`, so rustdoc records the condition under
+<a href=#93 id=93 data-nosnippet>93</a>/// which the real implementation is available.
+<a href=#94 id=94 data-nosnippet>94</a>///
+<a href=#95 id=95 data-nosnippet>95</a>/// # Examples
+<a href=#96 id=96 data-nosnippet>96</a>///
+<a href=#97 id=97 data-nosnippet>97</a>/// Keeps an x86-64 inline-assembly implementation available in rustdoc:
+<a href=#98 id=98 data-nosnippet>98</a>///
+<a href=#99 id=99 data-nosnippet>99</a>/// ```
+<a href=#100 id=100 data-nosnippet>100</a>/// #[cfg(any(target_arch = "x86_64", doc))]
+<a href=#101 id=101 data-nosnippet>101</a>/// pub mod cpu {
+<a href=#102 id=102 data-nosnippet>102</a>///     use cfg_or_dummy::cfg_or_dummy;
+<a href=#103 id=103 data-nosnippet>103</a>///
+<a href=#104 id=104 data-nosnippet>104</a>///     #[cfg_or_dummy(target_arch = "x86_64")]
+<a href=#105 id=105 data-nosnippet>105</a>///     pub fn pause() {
+<a href=#106 id=106 data-nosnippet>106</a>///         // SAFETY: `pause` has no memory or stack effects exposed to Rust.
+<a href=#107 id=107 data-nosnippet>107</a>///         unsafe {
+<a href=#108 id=108 data-nosnippet>108</a>///             core::arch::asm!("pause", options(nomem, nostack, preserves_flags));
+<a href=#109 id=109 data-nosnippet>109</a>///         }
+<a href=#110 id=110 data-nosnippet>110</a>///     }
+<a href=#111 id=111 data-nosnippet>111</a>/// }
+<a href=#112 id=112 data-nosnippet>112</a>///
+<a href=#113 id=113 data-nosnippet>113</a>/// #[cfg(target_arch = "x86_64")]
+<a href=#114 id=114 data-nosnippet>114</a>/// cpu::pause();
+<a href=#115 id=115 data-nosnippet>115</a>/// ```
+<a href=#116 id=116 data-nosnippet>116</a></span><span class="attr">#[proc_macro_attribute]
+<a href=#117 id=117 data-nosnippet>117</a></span><span class="kw">pub fn </span>cfg_or_dummy(attr: TokenStream1, item: TokenStream1) -&gt; TokenStream1 {
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="kw">let </span>attr = <span class="macro">parse_macro_input!</span>(attr <span class="kw">as </span>Meta);
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="kw">let </span>func = <span class="macro">parse_macro_input!</span>(item <span class="kw">as </span>ItemFn);
+<a href=#120 id=120 data-nosnippet>120</a>
+<a href=#121 id=121 data-nosnippet>121</a>    cfg_or_dummy_impl(attr, func).into()
+<a href=#122 id=122 data-nosnippet>122</a>}
 </code></pre></div></section></main></body></html>
