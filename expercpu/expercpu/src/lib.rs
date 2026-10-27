@@ -1,47 +1,59 @@
-//! Per-CPU data support.
-//!
-//! Defines and initializes per-CPU data areas for ecraOS.
-
+#![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "host-test"), no_std)]
-
-extern crate expercpu_macros;
 
 #[cfg(all(feature = "host-test", not(target_os = "linux")))]
 compile_error!("the expercpu `host-test` backend currently supports Linux only");
 
 #[cfg(feature = "host-test")]
 extern crate std;
-#[cfg(feature = "host-test")]
-pub mod host_test;
 
 use core::alloc::Layout;
 
 #[cfg(feature = "remote-access")]
 use crate_interface::def_interface;
+/// Defines a per-CPU static variable and its accessors.
 pub use expercpu_macros::def_percpu;
 use memory_addr::VirtAddr;
 
-const SIZE_64BIT: usize = 64;
-const PERCPU_AREA_ALIGN: usize = SIZE_64BIT;
+#[cfg(feature = "host-test")]
+pub mod host_test;
 
-unsafe extern "C" {
-    static _percpu_start: u8;
-    static _percpu_end: u8;
-    #[cfg(feature = "early-slot")]
-    static _percpu_early_slot_start: u8;
-    #[cfg(feature = "early-slot")]
-    static _percpu_early_slot_end: u8;
-}
-
+/// Internal items used by macro expansions.
 #[doc(hidden)]
 pub mod __priv {
+    /// Resolves the current host thread per-CPU area base.
     #[cfg(feature = "host-test")]
     pub use crate::host_test::current_base as host_current_base;
 
+    /// The guard used by generated current-CPU accessors.
     #[cfg(feature = "preempt")]
     pub use kernel_guard::NoPreempt as NoPreemptGuard;
 }
 
+/// The alignment used for every per-CPU data area.
+const SIZE_64BIT: usize = 64;
+
+/// The required alignment of every per-CPU data area.
+const PERCPU_AREA_ALIGN: usize = SIZE_64BIT;
+
+// Linker-provided bounds and optional early-slot bounds for the per-CPU section.
+unsafe extern "C" {
+    /// The virtual address of the first byte in the per-CPU section.
+    static _percpu_start: u8;
+
+    /// The virtual address immediately after the per-CPU section.
+    static _percpu_end: u8;
+
+    /// The virtual address of the first byte in the early per-CPU slot.
+    #[cfg(feature = "early-slot")]
+    static _percpu_early_slot_start: u8;
+
+    /// The virtual address immediately after the early per-CPU slot.
+    #[cfg(feature = "early-slot")]
+    static _percpu_early_slot_end: u8;
+}
+
+/// Resolves per-CPU area bases for remote access.
 #[cfg(feature = "remote-access")]
 #[def_interface(gen_caller)]
 pub trait PerCPUAreaIf {
@@ -49,6 +61,7 @@ pub trait PerCPUAreaIf {
     fn percpu_area_base_for(cpu_id: usize) -> VirtAddr;
 }
 
+/// Rounds a size up to the per-CPU area alignment.
 const fn align_up_64(val: usize) -> usize {
     (val + SIZE_64BIT - 1) & !(SIZE_64BIT - 1)
 }
@@ -64,6 +77,7 @@ pub fn percpu_area_layout() -> Layout {
     Layout::from_size_align(align_up_64(percpu_area_size()), PERCPU_AREA_ALIGN).unwrap()
 }
 
+/// Validates a per-CPU area base address.
 fn validate_percpu_base(base: VirtAddr) {
     assert!(
         base.as_usize() != 0,
@@ -86,10 +100,10 @@ fn validate_percpu_base(base: VirtAddr) {
 ///
 /// The caller must ensure that:
 ///
-/// - `base` is the current CPU's writable per-CPU area base;
+/// - `base` is the current CPU's writable per-CPU area base,
 /// - the area is at least `percpu_area_layout().size()` bytes and 64-byte
-///   aligned;
-/// - the destination does not overlap the `.percpu` initial image source; and
+///   aligned,
+/// - the destination does not overlap the `.percpu` initial image source, and
 /// - setting the current CPU's per-CPU register to this base is valid for the
 ///   current execution context.
 pub unsafe fn init(base: VirtAddr) {
@@ -147,6 +161,13 @@ pub fn early_slot_start() -> VirtAddr {
     ))
 }
 
+/// Copies a per-CPU image and writes the current CPU register.
+///
+/// # Safety
+///
+/// `base` must identify a valid writable per-CPU area and `from` must identify
+/// a readable per-CPU image. The regions must be valid for `percpu_area_size()`
+/// bytes and must not overlap in a way that invalidates the copy.
 unsafe fn init_from(base: VirtAddr, from: VirtAddr) {
     validate_percpu_base(base);
     let size = percpu_area_size();
@@ -185,6 +206,7 @@ pub fn read_percpu_reg() -> VirtAddr {
     VirtAddr::from_usize(tp + expercpu_macros::percpu_symbol_vma!(_percpu_start))
 }
 
+/// Reads the host thread current per-CPU area base.
 #[cfg(feature = "host-test")]
 pub fn read_percpu_reg() -> VirtAddr {
     host_test::current_base()
@@ -222,6 +244,11 @@ pub unsafe fn write_percpu_reg(tp: VirtAddr) {
     }
 }
 
+/// Writes the host thread current per-CPU area base.
+///
+/// # Safety
+///
+/// `tp` must be a valid per-CPU area base for the current host thread.
 #[cfg(feature = "host-test")]
 pub unsafe fn write_percpu_reg(tp: VirtAddr) {
     host_test::set_current_base(tp);

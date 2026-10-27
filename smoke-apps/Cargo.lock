@@ -247,7 +247,6 @@ dependencies = [
  "crate_interface",
  "expercpu_macros",
  "memory_addr",
- "x86",
 ]
 
 [[package]]

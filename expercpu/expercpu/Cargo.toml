@@ -1,7 +1,16 @@
 [package]
 name = "expercpu"
+description = "Defines and accesses per-CPU data areas across architectures."
 version = "0.1.0"
+authors = ["Yuekai Jia <equation618@gmail.com>"]
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/expercpu"
+readme = "README.md"
+keywords = ["per-cpu", "cpu-local", "kernel", "no-std", "operating-system"]
+categories = ["no-std", "os"]
 
 [features]
 default = []
@@ -14,9 +23,6 @@ arm-el2 = ["expercpu_macros/arm-el2"]
 [dependencies]
 cfg-if.workspace = true
 crate_interface = { version = "0.3", optional = true }
-expercpu_macros = { path = "../expercpu_macros" }
+expercpu_macros = { version = "0.1.0", path = "../expercpu_macros" }
 kernel_guard = { version = "0.2", optional = true }
 memory_addr.workspace = true
-
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-x86 = "0.52"

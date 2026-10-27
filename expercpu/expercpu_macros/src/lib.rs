@@ -1,60 +1,4 @@
-//! Macros to define and access a per-CPU data structure.
-//!
-//! **DO NOT** use this crate directly. Use the [expercpu] crate instead.
-//!
-//! [expercpu]: https://docs.rs/expercpu
-//!
-//! ## Implementation details of the `def_percpu` macro
-//!
-//! ### Core idea
-//!
-//! The core idea is to collect all per-CPU static variables to a single section (i.e., `.percpu`), then allocate a
-//! per-CPU data area, with the size equals to the size of the `.percpu` section, for each CPU (it can be done
-//! statically or dynamically), then copy the `.percpu` section to each per-CPU data area during initialization.
-//!
-//! The address of a per-CPU static variable on a given CPU can be calculated by adding the offset of the variable
-//! (relative to the section base) to the base address of the per-CPU data area on the CPU.
-//!
-//! ### How to access the per-CPU data
-//!
-//! To access a per-CPU static variable, the generated code combines that CPU's per-CPU data area base with the
-//! variable's offset inside the `.percpu` image. Each CPU's area is addressed independently; per-CPU areas are not
-//! required to be contiguous or derivable from a single whole-area base.
-//!
-//! - Current-CPU access reads the base address from the architecture-specific per-CPU register,
-//!   - like `TPIDR_EL1`/`TPIDR_EL2` on AArch64, or `gs` on x86_64,
-//!   - and adds the per-CPU static variable's offset.
-//! - Remote-CPU access is only generated with the `remote-access` feature,
-//!   - and asks the runtime for that CPU's area base through `expercpu::percpu_area_base_for(cpu_id)`,
-//!   - whose implementation is provided by the `expercpu::PerCPUAreaIf` interface.
-//! - The offset of the per-CPU static variable relative to the per-CPU data area base,
-//!   - which can be calculated by assembly notations, like `offset symbol` on x86_64, or `#:abs_g0_nc:symbol` on
-//!     AArch64, or `%hi(symbol)` and `%lo(symbol)` on RISC-V.
-//! - The size of the per-CPU static variable,
-//!   - which we actually do not need to know, just give the right type to rust compiler.
-//!
-//! ### Generated code
-//!
-//! For each static variable `X` with type `T` that is defined with the `def_percpu` macro, the following items are
-//! generated:
-//!
-//! - A static variable `__PERCPU_X` with type `T` that stores the per-CPU data.
-//!
-//!   This variable is placed in the `.percpu` section. All attributes of the original static variable, as well as the
-//!   initialization expression, are preserved.
-//!
-//!   This variable is never, and should never be, accessed directly. To access the per-CPU data, the offset of the
-//!   variable is, and should be, used.
-//!
-//! - A zero-sized wrapper struct `X_WRAPPER` that is used to access the per-CPU data.
-//!
-//!   Some methods are generated in this struct to access the per-CPU data. For primitive integer types, extra methods
-//!   are generated to accelerate the access.
-//!
-//! - A static variable `X` of type `X_WRAPPER` that is used to access the per-CPU data.
-//!
-//!   This variable is always generated with the same visibility and attributes as the original static variable.
-//!
+#![doc = include_str!("../README.md")]
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -63,6 +7,7 @@ use syn::{Error, ItemStatic};
 
 mod arch;
 
+/// Converts a syntax error into compiler-error tokens.
 fn compiler_error(err: Error) -> TokenStream {
     err.to_compile_error().into()
 }
@@ -100,6 +45,16 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let current_access_note = if cfg!(feature = "preempt") {
+        "Disables preemption for the duration of the call."
+    } else {
+        "The caller must keep execution on the same CPU for the call."
+    };
+    let current_raw_safety_note = if cfg!(feature = "host-test") {
+        "The current host thread must remain associated with a live per-CPU area."
+    } else {
+        "Caller must ensure that preemption is disabled on the current CPU."
+    };
 
     // Do not generate `fn read_current()`, `fn write_current()`, etc for non primitive types.
     let read_write_methods = if is_primitive_int {
@@ -112,38 +67,40 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// # Safety
             ///
-            /// Caller must ensure that preemption is disabled on the current CPU.
+            #[doc = #current_raw_safety_note]
             #[inline]
             pub unsafe fn read_current_raw(&self) -> #ty {
                 #read_current_raw
             }
 
-            /// Set the value of the per-CPU static variable on the current CPU.
+            /// Writes the value of the per-CPU static variable on the current CPU.
             ///
             /// # Safety
             ///
-            /// Caller must ensure that preemption is disabled on the current CPU.
+            #[doc = #current_raw_safety_note]
             #[inline]
             pub unsafe fn write_current_raw(&self, val: #ty) {
                 #write_current_raw
             }
 
-            /// Returns the value of the per-CPU static variable on the current CPU. Preemption will be disabled during
-            /// the call.
+            #[doc = "Returns the value of the per-CPU static variable on the current CPU."]
+            #[doc = ""]
+            #[doc = #current_access_note]
             pub fn read_current(&self) -> #ty {
                 #no_preempt_guard
                 unsafe { self.read_current_raw() }
             }
 
-            /// Set the value of the per-CPU static variable on the current CPU. Preemption will be disabled during the
-            /// call.
+            #[doc = "Writes the value of the per-CPU static variable on the current CPU."]
+            #[doc = ""]
+            #[doc = #current_access_note]
             pub fn write_current(&self, val: #ty) {
                 #no_preempt_guard
                 unsafe { self.write_current_raw(val) }
             }
         }
 
-        // Todo: maybe add `(read|write)_remote(_raw)?` here?
+        // TODO: Add remote read and write helpers when they are needed.
     } else {
         quote! {}
     };
@@ -166,7 +123,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
                 (base.as_usize() + offset) as *const #ty
             }
 
-            /// Returns the reference of the per-CPU static variable on the given CPU.
+            /// Returns a reference to the per-CPU static variable on the given CPU.
             ///
             /// # Safety
             ///
@@ -176,7 +133,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
                 unsafe { &*self.remote_ptr(cpu_id) }
             }
 
-            /// Returns the mutable reference of the per-CPU static variable on the given CPU.
+            /// Returns a mutable reference to the per-CPU static variable on the given CPU.
             ///
             /// # Safety
             ///
@@ -192,14 +149,16 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! {}
     };
     quote! {
+        #[doc(hidden)]
         #[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".percpu"))] // unimplemented on macos
         #(#attrs)*
         static mut #inner_symbol_name: #ty = #init_expr;
 
-        #[doc = concat!("Wrapper struct for the per-CPU data [`", stringify!(#name), "`]")]
+        #[doc = concat!("The per-CPU data wrapper for ", stringify!(#name), ".")]
         #[allow(non_camel_case_types)]
         #vis struct #struct_name {}
 
+        #[doc = concat!("The per-CPU accessor for ", stringify!(#name), ".")]
         #(#attrs)*
         #vis static #name: #struct_name = #struct_name {};
 
@@ -207,7 +166,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// Returns the virtual memory address of this per-CPU static
             /// variable in the `.percpu` section.
             ///
-            /// It's same across all CPUs.
+            /// The address is the same across all CPUs.
             #[inline]
             pub fn symbol_vma(&self) -> usize {
                 #symbol_vma
@@ -223,7 +182,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// # Safety
             ///
-            /// Caller must ensure that preemption is disabled on the current CPU.
+            #[doc = #current_raw_safety_note]
             #[inline]
             pub unsafe fn current_ptr(&self) -> *const #ty {
                 #current_ptr
@@ -233,7 +192,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// # Safety
             ///
-            /// Caller must ensure that preemption is disabled on the current CPU.
+            #[doc = #current_raw_safety_note]
             #[inline]
             pub unsafe fn current_ref_raw(&self) -> &#ty {
                 &*self.current_ptr()
@@ -243,15 +202,16 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// # Safety
             ///
-            /// Caller must ensure that preemption is disabled on the current CPU.
+            #[doc = #current_raw_safety_note]
             #[inline]
             #[allow(clippy::mut_from_ref)]
             pub unsafe fn current_ref_mut_raw(&self) -> &mut #ty {
                 &mut *(self.current_ptr() as *mut #ty)
             }
 
-            /// Manipulate the per-CPU data on the current CPU in the given closure.
-            /// Preemption will be disabled during the call.
+            /// Provides mutable access to the per-CPU data on the current CPU.
+            ///
+            #[doc = #current_access_note]
             pub fn with_current<F, T>(&self, f: F) -> T
             where
                 F: FnOnce(&mut #ty) -> T,
@@ -260,8 +220,9 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
                 f(unsafe { self.current_ref_mut_raw() })
             }
 
-            /// Reset the per-CPU data on the current CPU to the initial value.
-            /// Preemption will be disabled during the reset.
+            /// Resets the per-CPU data on the current CPU to its initial value.
+            ///
+            #[doc = #current_access_note]
             ///
             /// If the initial expression has side effects, they may be executed.
             pub fn reset_to_init(&self) {
@@ -278,6 +239,7 @@ pub fn def_percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
+/// Expands a linker symbol virtual address expression.
 #[doc(hidden)]
 #[proc_macro]
 pub fn percpu_symbol_vma(item: TokenStream) -> TokenStream {

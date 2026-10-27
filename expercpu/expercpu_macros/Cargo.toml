@@ -1,7 +1,16 @@
 [package]
 name = "expercpu_macros"
+description = "Generates per-CPU storage accessors for expercpu."
 version = "0.1.0"
+authors = ["Yuekai Jia <equation618@gmail.com>"]
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GeminiLab/ecraOS"
+documentation = "https://docs.rs/expercpu_macros"
+readme = "README.md"
+keywords = ["per-cpu", "macro", "procedural-macro", "kernel"]
+categories = ["development-tools::procedural-macro-helpers"]
 
 [features]
 default = []

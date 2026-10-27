@@ -1,6 +1,14 @@
+//! Architecture-specific per-CPU code generation.
+
 use quote::{format_ident, quote};
 use syn::{Ident, Type};
 
+/// Architecture-specific code-generation tests.
+#[cfg(test)]
+#[path = "arch_tests.rs"]
+mod tests;
+
+/// Wraps generated code with the x86-64 macOS limitation.
 fn macos_unimplemented(item: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     quote! {
         // aarch64 macOS is supported.
@@ -11,8 +19,9 @@ fn macos_unimplemented(item: proc_macro2::TokenStream) -> proc_macro2::TokenStre
     }
 }
 
-/// Generate a code block that calculates the virtual memory address (VMA) of
-/// a symbol in the `.percpu` section based on the inner symbol name.
+/// Generates a code block that calculates the virtual memory address of a per-CPU symbol.
+///
+/// Uses the inner symbol name to select the architecture-specific instruction sequence.
 pub fn gen_symbol_vma(symbol: &Ident) -> proc_macro2::TokenStream {
     quote! {
         unsafe {
@@ -67,8 +76,9 @@ pub fn gen_symbol_vma(symbol: &Ident) -> proc_macro2::TokenStream {
     }
 }
 
-/// Generate a code block that calculates the offset of the per-CPU variable
-/// based on the inner symbol name.
+/// Generates a code block that calculates a per-CPU symbol offset.
+///
+/// Uses the inner symbol name and the linker-provided per-CPU section start.
 pub fn gen_offset(symbol: &Ident) -> proc_macro2::TokenStream {
     let symbol_vma = gen_symbol_vma(symbol);
     let symbol_vma_percpu_start = gen_symbol_vma(&format_ident!("_percpu_start"));
@@ -82,17 +92,16 @@ pub fn gen_offset(symbol: &Ident) -> proc_macro2::TokenStream {
     }
 }
 
-/// Generate a code block that calculates the pointer to the per-CPU variable on the current CPU, based on the inner
-/// symbol name and the type of the variable.
+/// Generates a code block that calculates a current CPU per-CPU pointer.
+///
+/// Uses the symbol name and variable type to select the architecture-specific instruction sequence.
 pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
-    // let aarch64_tpidr = if cfg!(feature = "arm-el2") {
-    //     "TPIDR_EL2"
-    // } else {
-    //     // For ARM architecture, we assume running in EL1 by default,
-    //     // and use `TPIDR_EL1` to store the base address of the per-CPU data area.
-    //     "TPIDR_EL1"
-    // };
-    // let aarch64_asm = format!("mrs {{}}, {aarch64_tpidr}");
+    let aarch64_tpidr = if cfg!(feature = "arm-el2") {
+        "TPIDR_EL2"
+    } else {
+        "TPIDR_EL1"
+    };
+    let aarch64_mrs = format!("mrs {{base}}, {aarch64_tpidr}");
 
     if cfg!(feature = "host-test") {
         let offset = gen_offset(symbol);
@@ -138,7 +147,7 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
             ::core::arch::asm!(
                 "adrp {ptr}, {symbol}",
                 "add {ptr}, {ptr}, :lo12:{symbol}",
-                "mrs {base}, TPIDR_EL1",
+                #aarch64_mrs,
                 "add {ptr}, {ptr}, {base}",
                 ptr = out(reg) ptr,
                 base = out(reg) base,
@@ -164,10 +173,12 @@ pub fn gen_current_ptr(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
     })
 }
 
-/// Generate a code block that reads the value of the per-CPU variable on the current CPU, based on the inner symbol
-/// name and the type of the variable.
+/// Generates a code block that reads a per-CPU value on the current CPU.
 ///
-/// The type of the variable must be one of the following: `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
+/// Uses the symbol name and variable type to select the architecture-specific instruction sequence.
+///
+/// The type of the variable must be one of the following:
+/// `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
 pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStream {
     if cfg!(feature = "host-test") {
         return quote! {{ unsafe { *self.current_ptr() } }};
@@ -286,10 +297,13 @@ pub fn gen_read_current_raw(symbol: &Ident, ty: &Type) -> proc_macro2::TokenStre
     })
 }
 
-/// Generate a code block that writes the value of the per-CPU variable on the current CPU, based on the inner symbol
-/// name, the identifier of the value to write, and the type of the variable.
+/// Generates a code block that writes a per-CPU value on the current CPU.
 ///
-/// The type of the variable must be one of the following: `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
+/// Uses the symbol name, value identifier, and variable type to select the architecture-specific
+/// instruction sequence.
+///
+/// The type of the variable must be one of the following:
+/// `bool`, `u8`, `u16`, `u32`, `u64`, or `usize`.
 pub fn gen_write_current_raw(symbol: &Ident, val: &Ident, ty: &Type) -> proc_macro2::TokenStream {
     if cfg!(feature = "host-test") {
         return quote! {{ unsafe { *(self.current_ptr() as *mut #ty) = #val; } }};

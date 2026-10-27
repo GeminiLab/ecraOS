@@ -6,32 +6,44 @@ use core::num::NonZeroU32;
 use expercpu::*;
 use memory_addr::VirtAddr;
 
+/// A boolean per-CPU value with a true initial value.
 #[def_percpu]
 static BOOL: bool = true;
 
+/// An 8-bit per-CPU value with a one initial value.
 #[def_percpu]
 static U8: u8 = 1;
 
+/// A 16-bit per-CPU value with a two initial value.
 #[def_percpu]
 static U16: u16 = 2;
 
+/// A 32-bit per-CPU value with a three initial value.
 #[def_percpu]
 static U32: u32 = 3;
 
+/// A 64-bit per-CPU value with a four initial value.
 #[def_percpu]
 static U64: u64 = 4;
 
+/// A pointer-sized per-CPU value with a five initial value.
 #[def_percpu]
 static USIZE: usize = 5;
 
+/// A composite per-CPU value used by the integration tests.
 struct TestStruct {
+    /// A word-sized field in the test value.
     foo: usize,
+
+    /// A byte-sized field in the test value.
     bar: u8,
 }
 
+/// A composite per-CPU value with initialized fields.
 #[def_percpu]
 static STRUCT: TestStruct = TestStruct { foo: 6, bar: 7 };
 
+/// Allocates one zeroed per-CPU area for an integration test.
 fn alloc_area() -> (std::alloc::Layout, *mut u8) {
     let layout = expercpu::percpu_area_layout();
     let base = unsafe { std::alloc::alloc_zeroed(layout) };
@@ -39,11 +51,13 @@ fn alloc_area() -> (std::alloc::Layout, *mut u8) {
     (layout, base)
 }
 
+/// Keeps a test area allocated after the test changes the current CPU register.
 fn keep_active_area_for_process_lifetime(_layout: std::alloc::Layout, _base: *mut u8) {
     // The Linux test writes GS to this per-CPU area. Keep it alive for the
     // process lifetime so GS never points at freed memory after a test returns.
 }
 
+/// Checks the initial values copied into the current CPU area.
 fn assert_initial_values() {
     assert!(BOOL.read_current());
     assert_eq!(U8.read_current(), 1);
@@ -57,6 +71,7 @@ fn assert_initial_values() {
     });
 }
 
+/// Initializes a current CPU area and copies its initial values.
 #[test]
 fn init_sets_current_base_and_copies_initial_values() {
     let (layout, base) = alloc_area();
@@ -102,6 +117,7 @@ fn init_sets_current_base_and_copies_initial_values() {
     keep_active_area_for_process_lifetime(layout, base);
 }
 
+/// Reads, writes, and resets values in the current CPU area.
 #[test]
 fn current_accessors_read_write_and_reset_current_cpu_area() {
     let (layout, base) = alloc_area();
@@ -194,6 +210,7 @@ fn host_test_gives_each_thread_an_isolated_percpu_area() {
     assert_eq!((second.1, second.2, second.3), (true, 22, (222, 22)));
 }
 
+/// Tests remote per-CPU access through the runtime interface.
 #[cfg(feature = "remote-access")]
 mod remote_tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -202,13 +219,18 @@ mod remote_tests {
     use expercpu::PerCPUAreaIf;
     use memory_addr::VirtAddr;
 
+    /// The allocated area mapped to logical CPU zero.
     static CPU0_BASE: AtomicUsize = AtomicUsize::new(0);
+
+    /// The allocated area mapped to logical CPU one.
     static CPU1_BASE: AtomicUsize = AtomicUsize::new(0);
 
+    /// A test implementation of the per-CPU area interface.
     struct TestPerCPUArea;
 
     #[crate_interface::impl_interface]
     impl PerCPUAreaIf for TestPerCPUArea {
+        /// Returns the area registered for a test CPU identifier.
         fn percpu_area_base_for(cpu_id: usize) -> VirtAddr {
             let base = match cpu_id {
                 0 => CPU0_BASE.load(Ordering::SeqCst),
@@ -219,6 +241,7 @@ mod remote_tests {
         }
     }
 
+    /// Resolves remote pointers through the interface-provided area bases.
     #[test]
     fn remote_access_uses_interface_base() {
         let (layout0, base0) = super::alloc_area();
@@ -261,8 +284,8 @@ mod remote_tests {
             assert_eq!(*U32.remote_ref_raw(1), 3);
             assert_eq!(*U64.remote_ref_raw(1), 4);
             assert_eq!(*USIZE.remote_ref_raw(1), 5);
-            assert_eq!((*STRUCT.remote_ref_raw(1)).foo, 6);
-            assert_eq!((*STRUCT.remote_ref_raw(1)).bar, 7);
+            assert_eq!(STRUCT.remote_ref_raw(1).foo, 6);
+            assert_eq!(STRUCT.remote_ref_raw(1).bar, 7);
 
             *BOOL.remote_ref_mut_raw(1) = false;
             *U8.remote_ref_mut_raw(1) = 222;
@@ -281,8 +304,8 @@ mod remote_tests {
             assert_eq!(*U32.remote_ref_raw(1), 0xf00d_f00d);
             assert_eq!(*U64.remote_ref_raw(1), 0xfeed_feed_feed_feed);
             assert_eq!(*USIZE.remote_ref_raw(1), 0x0000_ffff);
-            assert_eq!((*STRUCT.remote_ref_raw(1)).foo, 0x2333);
-            assert_eq!((*STRUCT.remote_ref_raw(1)).bar, 100);
+            assert_eq!(STRUCT.remote_ref_raw(1).foo, 0x2333);
+            assert_eq!(STRUCT.remote_ref_raw(1).bar, 100);
         }
 
         super::keep_active_area_for_process_lifetime(layout0, base0);

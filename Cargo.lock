@@ -241,7 +241,6 @@ dependencies = [
  "expercpu_macros",
  "kernel_guard",
  "memory_addr",
- "x86",
 ]
 
 [[package]]
