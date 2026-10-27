@@ -21,6 +21,7 @@ pub fn test(root: &Path) -> TaskResult<()> {
         "exbuddy",
         "exslab",
         "expt",
+        "page_table_entry",
         "exarch",
         "expercpu",
         "memory_range_set",

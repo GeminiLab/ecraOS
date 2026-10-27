@@ -17,6 +17,7 @@ rust-version = "1.85"
 [features]
 arm-el2 = []
 xuantie-c9xx = []
+xuantie-openc910 = ["xuantie-c9xx"]
 
 [dependencies]
 bitflags = "2.9"
@@ -28,6 +29,10 @@ aarch64-cpu = "11.0"
 [target.'cfg(any(target_arch = "x86_64", ecraos_doc))'.dependencies]
 x86_64 = { version = "0.15", default-features = false }
 
+[dev-dependencies]
+aarch64-cpu = "11.0"
+
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "ecraos_doc"]
+rustdoc-args = ["--cfg", "ecraos_doc"]
 all-features = true

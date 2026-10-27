@@ -194,6 +194,9 @@ impl From<MappingFlags> for DescriptorAttr {
 /// Note that the **AttrIndx\[2:0\]** (bit\[4:2\]) field is set to `0` for
 /// device memory, and `1` for normal memory. The system must configure the
 /// MAIR_ELx system register accordingly.
+///
+/// Leaf mappings require READ permission. The fallible methods return the original mapping flags
+/// on error, and the convenience methods panic on error.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct A64PTE(u64);
@@ -206,15 +209,36 @@ impl A64PTE {
     pub const fn empty() -> Self {
         Self(0)
     }
+
+    /// Converts supported leaf flags to descriptor attributes.
+    ///
+    /// Requires READ because this implementation cannot represent leaf permissions without it.
+    fn try_descriptor_attr(flags: MappingFlags) -> Result<DescriptorAttr, MappingFlags> {
+        if !flags.contains(MappingFlags::READ) {
+            return Err(flags);
+        }
+        Ok(DescriptorAttr::from(flags))
+    }
 }
 
+/// Generic paging operations with validation of AArch64 leaf permissions.
 impl GenericPTE for A64PTE {
-    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self {
-        let mut attr = DescriptorAttr::from(flags) | DescriptorAttr::AF;
+    /// The rejected mapping flags.
+    type FlagError = MappingFlags;
+
+    /// Encodes a page or block after checking that read permission is present.
+    fn try_new_page(
+        paddr: PhysAddr,
+        flags: MappingFlags,
+        is_huge: bool,
+    ) -> Result<Self, Self::FlagError> {
+        let mut attr = Self::try_descriptor_attr(flags)? | DescriptorAttr::AF;
         if !is_huge {
             attr |= DescriptorAttr::NON_BLOCK;
         }
-        Self(attr.bits() | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK))
+        Ok(Self(
+            attr.bits() | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK),
+        ))
     }
 
     fn new_table(paddr: PhysAddr) -> Self {
@@ -234,12 +258,14 @@ impl GenericPTE for A64PTE {
         self.0 = (self.0 & !Self::PHYS_ADDR_MASK) | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK)
     }
 
-    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool) {
-        let mut attr = DescriptorAttr::from(flags) | DescriptorAttr::AF;
+    /// Replaces mapping attributes after validation, preserving the entry on error.
+    fn try_set_flags(&mut self, flags: MappingFlags, is_huge: bool) -> Result<(), Self::FlagError> {
+        let mut attr = Self::try_descriptor_attr(flags)? | DescriptorAttr::AF;
         if !is_huge {
             attr |= DescriptorAttr::NON_BLOCK;
         }
         self.0 = (self.0 & Self::PHYS_ADDR_MASK) | attr.bits();
+        Ok(())
     }
 
     fn bits(self) -> usize {
@@ -271,5 +297,104 @@ impl fmt::Debug for A64PTE {
             .field("attr", &DescriptorAttr::from_bits_truncate(self.0))
             .field("flags", &self.flags())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! AArch64 page and block permission validation tests.
+
+    use super::*;
+
+    /// Lists all R/W/X combinations and whether they describe a supported leaf.
+    fn permission_cases() -> [(MappingFlags, bool); 8] {
+        [
+            (MappingFlags::empty(), false),
+            (MappingFlags::READ, true),
+            (MappingFlags::WRITE, false),
+            (MappingFlags::READ | MappingFlags::WRITE, true),
+            (MappingFlags::EXECUTE, false),
+            (MappingFlags::READ | MappingFlags::EXECUTE, true),
+            (MappingFlags::WRITE | MappingFlags::EXECUTE, false),
+            (
+                MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE,
+                true,
+            ),
+        ]
+    }
+
+    /// Validates leaf permissions without accepting an invalid descriptor or changing it on error.
+    #[test]
+    fn leaf_permission_combinations() {
+        let paddr = PhysAddr::from(0x8000);
+        let permission_mask = MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE;
+        let attributes = [
+            MappingFlags::empty(),
+            MappingFlags::USER,
+            MappingFlags::DEVICE,
+            MappingFlags::UNCACHED,
+        ];
+        for (permissions, valid) in permission_cases() {
+            for attributes in attributes {
+                let flags = permissions | attributes;
+                for is_huge in [false, true] {
+                    let result = A64PTE::try_new_page(paddr, flags, is_huge);
+                    if valid {
+                        let pte = result.unwrap();
+                        assert!(pte.is_present());
+                        assert_eq!(pte.paddr(), paddr);
+                        assert_eq!(pte.is_huge(), is_huge);
+                        assert_eq!(pte.flags() & permission_mask, permissions);
+                    } else {
+                        assert!(result.is_err(), "accepted {flags:?}");
+                        assert_eq!(result.unwrap_err(), flags);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Preserves the full original entry when a flag update lacks read permission.
+    #[test]
+    fn flag_updates_validate_before_modifying_entry() {
+        let paddr = PhysAddr::from(0x8000);
+        let original_flags = MappingFlags::READ | MappingFlags::WRITE | MappingFlags::UNCACHED;
+        for (flags, valid) in permission_cases() {
+            for is_huge in [false, true] {
+                let mut pte = A64PTE::new_page(paddr, original_flags, !is_huge);
+                let original_bits = pte.bits();
+                let result = pte.try_set_flags(flags, is_huge);
+                if valid {
+                    result.unwrap();
+                    assert!(pte.is_present());
+                    assert_eq!(pte.paddr(), paddr);
+                    assert_eq!(pte.is_huge(), is_huge);
+                    assert_eq!(pte.flags(), flags);
+                } else {
+                    assert!(result.is_err(), "accepted {flags:?}");
+                    assert_eq!(result.unwrap_err(), flags);
+                    assert_eq!(pte.bits(), original_bits);
+                }
+            }
+        }
+    }
+
+    /// Rejects execute-only mappings through the legacy constructor in every profile.
+    #[test]
+    #[should_panic(expected = "invalid flags")]
+    fn legacy_new_page_panics_without_read_permission() {
+        A64PTE::new_page(PhysAddr::from(0x8000), MappingFlags::EXECUTE, false);
+    }
+
+    /// Preserves a mapped page when the legacy flag setter rejects write-only permissions.
+    #[test]
+    fn legacy_set_flags_panics_without_modifying_entry() {
+        let mut pte = A64PTE::new_page(PhysAddr::from(0x8000), MappingFlags::READ, false);
+        let original_bits = pte.bits();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pte.set_flags(MappingFlags::WRITE, false);
+        }));
+        assert!(result.is_err());
+        assert_eq!(pte.bits(), original_bits);
     }
 }

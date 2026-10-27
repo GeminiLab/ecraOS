@@ -5,7 +5,7 @@
 //! hardware. Snapshots follow cleanup, and no test executes privileged instructions or claims to
 //! prove hardware synchronization.
 
-use core::marker::PhantomData;
+use core::{convert::Infallible, marker::PhantomData};
 use std::{
     alloc::{Layout, alloc, dealloc},
     cell::RefCell,
@@ -71,12 +71,21 @@ struct TestPte(usize);
 
 /// Encodes independent test leaves and child-table descriptors.
 impl GenericPTE for TestPte {
+    /// The test encoding accepts every flag combination.
+    type FlagError = Infallible;
+
     /// Constructs a leaf with independent address and permission fields.
     ///
     /// The kind determines whether traversal terminates above level zero.
-    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self {
+    fn try_new_page(
+        paddr: PhysAddr,
+        flags: MappingFlags,
+        is_huge: bool,
+    ) -> Result<Self, Self::FlagError> {
         assert!(paddr.is_aligned(PAGE));
-        Self(paddr.as_usize() | (flags.bits() << 2) | if is_huge { 3 } else { 2 })
+        Ok(Self(
+            paddr.as_usize() | (flags.bits() << 2) | if is_huge { 3 } else { 2 },
+        ))
     }
     /// Constructs a child page table descriptor.
     ///
@@ -107,8 +116,9 @@ impl GenericPTE for TestPte {
     /// Changes leaf permissions and kind.
     ///
     /// The physical address remains unchanged.
-    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool) {
-        *self = Self::new_page(self.paddr(), flags, is_huge);
+    fn try_set_flags(&mut self, flags: MappingFlags, is_huge: bool) -> Result<(), Self::FlagError> {
+        *self = Self::try_new_page(self.paddr(), flags, is_huge).unwrap();
+        Ok(())
     }
     /// Returns the complete encoded entry.
     ///

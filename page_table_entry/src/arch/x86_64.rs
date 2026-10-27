@@ -1,6 +1,6 @@
 //! x86 page table entries on 64-bit paging.
 
-use core::fmt;
+use core::{convert::Infallible, fmt};
 
 use memory_addr::PhysAddr;
 pub use x86_64::structures::paging::page_table::PageTableFlags as PTF;
@@ -66,13 +66,24 @@ impl X64PTE {
     }
 }
 
+/// Generic paging operations using the existing x86-64 flag conversion.
 impl GenericPTE for X64PTE {
-    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self {
+    /// The x86-64 flag conversion reports no errors.
+    type FlagError = Infallible;
+
+    /// Encodes a page or block using the existing x86-64 mapping attributes.
+    fn try_new_page(
+        paddr: PhysAddr,
+        flags: MappingFlags,
+        is_huge: bool,
+    ) -> Result<Self, Self::FlagError> {
         let mut flags = PTF::from(flags);
         if is_huge {
             flags |= PTF::HUGE_PAGE;
         }
-        Self(flags.bits() | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK))
+        Ok(Self(
+            flags.bits() | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK),
+        ))
     }
 
     fn new_table(paddr: PhysAddr) -> Self {
@@ -92,12 +103,14 @@ impl GenericPTE for X64PTE {
         self.0 = (self.0 & !Self::PHYS_ADDR_MASK) | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK)
     }
 
-    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool) {
+    /// Replaces mapping attributes while preserving the physical address.
+    fn try_set_flags(&mut self, flags: MappingFlags, is_huge: bool) -> Result<(), Self::FlagError> {
         let mut flags = PTF::from(flags);
         if is_huge {
             flags |= PTF::HUGE_PAGE;
         }
-        self.0 = (self.0 & Self::PHYS_ADDR_MASK) | flags.bits()
+        self.0 = (self.0 & Self::PHYS_ADDR_MASK) | flags.bits();
+        Ok(())
     }
 
     fn bits(self) -> usize {

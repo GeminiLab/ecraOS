@@ -4,7 +4,7 @@
 //!
 //! <https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.html#section-multi-level-page-table-structure-supported-by-page-walking>
 
-use core::fmt;
+use core::{convert::Infallible, fmt};
 
 use memory_addr::PhysAddr;
 
@@ -135,13 +135,24 @@ impl LA64PTE {
     }
 }
 
+/// Generic paging operations using the existing LoongArch mapping conversion.
 impl GenericPTE for LA64PTE {
-    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self {
+    /// The LoongArch flag conversion reports no errors.
+    type FlagError = Infallible;
+
+    /// Encodes a page or huge page with the existing LoongArch attributes.
+    fn try_new_page(
+        paddr: PhysAddr,
+        flags: MappingFlags,
+        is_huge: bool,
+    ) -> Result<Self, Self::FlagError> {
         let mut flags = PTEFlags::from(flags);
         if is_huge {
             flags |= PTEFlags::GH;
         }
-        Self(flags.bits() | ((paddr.as_usize()) as u64 & Self::PHYS_ADDR_MASK))
+        Ok(Self(
+            flags.bits() | ((paddr.as_usize()) as u64 & Self::PHYS_ADDR_MASK),
+        ))
     }
 
     fn new_table(paddr: PhysAddr) -> Self {
@@ -160,12 +171,14 @@ impl GenericPTE for LA64PTE {
         self.0 = (self.0 & !Self::PHYS_ADDR_MASK) | (paddr.as_usize() as u64 & Self::PHYS_ADDR_MASK)
     }
 
-    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool) {
+    /// Replaces mapping attributes while preserving the physical address.
+    fn try_set_flags(&mut self, flags: MappingFlags, is_huge: bool) -> Result<(), Self::FlagError> {
         let mut flags = PTEFlags::from(flags);
         if is_huge {
             flags |= PTEFlags::GH;
         }
         self.0 = (self.0 & Self::PHYS_ADDR_MASK) | flags.bits();
+        Ok(())
     }
 
     fn bits(self) -> usize {

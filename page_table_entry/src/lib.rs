@@ -38,10 +38,33 @@ impl fmt::Debug for MappingFlags {
 /// A generic page table entry.
 ///
 /// All architecture-specific page table entry types implement this trait.
+///
+/// Flag validation is architecture-specific, and conversions can discard or imply flags that
+/// cannot be represented independently by the hardware.
 pub trait GenericPTE: fmt::Debug + Clone + Copy + Sync + Send + Sized {
-    /// Creates a page table entry point to a terminate page or block.
-    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self;
-    /// Creates a page table entry point to a next level page table.
+    /// The error type returned when the implementation rejects a flag combination.
+    ///
+    /// Implementations can use a custom error type or [`MappingFlags`]. Implementations that
+    /// never reject flags can use [`core::convert::Infallible`].
+    type FlagError: fmt::Debug;
+
+    /// Creates a page table entry pointing to a page or block.
+    ///
+    /// Returns an architecture-specific error when the flag combination is rejected.
+    fn try_new_page(
+        paddr: PhysAddr,
+        flags: MappingFlags,
+        is_huge: bool,
+    ) -> Result<Self, Self::FlagError>;
+    /// Creates a page table entry pointing to a terminal page or block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the flags are invalid.
+    fn new_page(paddr: PhysAddr, flags: MappingFlags, is_huge: bool) -> Self {
+        Self::try_new_page(paddr, flags, is_huge).expect("invalid flags")
+    }
+    /// Creates a page table entry pointing to a next-level page table.
     fn new_table(paddr: PhysAddr) -> Self;
 
     /// Returns the physical address mapped by this entry.
@@ -49,10 +72,21 @@ pub trait GenericPTE: fmt::Debug + Clone + Copy + Sync + Send + Sized {
     /// Returns the flags of this entry.
     fn flags(&self) -> MappingFlags;
 
-    /// Set mapped physical address of the entry.
+    /// Sets the mapped physical address of the entry.
     fn set_paddr(&mut self, paddr: PhysAddr);
-    /// Set flags of the entry.
-    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool);
+    /// Sets the flags of the entry.
+    ///
+    /// Returns an architecture-specific error when the flag combination is rejected. The entry
+    /// remains unchanged on error.
+    fn try_set_flags(&mut self, flags: MappingFlags, is_huge: bool) -> Result<(), Self::FlagError>;
+    /// Sets the flags of the entry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the flags are invalid.
+    fn set_flags(&mut self, flags: MappingFlags, is_huge: bool) {
+        Self::try_set_flags(self, flags, is_huge).expect("invalid flags")
+    }
 
     /// Returns the raw bits of this entry.
     fn bits(self) -> usize;
@@ -63,6 +97,6 @@ pub trait GenericPTE: fmt::Debug + Clone + Copy + Sync + Send + Sized {
     /// For non-last level translation, returns whether this entry maps to a
     /// huge frame.
     fn is_huge(&self) -> bool;
-    /// Set this entry to zero.
+    /// Sets this entry to zero.
     fn clear(&mut self);
 }
