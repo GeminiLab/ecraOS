@@ -1,324 +1,292 @@
-//! Slab page header, bitmap-based object tracking, and lock-free remote free.
-//!
-//! Each slab page starts with a [`SlabPageHeader`] followed by the object array.
-//! Local (owner-CPU) operations use a bitmap under the slab lock.
-//! Remote (cross-CPU) frees use an atomic CAS stack -- no lock required.
+//! Slab headers, bitmaps, and remote publication using precomputed layouts.
 
 use core::{
     ptr::NonNull,
-    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
-use memory_addr::{MemoryAddr, VirtAddr, va};
+use memory_addr::{VirtAddr, va};
 
-use crate::size_class::SizeClass;
+use crate::{SlabLayout, size_class::SizeClass};
 
-/// Magic number written at the start of every slab page header.
-pub const SLAB_MAGIC: u32 = 0x534C_4142; // "SLAB"
+/// Fixed byte offset of the first-level bitmap.
+const BITMAP_OFFSET: usize = 64;
+/// Byte offset of the reserved summary bitmap.
+const SUMMARY_OFFSET: usize = 32;
+/// Number of bytes reserved for summary words.
+const SUMMARY_BYTES: usize = 32;
+/// Number of slots covered by each summary bit.
+const GROUP_SLOTS: usize = 512;
+/// Number of first-level words in a summary group.
+const GROUP_WORDS: usize = 8;
 
-/// Maximum objects per slab page (512 = 8 * u64 bitmap words).
-pub const MAX_OBJECTS_PER_SLAB: usize = 512;
-
-/// Number of u64 words in the local bitmap.
-pub const BITMAP_WORDS: usize = MAX_OBJECTS_PER_SLAB / 64; // 8
-
-/// Maximum number of pages a slab may span.
-pub const MAX_SLAB_PAGES: usize = 4;
-
-/// Header placed at the very start of each slab page.
+/// Common header for a slab using a precomputed geometry record.
 ///
-/// Object data starts at `header_end`, aligned to `size_class.size()`.
+/// The owner serializes access to the links and local free count. Remote producers access only
+/// the atomic head and immutable fields. Concurrent operations must project individual fields
+/// through raw pointers rather than create references covering the complete header.
 #[repr(C)]
 pub struct SlabPageHeader {
-    /// Magic number for integrity checks.
-    pub magic: u32,
-    /// Which size class this slab serves.
-    pub size_class: SizeClass,
-    /// Total number of objects that fit.
-    pub object_count: u16,
-    /// Number of objects free in `local_bitmap`.
-    pub local_free_count: u16,
-    /// The CPU that owns this slab page (local alloc/dealloc go through this CPU's lock).
-    pub owner_cpu: u16,
-    _pad: u16,
-    /// Total usable bytes (slab pages * page_size).
-    pub slab_bytes: u32,
-
-    // --- Intrusive doubly-linked list pointers (used by SlabCache) ---
-    pub list_prev: VirtAddr,
-    pub list_next: VirtAddr,
-
-    // --- Local bitmap (under slab lock, owner CPU only) ---
-    // A set bit means the slot is FREE.
-    pub local_bitmap: [u64; BITMAP_WORDS],
-
-    // --- Lock-free remote free stack (any CPU) ---
-    /// Head of the remote-free linked list (object virtual address, 0 = empty).
-    ///
-    /// Each freed object stores `next` at its start (reuses object memory).
+    /// Head of the remotely freed slot list, or zero when no frees are pending.
     pub remote_free_head: AtomicUsize,
-    /// Number of objects in the remote-free stack.
-    pub remote_free_count: AtomicU32,
+    /// Previous slab in the owner-managed cache list.
+    pub list_prev: Option<NonNull<SlabPageHeader>>,
+    /// Next slab in the owner-managed cache list.
+    pub list_next: Option<NonNull<SlabPageHeader>>,
+    /// Immutable logical CPU id that owns the slab.
+    pub owner_cpu: u16,
+    /// Immutable slot capacity initialized from the compile-time layout.
+    pub object_count: u16,
+    /// Number of slots available in the owner-managed bitmap.
+    pub local_free_count: u16,
+    /// Immutable object size class.
+    pub size_class: SizeClass,
 }
 
 impl SlabPageHeader {
-    /// Size of the header in bytes.
-    pub const HEADER_SIZE: usize = core::mem::size_of::<Self>();
-
-    /// Initializes a slab page header, marking all objects as free in the bitmap.
-    ///
-    /// `base` is the virtual address of the page, `bytes` is the total slab size.
-    pub fn init(&mut self, size_class: SizeClass, bytes: usize, owner_cpu: u16) {
-        let obj_size = size_class.size();
-        let data_start = Self::data_offset(obj_size);
-        let usable = bytes.saturating_sub(data_start);
-        let count = (usable / obj_size).min(MAX_OBJECTS_PER_SLAB);
-
-        self.magic = SLAB_MAGIC;
-        self.size_class = size_class;
-        self.object_count = count as u16;
-        self.local_free_count = count as u16;
-        self.owner_cpu = owner_cpu;
-        self._pad = 0;
-        self.slab_bytes = bytes as u32;
-        self.list_prev = va!(0);
-        self.list_next = va!(0);
-        self.local_bitmap = [0u64; BITMAP_WORDS];
-        self.remote_free_head = AtomicUsize::new(0);
-        self.remote_free_count = AtomicU32::new(0);
-
-        // Mark first `count` bits as 1 (free).
-        let full_words = count / 64;
-        let remaining_bits = count % 64;
-        for w in self.local_bitmap.iter_mut().take(full_words) {
-            *w = u64::MAX;
-        }
-        if remaining_bits > 0 {
-            self.local_bitmap[full_words] = (1u64 << remaining_bits) - 1;
-        }
-    }
-
-    /// Returns the byte offset from the start of the page to the first object.
-    ///
-    /// Aligned up to `obj_size` for natural alignment.
-    pub fn data_offset(obj_size: usize) -> usize {
-        let raw = Self::HEADER_SIZE;
-        // Align to obj_size (which is always a power of two).
-        (raw + obj_size - 1) & !(obj_size - 1)
-    }
-
-    /// Returns the virtual address of the object region start (given `base` = page start).
-    #[inline]
-    pub fn data_start(&self, base: VirtAddr) -> VirtAddr {
-        base + Self::data_offset(self.size_class.size())
-    }
-
-    /// Returns the virtual address of object at `index`.
-    #[inline]
-    pub fn object_addr(&self, base: VirtAddr, index: usize) -> VirtAddr {
-        self.data_start(base) + index * self.size_class.size()
-    }
-
-    /// Returns the index of the object whose address is `addr`.
-    #[inline]
-    pub fn object_index(&self, base: VirtAddr, addr: VirtAddr) -> usize {
-        (addr.as_usize() - self.data_start(base).as_usize()) / self.size_class.size()
-    }
-
-    /// Returns the base address (slab start) from an object address.
-    ///
-    /// Searches backward by page because the slab base may no longer have
-    /// absolute `slab_bytes` alignment after metadata is carved from a region.
-    #[inline]
-    pub fn base_from_obj_addr(addr: VirtAddr, slab_bytes: usize, page_size: usize) -> VirtAddr {
-        let slab_pages = slab_bytes / page_size;
-        debug_assert!(slab_pages > 0);
-
-        let page_base = va!(addr.as_usize() & !(page_size - 1));
-        for page_idx in 0..slab_pages {
-            let Some(candidate) = page_base.checked_sub(page_idx * page_size) else {
-                break;
-            };
-            let hdr = unsafe { &*candidate.as_ptr_of::<SlabPageHeader>() };
-            if hdr.magic == SLAB_MAGIC
-                && hdr.slab_bytes as usize == slab_bytes
-                && addr >= candidate
-                && addr < candidate + slab_bytes
-            {
-                return candidate;
-            }
-        }
-
-        debug_assert!(false, "object address does not belong to a live slab");
-        page_base
-    }
-
-    fn base_from_obj_addr_unknown_with_page_size(
-        addr: VirtAddr,
-        page_size: usize,
-    ) -> Option<VirtAddr> {
-        if page_size == 0 || !page_size.is_power_of_two() {
-            return None;
-        }
-        let page_base = va!(addr.as_usize() & !(page_size - 1));
-        for page_idx in 0..MAX_SLAB_PAGES {
-            let Some(candidate) = page_base.checked_sub(page_idx * page_size) else {
-                break;
-            };
-            let hdr = unsafe { &*candidate.as_ptr_of::<SlabPageHeader>() };
-            let slab_bytes = hdr.slab_bytes as usize;
-            if hdr.magic != SLAB_MAGIC
-                || slab_bytes == 0
-                || !slab_bytes.is_multiple_of(page_size)
-                || slab_bytes / page_size > MAX_SLAB_PAGES
-            {
-                continue;
-            }
-            if addr >= candidate && addr < candidate + slab_bytes {
-                return Some(candidate);
-            }
-        }
-        None
-    }
-
-    /// Returns the base address (slab start) from an object address without knowing the slab size.
-    ///
-    /// Searches backward up to [`MAX_SLAB_PAGES`] pages and validates each candidate
-    /// against the header's `slab_bytes`.
-    #[inline]
-    pub fn base_from_obj_addr_unknown(addr: VirtAddr, page_size: usize) -> Option<VirtAddr> {
-        Self::base_from_obj_addr_unknown_with_page_size(addr, page_size)
-    }
-
-    /// Queues the object on its owner's remote-free list.
+    /// Publishes a freed slot to its owning slab.
     ///
     /// # Safety
     ///
-    /// - `ptr` must point to a valid live slab object.
-    /// - `owner_cpu` must match the slab header's owner CPU.
-    /// - `page_size` must be the slab allocator's page size.
-    pub unsafe fn remote_free_object(ptr: NonNull<u8>, owner_cpu: u16, page_size: usize) {
-        let obj_addr = VirtAddr::from_mut_ptr_of(ptr.as_ptr());
-        let Some(base) = Self::base_from_obj_addr_unknown_with_page_size(obj_addr, page_size)
-        else {
-            debug_assert!(false, "object address does not belong to a live slab");
-            return;
+    /// `this` must identify a live initialized slab header. `obj_addr` must identify a live slot
+    /// in that slab, freed exactly once. The header and slot must stay live until publication.
+    /// No reference covering the complete header may overlap this operation.
+    pub unsafe fn remote_free(this: NonNull<Self>, obj_addr: VirtAddr) {
+        // SAFETY: Only the atomic field is borrowed, leaving owner-managed fields unborrowed.
+        let head = unsafe { &(*this.as_ptr()).remote_free_head };
+        let mut previous = head.load(Ordering::Relaxed);
+        loop {
+            // SAFETY: A producer owns its freed slot until the successful release publication.
+            unsafe { obj_addr.as_mut_ptr_of::<usize>().write(previous) };
+            match head.compare_exchange_weak(
+                previous,
+                obj_addr.as_usize(),
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                // The owner may reuse the slot or reclaim backing immediately after publication.
+                Ok(_) => return,
+                Err(current) => previous = current,
+            }
+        }
+    }
+
+    /// Returns whether a live slab has pending remote frees.
+    ///
+    /// # Safety
+    ///
+    /// `this` must remain a live initialized header throughout the atomic load.
+    pub(crate) unsafe fn has_remote_frees(this: NonNull<Self>) -> bool {
+        // SAFETY: The caller supplies a live atomic field and no owner fields are borrowed.
+        unsafe { &(*this.as_ptr()).remote_free_head }.load(Ordering::Acquire) != 0
+    }
+
+    /// Detaches a published remote-free batch for the owner.
+    ///
+    /// # Safety
+    ///
+    /// `this` must be live and the caller must serialize owner-side operations.
+    unsafe fn detach_remote_frees(this: NonNull<Self>) -> usize {
+        // SAFETY: The field is atomic and its containing backing remains allocated.
+        unsafe { &(*this.as_ptr()).remote_free_head }.swap(0, Ordering::Acquire)
+    }
+}
+
+/// Header-only view of backing whose geometry is supplied as immutable data.
+///
+/// Memory operations use raw field projections so remote producers never borrow owner state.
+#[repr(transparent)]
+pub(crate) struct SlabPage(SlabPageHeader);
+
+impl SlabPage {
+    /// Initializes complete exclusive backing using a validated immutable geometry.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must identify writable backing of the selected size, aligned to that size.
+    /// No previous live slots, references, or remote operations may access the backing.
+    pub(crate) unsafe fn init_at(this: *mut Self, layout: &SlabLayout, owner_cpu: u16) {
+        assert!(core::mem::size_of::<SlabPageHeader>() == SUMMARY_OFFSET);
+        assert!(!this.is_null());
+        assert!(this.addr().is_multiple_of(layout.slab_size));
+        let header = SlabPageHeader {
+            remote_free_head: AtomicUsize::new(0),
+            list_prev: None,
+            list_next: None,
+            owner_cpu,
+            object_count: layout.slot_count as u16,
+            local_free_count: layout.slot_count as u16,
+            size_class: layout.size_class,
         };
-        let hdr = unsafe { &*base.as_ptr_of::<SlabPageHeader>() };
-        debug_assert_eq!(hdr.magic, SLAB_MAGIC);
-        debug_assert_eq!(hdr.owner_cpu, owner_cpu);
-        unsafe { hdr.remote_free(obj_addr) };
-    }
-
-    // ------------------------------------------------------------------
-    // Local allocation (under slab lock)
-    // ------------------------------------------------------------------
-
-    /// Allocates one object from the local bitmap, returning the slot index or `None`.
-    pub fn local_alloc(&mut self) -> Option<usize> {
-        for (wi, word) in self.local_bitmap.iter_mut().enumerate() {
-            if *word != 0 {
-                let bit = word.trailing_zeros() as usize;
-                *word &= !(1u64 << bit);
-                self.local_free_count -= 1;
-                return Some(wi * 64 + bit);
-            }
-        }
-        None
-    }
-
-    /// Frees an object back to the local bitmap.
-    pub fn local_free(&mut self, index: usize) {
-        let wi = index / 64;
-        let bit = index % 64;
-        debug_assert!(self.local_bitmap[wi] & (1u64 << bit) == 0, "double free");
-        self.local_bitmap[wi] |= 1u64 << bit;
-        self.local_free_count += 1;
-    }
-
-    /// Returns whether this slab has any free objects (local bitmap only).
-    #[inline]
-    pub fn has_local_free(&self) -> bool {
-        self.local_free_count > 0
-    }
-
-    /// Returns whether every object in this slab is free (local bitmap only).
-    #[inline]
-    pub fn is_all_free(&self) -> bool {
-        self.local_free_count == self.object_count
-    }
-
-    /// Returns whether the local bitmap is completely full (zero free objects locally).
-    #[inline]
-    pub fn is_local_full(&self) -> bool {
-        self.local_free_count == 0
-    }
-
-    // ------------------------------------------------------------------
-    // Remote free (lock-free, any CPU)
-    // ------------------------------------------------------------------
-
-    /// Pushes `obj_addr` onto the remote-free stack (lock-free CAS).
-    ///
-    /// # Safety
-    ///
-    /// - `obj_addr` must point to a previously allocated object within this slab.
-    /// - The object's first `size_of::<usize>()` bytes will be overwritten with
-    ///   the next-pointer.
-    pub unsafe fn remote_free(&self, obj_addr: VirtAddr) {
+        // SAFETY: The caller supplies exclusive complete backing, including both bitmap regions.
         unsafe {
-            loop {
-                let old_head = self.remote_free_head.load(Ordering::Acquire);
-                // Store "next" pointer inside the freed object.
-                obj_addr.as_mut_ptr_of::<usize>().write(old_head);
-                if self
-                    .remote_free_head
-                    .compare_exchange_weak(
-                        old_head,
-                        obj_addr.as_usize(),
-                        Ordering::AcqRel,
-                        Ordering::Relaxed,
-                    )
-                    .is_ok()
-                {
-                    self.remote_free_count.fetch_add(1, Ordering::Relaxed);
-                    return;
+            this.cast::<SlabPageHeader>().write(header);
+            this.cast::<u8>()
+                .add(SUMMARY_OFFSET)
+                .write_bytes(0, SUMMARY_BYTES);
+            let this = NonNull::new_unchecked(this);
+            for word in 0..layout.bitmap_words {
+                let remaining = layout.slot_count - word * 64;
+                Self::bitmap_word(this, word).write(u64::MAX >> (64 - remaining.min(64)));
+            }
+            if layout.summary_words != 0 {
+                for group in 0..layout.slot_count.div_ceil(GROUP_SLOTS) {
+                    let summary = Self::summary_word(this, group / 64);
+                    summary.write(summary.read() | (1 << (group % 64)));
                 }
             }
         }
     }
 
-    /// Drains all remote frees back into the local bitmap.
+    /// Projects a first-level word without borrowing complete backing.
     ///
-    /// Must be called under the owner-CPU slab lock.
-    pub fn drain_remote_frees(&mut self, base: VirtAddr) {
-        let head = self.remote_free_head.swap(0, Ordering::AcqRel);
-        if head == 0 {
-            return;
-        }
-        // Also zero the count (we'll re-add to local).
-        self.remote_free_count.store(0, Ordering::Relaxed);
-
-        let mut ptr = head;
-        while ptr != 0 {
-            let ptr_addr = va!(ptr);
-            let next = unsafe { *ptr_addr.as_ptr_of::<usize>() };
-            let idx = self.object_index(base, ptr_addr);
-            let wi = idx / 64;
-            let bit = idx % 64;
-            debug_assert!(
-                self.local_bitmap[wi] & (1u64 << bit) == 0,
-                "remote double free"
-            );
-            self.local_bitmap[wi] |= 1u64 << bit;
-            self.local_free_count += 1;
-            ptr = next;
+    /// # Safety
+    ///
+    /// Backing must be live and complete. The word must be below the layout's bitmap length.
+    unsafe fn bitmap_word(this: NonNull<Self>, word: usize) -> *mut u64 {
+        // SAFETY: The caller provides complete backing and an in-bounds word index.
+        unsafe {
+            this.as_ptr()
+                .cast::<u8>()
+                .add(BITMAP_OFFSET)
+                .cast::<u64>()
+                .add(word)
         }
     }
 
-    /// Returns whether any remote frees are pending.
-    #[inline]
-    pub fn has_remote_frees(&self) -> bool {
-        self.remote_free_count.load(Ordering::Relaxed) > 0
+    /// Projects a reserved summary word without borrowing owner-managed fields.
+    ///
+    /// # Safety
+    ///
+    /// Backing must be live and the word must be below the layout's active summary length.
+    unsafe fn summary_word(this: NonNull<Self>, word: usize) -> *mut u64 {
+        // SAFETY: The caller provides complete backing and an in-bounds summary index.
+        unsafe {
+            this.as_ptr()
+                .cast::<u8>()
+                .add(SUMMARY_OFFSET)
+                .cast::<u64>()
+                .add(word)
+        }
+    }
+
+    /// Returns the first slot address for matching backing and geometry.
+    fn slot_start(this: NonNull<Self>, layout: &SlabLayout) -> VirtAddr {
+        VirtAddr::from_mut_ptr_of(this.as_ptr()) + layout.slot_offset
+    }
+
+    /// Returns a slot address after checking its capacity bound.
+    fn slot_addr(this: NonNull<Self>, layout: &SlabLayout, index: usize) -> VirtAddr {
+        assert!(index < layout.slot_count);
+        Self::slot_start(this, layout) + (index << layout.object_log2)
+    }
+
+    /// Locates the header from a live object using the geometry's backing mask.
+    ///
+    /// # Safety
+    ///
+    /// The address must identify a live slot in a slab with this exact geometry.
+    pub(crate) unsafe fn from_object(address: VirtAddr, layout: &SlabLayout) -> NonNull<Self> {
+        let base = va!(address.as_usize() & layout.slab_mask);
+        let this = NonNull::new(base.as_mut_ptr_of::<Self>()).expect("live slab base is nonzero");
+        debug_assert!(address >= Self::slot_start(this, layout));
+        debug_assert!(address < base + layout.slab_size);
+        debug_assert!(
+            (address - Self::slot_start(this, layout)).is_multiple_of(1 << layout.object_log2)
+        );
+        this
+    }
+
+    /// Takes a slot using the common first-level and optional summary algorithms.
+    ///
+    /// # Safety
+    ///
+    /// Backing must be live, initialized with this geometry, and locally owner-serialized.
+    pub(crate) unsafe fn local_alloc(this: NonNull<Self>, layout: &SlabLayout) -> Option<VirtAddr> {
+        let header = this.as_ptr().cast::<SlabPageHeader>();
+        // SAFETY: The caller serializes this individual local field.
+        if unsafe { (*header).local_free_count } == 0 {
+            return None;
+        }
+        let (first, end) = if layout.summary_words != 0 {
+            let group = (0..layout.summary_words)
+                .find_map(|word| {
+                    // SAFETY: The owner reads an initialized in-bounds summary word.
+                    let bits = unsafe { Self::summary_word(this, word).read() };
+                    (bits != 0).then(|| word * 64 + bits.trailing_zeros() as usize)
+                })
+                .expect("free count and summary must agree");
+            let first = group * GROUP_WORDS;
+            (first, (first + GROUP_WORDS).min(layout.bitmap_words))
+        } else {
+            (0, layout.bitmap_words)
+        };
+        for word in first..end {
+            // SAFETY: The selected bitmap interval is initialized and within backing.
+            let bitmap = unsafe { Self::bitmap_word(this, word) };
+            let value = unsafe { bitmap.read() };
+            if value == 0 {
+                continue;
+            }
+            let bit = value.trailing_zeros() as usize;
+            let remaining = value & (value - 1);
+            // SAFETY: The owner serializes local count and bitmap updates.
+            unsafe {
+                bitmap.write(remaining);
+                (*header).local_free_count -= 1;
+                if layout.summary_words != 0
+                    && remaining == 0
+                    && (word + 1..end).all(|index| Self::bitmap_word(this, index).read() == 0)
+                {
+                    let group = word / GROUP_WORDS;
+                    let summary = Self::summary_word(this, group / 64);
+                    summary.write(summary.read() & !(1 << (group % 64)));
+                }
+            }
+            return Some(Self::slot_addr(this, layout, word * 64 + bit));
+        }
+        unreachable!("free count and bitmap must agree")
+    }
+
+    /// Restores a live slot to its local bitmap and summary group.
+    ///
+    /// # Safety
+    ///
+    /// The slot must be live in backing of this geometry and freed once by the serialized owner.
+    pub(crate) unsafe fn local_free(this: NonNull<Self>, layout: &SlabLayout, address: VirtAddr) {
+        let offset = address - Self::slot_start(this, layout);
+        debug_assert!(offset.is_multiple_of(1 << layout.object_log2));
+        let index = offset >> layout.object_log2;
+        debug_assert!(index < layout.slot_count);
+        // SAFETY: The caller identifies a live slot and serializes bitmap and local count access.
+        unsafe {
+            let bitmap = Self::bitmap_word(this, index / 64);
+            let mask = 1 << (index % 64);
+            debug_assert_eq!(bitmap.read() & mask, 0, "double free");
+            bitmap.write(bitmap.read() | mask);
+            if layout.summary_words != 0 {
+                let group = index / GROUP_SLOTS;
+                let summary = Self::summary_word(this, group / 64);
+                summary.write(summary.read() | (1 << (group % 64)));
+            }
+            let header = this.as_ptr().cast::<SlabPageHeader>();
+            (*header).local_free_count += 1;
+        }
+    }
+
+    /// Drains one remote batch with the same unconditional swap as the generic baselines.
+    ///
+    /// # Safety
+    ///
+    /// Backing must be initialized with this layout and owner-side operations serialized.
+    pub(crate) unsafe fn drain_remote_frees(this: NonNull<Self>, layout: &SlabLayout) {
+        // SAFETY: The caller supplies a live header and serializes the sole consumer.
+        let mut head = unsafe { SlabPageHeader::detach_remote_frees(this.cast()) };
+        while head != 0 {
+            let address = va!(head);
+            // SAFETY: Acquire detachment made this published link visible to its sole consumer.
+            head = unsafe { address.as_ptr_of::<usize>().read() };
+            unsafe { Self::local_free(this, layout, address) };
+        }
     }
 }
