@@ -1,11 +1,16 @@
-//! Object size classes for the slab allocator.
+//! Slot size classes for the slab allocator.
 
 use core::alloc::Layout;
 
-// Keep discriminants as compact cache indices because allocation and deallocation use `index()`
-// on their hot paths. A size-valued representation makes `size()` cheaper but requires a bit scan
-// for `index()`, which slowed the measured x86_64 release slab allocation and deallocation paths.
-/// Fixed set of object sizes served by the slab allocator.
+/// The slot sizes supported by the slab allocator.
+///
+/// Classes double from 8 to 2048 bytes. Allocation layouts are rounded up to the smallest size
+/// class that can satisfy the layout's size and alignment requirements.
+///
+///
+/// We keep discriminants as compact cache indices because allocation and deallocation use `index()`
+/// on their hot paths. A size-valued representation makes `size()` cheaper but requires a bit scan
+/// for `index()`, which slowed the measured x86_64 release slab allocation and deallocation paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SizeClass {
@@ -29,9 +34,10 @@ pub enum SizeClass {
     Bytes2048 = 8,
 }
 
-/// Maximum object size handled by the slab.
+/// The largest object size and alignment that the slab allocator accepts.
 pub const SLAB_MAX_SIZE: usize = 2048;
 
+/// Selection and properties of supported object size classes.
 impl SizeClass {
     /// All size classes in ascending order.
     pub const ALL: [SizeClass; Self::SIZE_CLASS_COUNT] = [
@@ -49,12 +55,13 @@ impl SizeClass {
     /// Number of distinct size classes.
     pub const SIZE_CLASS_COUNT: usize = 9;
 
-    /// Object sizes in ascending size-class order.
+    /// Slot sizes in ascending size-class order.
     const CLASS_SIZES: [usize; Self::SIZE_CLASS_COUNT] = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 
-    /// Selects the smallest size class that can satisfy `layout`.
+    /// Selects the smallest size class that can satisfy an allocation layout.
     ///
-    /// Returns `None` if the requested size or alignment exceeds the slab's capability.
+    /// Rounds up the larger of the requested size and alignment up to the smallest size class,
+    /// because a slot must satisfy both. Returns `None` if that value exceeds [`SLAB_MAX_SIZE`].
     pub fn from_layout(layout: Layout) -> Option<SizeClass> {
         let size = layout.size().max(layout.align());
         if size > SLAB_MAX_SIZE {
@@ -89,7 +96,7 @@ impl SizeClass {
     // implementation still requires careful testing of realistic workloads, allocator state,
     // compiler output, and CPU features, especially across x86-64, AArch64, and RISC-V.
 
-    /// Returns the object size in bytes for this size class.
+    /// Returns the slot size in bytes for this size class.
     pub const fn size(self) -> usize {
         Self::CLASS_SIZES[self as usize]
     }

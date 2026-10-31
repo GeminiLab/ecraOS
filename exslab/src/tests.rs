@@ -1,4 +1,4 @@
-//! Correctness checks for the shared runtime page and compile-time layout table.
+//! Host tests for slab allocation and remote releases.
 
 use core::{alloc::Layout, ptr::NonNull};
 use std::{
@@ -17,19 +17,20 @@ use memory_addr::VirtAddr;
 
 use crate::{
     AllocError, SizeClass, SlabAllocResult, SlabAllocator, SlabDeallocResult, cache::SlabCache,
-    page::SlabPageHeader,
+    slab_page::SlabPageHeader,
 };
 
-/// Owned, page-aligned backing memory for a host slab.
+/// Owned, page-aligned slab memory for host tests.
 struct TestPages {
-    /// Start of the backing allocation.
+    /// Start of the slab memory allocation.
     base: NonNull<u8>,
     /// Allocation layout required when releasing the pages.
     layout: Layout,
 }
 
+/// Allocation and address access for owned host-test slab memory.
 impl TestPages {
-    /// Allocates zeroed backing aligned to the selected page size.
+    /// Allocates zeroed slab memory aligned to the selected page size.
     fn with_page_size(pages: usize, page_size: usize) -> Self {
         let layout = Layout::from_size_align(pages * page_size, page_size).unwrap();
         // SAFETY: The nonzero layout describes the complete allocation retained by this fixture.
@@ -38,23 +39,24 @@ impl TestPages {
         Self { base, layout }
     }
 
-    /// Returns the virtual base address of the backing pages.
+    /// Returns the virtual base address of the slab memory.
     fn base(&self) -> VirtAddr {
         VirtAddr::from_mut_ptr_of(self.base.as_ptr())
     }
 }
 
+/// Owned slab memory cleanup for host tests.
 impl Drop for TestPages {
-    /// Releases the backing allocation after the fixture is no longer used.
+    /// Releases the slab memory allocation after the fixture is no longer used.
     fn drop(&mut self) {
         // SAFETY: All fixture users have finished and the original allocation layout is retained.
         unsafe { dealloc(self.base.as_ptr(), self.layout) };
     }
 }
 
-/// Locates immutable ownership from the original allocation geometry without borrowing a cache.
+/// Locates a slot's owner CPU from its allocation layout and page size without borrowing a cache.
 #[test]
-fn owner_lookup_uses_original_geometry_without_borrowing_the_allocator() {
+fn owner_lookup_uses_original_layout_without_borrowing_the_allocator() {
     for page_size in [4096, 16384, 65536] {
         for class in SizeClass::ALL {
             let span = (class.size() * 512).min(65536).max(page_size);
@@ -62,7 +64,8 @@ fn owner_lookup_uses_original_geometry_without_borrowing_the_allocator() {
             let mut allocator = SlabAllocator::new(page_size).unwrap();
             let owner = 300 + class.index() as u16;
             let request = Layout::from_size_align(1, class.size()).unwrap();
-            // SAFETY: The fixture supplies exclusive, complete backing aligned to the slab span.
+            // SAFETY: The fixture supplies complete slab memory aligned to its size for exclusive
+            // use.
             unsafe { allocator.add_slab(class, backing.base(), owner) }.unwrap();
             let mut objects = Vec::new();
             while let SlabAllocResult::Allocated(object) = allocator.alloc(request).unwrap() {
@@ -76,7 +79,8 @@ fn owner_lookup_uses_original_geometry_without_borrowing_the_allocator() {
             let last = VirtAddr::from_mut_ptr_of(objects.last().unwrap().as_ptr());
             assert!(last >= backing.base() + span - class.size());
             for object in objects {
-                // SAFETY: Each live slot is released once by the serialized owner.
+                // SAFETY: Each live slot is released once through its owner. No other owner calls
+                // run concurrently.
                 assert!(matches!(
                     unsafe { allocator.dealloc(object, request) },
                     SlabDeallocResult::Done
@@ -97,7 +101,7 @@ fn owner_lookup_uses_original_geometry_without_borrowing_the_allocator() {
     }
 }
 
-/// Fills every supported geometry and restores summary groups after exhaustion.
+/// Fills every supported slab layout and restores summary groups after exhaustion.
 #[test]
 fn runtime_cache_supports_all_layouts_without_metadata_overlap() {
     for object_log in 3..=11 {
@@ -106,7 +110,7 @@ fn runtime_cache_supports_all_layouts_without_metadata_overlap() {
             let span = 1 << slab_log;
             let backing = TestPages::with_page_size(1, span);
             let mut cache = SlabCache::new(object_log, slab_log).unwrap();
-            // SAFETY: The fixture owns complete exclusive backing aligned to its entire span.
+            // SAFETY: The fixture owns complete exclusive slab memory aligned to its entire span.
             unsafe { cache.add_slab(backing.base(), 0) }.unwrap();
             let mut objects = Vec::new();
             let mut addresses = BTreeSet::new();
@@ -141,9 +145,9 @@ fn runtime_cache_supports_all_layouts_without_metadata_overlap() {
     }
 }
 
-/// Rejects unsupported exponents, hardware pages, and backing alignment before memory access.
+/// Rejects unsupported size exponents, page sizes, and slab alignment before memory access.
 #[test]
-fn runtime_layout_rejects_invalid_geometry() {
+fn runtime_layout_rejects_invalid_layout() {
     for (object, slab) in [(2, 12), (12, 12), (3, 11), (3, 19), (usize::MAX, 12)] {
         assert!(matches!(
             SlabCache::new(object, slab),
@@ -177,9 +181,9 @@ fn runtime_layout_rejects_invalid_geometry() {
     );
 }
 
-/// Selects the agreed slab policy without confusing hardware page size and backing alignment.
+/// Selects the agreed slab policy without confusing hardware page size and slab alignment.
 #[test]
-fn runtime_allocator_selects_geometry_and_returns_exact_backing() {
+fn runtime_allocator_selects_layout_and_returns_exact_backing() {
     for (page_size, page_counts) in [
         (4096, [1, 2, 4, 8, 16, 16, 16, 16, 16]),
         (16384, [1, 1, 1, 2, 4, 4, 4, 4, 4]),
@@ -200,7 +204,8 @@ fn runtime_allocator_selects_geometry_and_returns_exact_backing() {
             };
             assert_eq!(size_class, class);
             assert_eq!(requested, pages);
-            // SAFETY: Both fixtures supply exclusive backing of the requested size and alignment.
+            // SAFETY: Both fixtures supply slab memory of the requested size and alignment for
+            // exclusive use.
             unsafe { allocator.add_slab(class, first.base(), 4) }.unwrap();
             let SlabAllocResult::Allocated(object) = allocator.alloc(request).unwrap() else {
                 panic!("registered backing must supply a slot");
@@ -215,7 +220,7 @@ fn runtime_allocator_selects_geometry_and_returns_exact_backing() {
             let SlabAllocResult::Allocated(object) = allocator.alloc(request).unwrap() else {
                 panic!("the second backing must supply a slot");
             };
-            // SAFETY: This live slot is released exactly once by its serialized owner.
+            // SAFETY: This live slot is released once through its owner, without concurrent calls.
             let SlabDeallocResult::FreeSlab {
                 base,
                 pages: returned,
@@ -235,7 +240,7 @@ fn runtime_allocator_reuses_concurrent_remote_publications() {
     let backing = TestPages::with_page_size(1, 65536);
     let mut allocator = SlabAllocator::new(65536).unwrap();
     let request = Layout::from_size_align(8, 8).unwrap();
-    // SAFETY: The fixture owns complete writable slab-aligned backing for all scoped operations.
+    // SAFETY: The fixture owns complete writable slab memory with full-span alignment for all uses.
     unsafe { allocator.add_slab(SizeClass::Bytes8, backing.base(), 0) }.unwrap();
     let mut held = Vec::new();
     while let SlabAllocResult::Allocated(object) = allocator.alloc(request).unwrap() {
@@ -262,7 +267,7 @@ fn runtime_allocator_reuses_concurrent_remote_publications() {
                 thread::yield_now();
             };
             assert_eq!(reused, object);
-            // SAFETY: Acquire draining transferred the live slot back to this owner.
+            // SAFETY: Draining with Ordering::Acquire transferred the live slot back to this owner.
             unsafe { reused.as_ptr().write_bytes(0x5A, 8) };
         }
         drop(sender);
@@ -285,7 +290,7 @@ fn runtime_allocator_reclaims_immediately_after_remote_publication() {
         let reclaimed = TestPages::with_page_size(1, 65536);
         let mut allocator = SlabAllocator::new(page_size).unwrap();
         let request = Layout::from_size_align(2048, 2048).unwrap();
-        // SAFETY: Both fixtures supply independent complete backing aligned to 64 KiB.
+        // SAFETY: Both fixtures supply independent complete slab memory aligned to 64 KiB.
         unsafe { allocator.add_slab(SizeClass::Bytes2048, retained.base(), 0) }.unwrap();
         let SlabAllocResult::Allocated(first) = allocator.alloc(request).unwrap() else {
             panic!("registered backing must supply a live slot");
@@ -307,7 +312,7 @@ fn runtime_allocator_reclaims_immediately_after_remote_publication() {
         thread::scope(|scope| {
             let producer = scope.spawn(move || {
                 let object = NonNull::new(address.as_mut_ptr()).unwrap();
-                // SAFETY: This producer publishes one live allocation with its exact geometry.
+                // SAFETY: This producer publishes one live allocation with its exact slab layout.
                 unsafe { SlabAllocator::remote_free_object(object, request, page_size) }.unwrap();
             });
             let header = NonNull::new(reclaimed.base().as_mut_ptr_of::<SlabPageHeader>()).unwrap();
@@ -315,7 +320,7 @@ fn runtime_allocator_reclaims_immediately_after_remote_publication() {
             while !unsafe { SlabPageHeader::has_remote_frees(header) } {
                 thread::yield_now();
             }
-            // SAFETY: The final local release drains the published batch and empties backing.
+            // SAFETY: The final local release drains the published batch and empties the slab.
             let SlabDeallocResult::FreeSlab { base, pages } =
                 (unsafe { allocator.dealloc(local, request) })
             else {
@@ -429,7 +434,7 @@ fn runtime_allocator_preserves_all_class_lifecycles() {
             };
             let span = pages * page_size;
             let first = TestPages::with_page_size(1, span);
-            // SAFETY: The fixture supplies complete, exclusive, span-aligned backing.
+            // SAFETY: The fixture supplies complete, exclusive slab memory aligned to its size.
             unsafe { allocator.add_slab(size_class, first.base(), 7) }.unwrap();
             let mut objects = Vec::new();
             let mut addresses = BTreeSet::new();
@@ -471,7 +476,8 @@ fn runtime_allocator_preserves_all_class_lifecycles() {
                 ));
             }
             let second = TestPages::with_page_size(1, span);
-            // SAFETY: This is a separate complete backing allocation with the required alignment.
+            // SAFETY: This is a separate complete slab memory allocation with the required
+            // alignment.
             unsafe { allocator.add_slab(size_class, second.base(), 7) }.unwrap();
             let SlabAllocResult::Allocated(object) = allocator.alloc(layout).unwrap() else {
                 panic!("newly registered slab must supply a slot");
@@ -509,7 +515,7 @@ fn check_non_head_unlink(page_size: usize) {
     let backing: Vec<_> = (0..3).map(|_| TestPages::with_page_size(1, span)).collect();
     let mut allocator = SlabAllocator::new(page_size).unwrap();
     for slab in &backing {
-        // SAFETY: Every fixture supplies independent complete backing with full-span alignment.
+        // SAFETY: Every fixture supplies independent complete slab memory with full-span alignment.
         unsafe { allocator.add_slab(class, slab.base(), 0) }.unwrap();
     }
     let request = Layout::from_size_align(2048, 2048).unwrap();
@@ -579,13 +585,13 @@ fn runtime_allocators_do_not_share_cache_state() {
     let mut first_allocator = SlabAllocator::new(4096).unwrap();
     let mut second_allocator = SlabAllocator::new(4096).unwrap();
     let layout = Layout::from_size_align(8, 8).unwrap();
-    // SAFETY: Each independent allocator receives distinct complete aligned backing.
+    // SAFETY: Each independent allocator receives distinct complete aligned slab memory.
     unsafe { first_allocator.add_slab(SizeClass::Bytes8, first.base(), 0) }.unwrap();
     assert!(matches!(
         second_allocator.alloc(layout).unwrap(),
         SlabAllocResult::NeedsSlab { .. }
     ));
-    // SAFETY: The second allocation is independent of the first allocator's backing.
+    // SAFETY: The second allocation is independent of the first allocator's slab memory.
     unsafe { second_allocator.add_slab(SizeClass::Bytes8, second.base(), 1) }.unwrap();
     for (allocator, base) in [
         (&mut first_allocator, first.base()),

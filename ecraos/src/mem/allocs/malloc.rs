@@ -4,7 +4,7 @@
 //! physical page allocator, then exposes the result through Rust's global
 //! allocator interface.
 //!
-//! Each CPU serializes local slab operations with its interrupt-disabling lock. Backing spans
+//! Each CPU serializes local slab operations with its interrupt-disabling lock. Slab memory regions
 //! follow exslab's precomputed layouts and are aligned to their complete size. Remote frees
 //! publish to the owning slab directly and are drained by its owner on later allocation or
 //! deallocation. Owner lookup uses the original allocation layout without scanning memory.
@@ -31,7 +31,9 @@ use crate::{
 #[def_percpu]
 static CURRENT_SLAB: LazyInit<PerCpuSlab> = LazyInit::new();
 
-/// ecraOS per-CPU wrapper around the reusable slab allocator core.
+/// A CPU's slab allocator state.
+///
+/// Couples the logical owner identifier with the lock serializing local allocation operations.
 struct PerCpuSlab {
     /// Logical CPU id that owns this slab allocator.
     cpu_id: u16,
@@ -39,6 +41,7 @@ struct PerCpuSlab {
     inner: SpinNoIrq<SlabAllocator>,
 }
 
+/// Locked allocation and slab registration operations for one CPU.
 impl PerCpuSlab {
     /// Creates an empty per-CPU slab allocator wrapper.
     fn new(cpu_id: u16, page_size: usize) -> Self {
@@ -60,9 +63,9 @@ impl PerCpuSlab {
     /// # Safety
     ///
     /// `base` must identify exclusive mapped writable frames of the requested span, aligned to
-    /// that complete span. Backing must remain live until returned or all slab users finish.
+    /// that complete span. Slab memory must remain valid until returned or all slab users finish.
     unsafe fn add_slab(&self, size_class: exslab::SizeClass, base: VirtAddr) -> AllocResult {
-        // SAFETY: The caller guarantees that the supplied frames are valid slab backing memory.
+        // SAFETY: The caller guarantees that the supplied frames are valid slab memory.
         unsafe { self.inner.lock().add_slab(size_class, base, self.cpu_id) }
     }
 
@@ -96,7 +99,7 @@ pub fn init_malloc_current_cpu() {
     info!("Small object allocator initialized for CPU {}", cpu_id);
 }
 
-/// Allocates a slab-backed small object.
+/// Allocates a small object from a slab.
 fn alloc_small(layout: Layout) -> *mut u8 {
     let page_size = mem::vmm::page_size();
 
@@ -138,7 +141,7 @@ fn alloc_large(layout: Layout) -> *mut u8 {
     }
 }
 
-/// Deallocates a slab-backed small object.
+/// Deallocates a small object through its owning slab.
 ///
 /// # Safety
 ///
@@ -186,8 +189,13 @@ fn dealloc_large(ptr: *mut u8, layout: Layout) {
 /// The ecraOS global allocator.
 struct EcraosGlobalAlloc;
 
+/// Kernel global allocation behavior for the slab caches and page allocator.
 unsafe impl GlobalAlloc for EcraosGlobalAlloc {
     /// Allocates an object from a slab or contiguous physical frames according to its layout.
+    ///
+    /// # Safety
+    ///
+    /// The caller must uphold the [`GlobalAlloc::alloc`] contract for the requested layout.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let effective_size = layout.size().max(layout.align());
         if effective_size <= exslab::size_class::SLAB_MAX_SIZE
@@ -200,6 +208,10 @@ unsafe impl GlobalAlloc for EcraosGlobalAlloc {
     }
 
     /// Releases an object through the same layout-selected path used during allocation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must uphold the [`GlobalAlloc::dealloc`] contract for the pointer and layout.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let effective_size = layout.size().max(layout.align());
         if effective_size <= exslab::size_class::SLAB_MAX_SIZE

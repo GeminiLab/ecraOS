@@ -54,7 +54,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
 - [x] [expercpu/expercpu](expercpu/expercpu)
 - [x] [expercpu/expercpu_macros](expercpu/expercpu_macros)
 - [x] [expt](expt)
-- [ ] [exslab](exslab)
+- [x] [exslab](exslab)
 - [x] [page_table_entry](page_table_entry)
 - [x] [utils/cartesian_product](utils/cartesian_product)
 - [x] [utils/cfg_or_dummy](utils/cfg_or_dummy)

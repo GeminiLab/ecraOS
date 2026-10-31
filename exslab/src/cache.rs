@@ -1,7 +1,11 @@
-//! Size-class caches bound to immutable precomputed slab layouts.
+//! Size-class slab caches.
 //!
-//! The caller serializes owner operations and supplies complete slab-aligned backing. Remote
-//! producers publish through the page header without accessing cache state.
+//! A cache holds the slabs of one size class. It keeps slabs with free slots separate from full
+//! ones so that allocation rarely has to search, and retains one empty slab instead of returning it
+//! immediately.
+//!
+//! A remote free touches only the atomic list in a slab header, so it needs no access to the cache.
+//! The cache drains pending remote frees when a later allocation or deallocation uses that slab.
 
 use core::ptr::NonNull;
 
@@ -10,25 +14,33 @@ use memory_addr::{MemoryAddr, VirtAddr};
 use crate::{
     SlabLayout,
     error::{AllocError, AllocResult},
-    page::{SlabPage, SlabPageHeader},
+    slab_page::{SlabPage, SlabPageHeader},
 };
 
-/// Cache with one permanently bound immutable layout and three common-header heads.
+/// A size-class slab cache.
+///
+/// The cache owns a partial list, a full list, and one retained empty slab. All three hold slabs
+/// registered with [`SlabCache::add_slab`]. The bound layout is fixed at construction, so every
+/// slab in the cache has the same size, slot count, and slot size.
 pub struct SlabCache {
-    /// Slabs with locally available slots.
+    /// Slabs with at least one locally available slot.
     partial: Option<NonNull<SlabPageHeader>>,
-    /// Slabs with no locally available slots.
+    /// Slabs with no locally available slot, though some may have pending remote frees.
     full: Option<NonNull<SlabPageHeader>>,
-    /// Retained empty slab, without list neighbors.
+    /// Retained empty slab, kept out of both lists.
     empty: Option<NonNull<SlabPageHeader>>,
     /// Shared compile-time layout selected when the cache is constructed.
     layout: &'static SlabLayout,
 }
 
+/// Slot allocation and slab memory management for [`SlabCache`].
 impl SlabCache {
-    /// Creates an empty cache for supported object and slab exponents.
+    /// Creates an empty size-class cache.
     ///
-    /// Object exponents range from 3 to 11. Slab exponents range from 12 to 18.
+    /// `object_log2` and `slab_log2` are the base-2 logarithms of the slot and slab sizes in bytes.
+    /// They must select a power-of-two slot size from 8 to 2048 bytes and a power-of-two slab size
+    /// from 4 to 256 KiB. Other values return [`AllocError::InvalidParam`]. The resulting cache
+    /// holds no slab until the caller registers one with [`Self::add_slab`].
     pub const fn new(object_log2: usize, slab_log2: usize) -> AllocResult<Self> {
         match SlabLayout::select(object_log2, slab_log2) {
             Some(layout) => Ok(Self::with_layout(layout)),
@@ -36,7 +48,9 @@ impl SlabCache {
         }
     }
 
-    /// Binds an empty cache to one validated static geometry record.
+    /// Binds an empty cache to one validated static slab layout record.
+    ///
+    /// Used by [`crate::SlabAllocator`], which selects the layout from its page-size policy.
     pub(crate) const fn with_layout(layout: &'static SlabLayout) -> Self {
         Self {
             partial: None,
@@ -46,37 +60,46 @@ impl SlabCache {
         }
     }
 
-    /// Returns the immutable geometry bound to this cache.
+    /// Returns the immutable slab layout bound to this cache.
     pub const fn layout(&self) -> &'static SlabLayout {
         self.layout
     }
 
-    /// Registers backing after checking its complete slab alignment.
+    /// Registers slab memory with this cache.
+    ///
+    /// Initializes the slab so that all of its slots are available, then adds it to the partial
+    /// list. Returns [`AllocError::InvalidParam`] before memory access if the base is zero or is
+    /// not aligned to [`SlabLayout::slab_size`].
     ///
     /// # Safety
     ///
-    /// An accepted base must identify exclusive writable backing of the bound slab size. Backing
-    /// must remain live until returned or all cache operations, slots, and remote producers end.
+    /// An accepted base must identify exclusive writable slab memory of the bound slab size. Keep
+    /// this memory valid until it is returned or all cache operations, slots, and remote producers
+    /// end.
     pub unsafe fn add_slab(&mut self, base: VirtAddr, owner_cpu: u16) -> AllocResult {
         if base.as_usize() == 0 || !base.is_aligned(self.layout.slab_size) {
             return Err(AllocError::InvalidParam);
         }
         let slab = NonNull::new(base.as_mut_ptr_of::<SlabPage>()).unwrap();
-        // SAFETY: The caller supplies exclusive backing of the checked geometry and alignment.
+        // SAFETY: The caller supplies exclusive slab memory of the checked size and alignment.
         unsafe {
-            SlabPage::init_at(slab.as_ptr(), self.layout, owner_cpu);
+            SlabPage::init_at(slab, self.layout, owner_cpu);
             Self::push_front(&mut self.partial, slab.cast());
         }
         Ok(())
     }
 
-    /// Allocates a slot after draining pending remote releases when needed.
+    /// Allocates one object slot.
     ///
-    /// The caller serializes all owner operations. The private layout binding keeps slab
-    /// geometry consistent without selecting an operation-table entry.
+    /// Takes a slot from the first partial slab. If there is none, a full slab with pending remote
+    /// frees is moved back to the partial list, and failing that the retained empty slab is reused.
+    /// Returns `None` when the cache holds no slab that can supply a slot, which is the caller's
+    /// signal to register a new slab.
+    ///
+    /// The caller serializes all operations through this cache.
     pub fn alloc_object(&mut self) -> Option<VirtAddr> {
         if let Some(slab) = self.partial {
-            // SAFETY: Private state fixes geometry and the mutable borrow serializes access.
+            // SAFETY: Private state fixes the slab layout and the mutable borrow serializes access.
             return Some(unsafe { self.alloc_from_partial(slab) });
         }
         let mut current = self.full;
@@ -101,14 +124,20 @@ impl SlabCache {
         }
     }
 
-    /// Frees a live slot and returns excess empty backing.
+    /// Releases an object slot to this cache.
+    ///
+    /// Collects pending remote frees before judging whether the slab is empty, so that a slab
+    /// emptied by remote frees is not mistaken for a partial one. Returns `Some` with the slab
+    /// base when the slab became empty and the cache already retained another empty slab,
+    /// leaving that slab for the caller to release. Its memory spans [`SlabLayout::slab_size`]
+    /// bytes. Otherwise returns `None`, possibly after retaining this slab as the empty one.
     ///
     /// # Safety
     ///
-    /// The address must identify one live slot belonging to this cache, released exactly once
-    /// by the serialized owner.
+    /// The address must identify one live slot belonging to this cache, released exactly once.
+    /// The caller must serialize this call with all other operations through the cache.
     pub unsafe fn dealloc_object(&mut self, obj_addr: VirtAddr) -> Option<VirtAddr> {
-        // SAFETY: A live slot belongs to backing of this exact cache geometry.
+        // SAFETY: A live slot belongs to slab memory with this cache's exact slab layout.
         let slab = unsafe { SlabPage::from_object(obj_addr, self.layout) };
         let header = slab.cast::<SlabPageHeader>();
         // SAFETY: Local fields have serialized owner access, without whole-header references.
@@ -134,15 +163,17 @@ impl SlabCache {
         }
     }
 
-    /// Allocates from a known partial slab and updates its list membership.
+    /// Allocates a slot from a partial slab.
+    ///
+    /// Moves the slab to the full list if the final locally available slot is taken.
     ///
     /// # Safety
     ///
-    /// The slab must belong to this cache's partial list and have its bound geometry.
-    /// All owner accesses must be serialized and the backing must remain live.
+    /// The slab must belong to this cache's partial list and have its bound slab layout.
+    /// All owner accesses must be serialized and the slab memory must remain valid.
     unsafe fn alloc_from_partial(&mut self, header: NonNull<SlabPageHeader>) -> VirtAddr {
         let slab = header.cast::<SlabPage>();
-        // SAFETY: The caller guarantees matching geometry and serialized owner accesses.
+        // SAFETY: The caller guarantees a matching slab layout and serialized owner accesses.
         unsafe {
             SlabPage::drain_remote_frees(slab, self.layout);
             let object =
