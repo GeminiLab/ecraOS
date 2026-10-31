@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["BITMAP_WORDS","MAX_OBJECTS_PER_SLAB","MAX_SLAB_PAGES","SLAB_MAGIC"],"struct":["SlabPageHeader"]};

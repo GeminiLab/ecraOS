@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["CLASS_SIZES","SIZE_CLASS_COUNT","SLAB_MAX_SIZE"],"enum":["SizeClass"]};
+window.SIDEBAR_ITEMS = {"constant":["SLAB_MAX_SIZE"],"enum":["SizeClass"]};

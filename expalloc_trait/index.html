@@ -1,7 +1,72 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Abstract page allocator interface."><title>expalloc_trait - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="expalloc_trait" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate expalloc_trait</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../expalloc_trait/index.html">expalloc_<wbr>trait</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#traits" title="Traits">Traits</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>expalloc_<wbr>trait</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/expalloc_trait/lib.rs.html#1-79">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Abstract page allocator interface.</p>
-<p>This crate defines <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a>, a static interface used by low-level
-components that need physically addressed pages and virtual addresses to
-them, such as page-table implementations. The accompanying
-<a href="struct.DynPageAllocator.html" title="struct expalloc_trait::DynPageAllocator"><code>DynPageAllocator</code></a> function-pointer table permits choosing
-an implementation at runtime.</p>
-</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.DynPageAllocator.html" title="struct expalloc_trait::DynPageAllocator">DynPage<wbr>Allocator</a></dt><dd>A function-pointer table for <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a>.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator">Page<wbr>Allocator</a></dt><dd>A physical page allocator.</dd></dl></section></div></main></body></html>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`expalloc_trait`"><title>expalloc_trait - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="expalloc_trait" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate expalloc_trait</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../expalloc_trait/index.html">expalloc_<wbr>trait</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#expalloc_trait" title="`expalloc_trait`"><code>expalloc_trait</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#default-methods-and-contracts" title="Default methods and contracts">Default methods and contracts</a></li><li><a href="#runtime-selection" title="Runtime selection">Runtime selection</a></li></ul></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#traits" title="Traits">Traits</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>expalloc_<wbr>trait</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/expalloc_trait/lib.rs.html#1-96">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="expalloc_trait"><a class="doc-anchor" href="#expalloc_trait">§</a><code>expalloc_trait</code></h2>
+<p><code>expalloc_trait</code> provides <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a>, a static interface for allocating physically
+contiguous page frames, releasing them, and accessing them through virtual addresses. Generic code
+selects an implementation through a type parameter. The generated <a href="struct.DynPageAllocator.html" title="struct expalloc_trait::DynPageAllocator"><code>DynPageAllocator</code></a> table
+provides runtime selection through function pointers.</p>
+<p>The crate is <code>no_std</code> and does not supply an allocator implementation. Physical and virtual
+addresses use <a href="../memory_addr/addr/struct.PhysAddr.html" title="struct memory_addr::addr::PhysAddr"><code>PhysAddr</code></a> and <a href="../memory_addr/addr/struct.VirtAddr.html" title="struct memory_addr::addr::VirtAddr"><code>VirtAddr</code></a> from <code>memory_addr</code>.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Implement the four required functions of <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a> for an allocator type. This example
+represents an empty pool, so allocation always fails and neither deallocation nor translation has
+a valid input:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expalloc_trait::{DynPageAllocator, PageAllocator};
+<span class="kw">use </span>memory_addr::{PhysAddr, VirtAddr};
+
+<span class="kw">struct </span>EmptyAllocator;
+
+<span class="kw">impl </span>PageAllocator <span class="kw">for </span>EmptyAllocator {
+    <span class="kw">fn </span>page_size_shift() -&gt; usize {
+        <span class="number">12
+    </span>}
+
+    <span class="kw">fn </span>alloc_frames(_page_count: usize) -&gt; <span class="prelude-ty">Option</span>&lt;PhysAddr&gt; {
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">fn </span>dealloc_frames(_addr: PhysAddr, _page_count: usize) {
+        <span class="macro">panic!</span>(<span class="string">"the empty allocator has no allocations"</span>);
+    }
+
+    <span class="kw">fn </span>phys_to_virt(_addr: PhysAddr) -&gt; VirtAddr {
+        <span class="macro">panic!</span>(<span class="string">"the empty allocator has no mapped memory"</span>);
+    }
+}
+
+<span class="macro">assert_eq!</span>(EmptyAllocator::page_size_shift(), <span class="number">12</span>);
+<span class="macro">assert_eq!</span>(EmptyAllocator::alloc_frame(), <span class="prelude-val">None</span>);
+
+<span class="kw">let </span>allocator = DynPageAllocator::new::&lt;EmptyAllocator&gt;();
+<span class="macro">assert_eq!</span>((allocator.page_size_shift)(), <span class="number">12</span>);
+<span class="macro">assert_eq!</span>((allocator.alloc_frames_of_size)(<span class="number">4097</span>), <span class="prelude-val">None</span>);</code></pre></div>
+<p>Generic code can allocate storage and obtain its accessible address without knowing the concrete
+allocator:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>expalloc_trait::PageAllocator;
+<span class="kw">use </span>memory_addr::{PhysAddr, VirtAddr};
+
+<span class="kw">fn </span>allocate_buffer&lt;A: PageAllocator&gt;(size: usize) -&gt; <span class="prelude-ty">Option</span>&lt;(PhysAddr, VirtAddr)&gt; {
+    <span class="kw">let </span>physical = A::alloc_frames_of_size(size)<span class="question-mark">?</span>;
+    <span class="kw">let </span>accessible = A::phys_to_virt(physical);
+    <span class="prelude-val">Some</span>((physical, accessible))
+}</code></pre></div>
+<p>The caller retains responsibility for the allocation. After all accesses have ended, it releases
+the storage with <code>A::dealloc_frames_of_size(physical, size)</code> using the original byte size.</p>
+<h3 id="default-methods-and-contracts"><a class="doc-anchor" href="#default-methods-and-contracts">§</a>Default methods and contracts</h3>
+<p><a href="trait.PageAllocator.html#method.alloc_frame" title="associated function expalloc_trait::PageAllocator::alloc_frame"><code>PageAllocator::alloc_frame</code></a> and <a href="trait.PageAllocator.html#method.dealloc_frame" title="associated function expalloc_trait::PageAllocator::dealloc_frame"><code>PageAllocator::dealloc_frame</code></a> delegate to the corresponding
+frame-count functions with a count of one. The default <a href="trait.PageAllocator.html#method.alloc_frames_of_size" title="associated function expalloc_trait::PageAllocator::alloc_frames_of_size"><code>PageAllocator::alloc_frames_of_size</code></a> and
+<a href="trait.PageAllocator.html#method.dealloc_frames_of_size" title="associated function expalloc_trait::PageAllocator::dealloc_frames_of_size"><code>PageAllocator::dealloc_frames_of_size</code></a> round byte sizes up to whole pages. For example, with
+4 KiB pages, 4097 bytes require two frames. A zero byte size is forwarded as a zero page count,
+whose behavior is determined by the implementation.</p>
+<p>An implementation may override the provided methods, including tracking the original byte size.
+Callers should pair the byte-size methods with the original size even when a different size would
+round to the same page count. See <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a> and its associated functions for the page-size,
+allocation-lifetime, and address-access requirements.</p>
+<h3 id="runtime-selection"><a class="doc-anchor" href="#runtime-selection">§</a>Runtime selection</h3>
+<p><a href="struct.DynPageAllocator.html#method.new" title="associated function expalloc_trait::DynPageAllocator::new"><code>DynPageAllocator::new</code></a> stores the selected implementation’s associated functions, including
+overrides of the default methods. Tables constructed from different implementations have the same
+type and can be selected at runtime. Call a field with parentheses, such as
+<code>(allocator.alloc_frame)()</code>, because each field is a function pointer.</p>
+<p>The table is generated by <a href="../dyn_static_traits/attr.dyn_static_traits.html" title="attr dyn_static_traits::dyn_static_traits"><code>dyn_static_traits::dyn_static_traits</code></a>. Its fields link to the
+corresponding <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a> functions and retain their contracts.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.DynPageAllocator.html" title="struct expalloc_trait::DynPageAllocator">DynPage<wbr>Allocator</a></dt><dd>A function-pointer table for <a href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator"><code>PageAllocator</code></a>.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.PageAllocator.html" title="trait expalloc_trait::PageAllocator">Page<wbr>Allocator</a></dt><dd>A physical page allocator with a static interface.</dd></dl></section></div></main></body></html>

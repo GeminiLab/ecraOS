@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["CacheDeallocResult"],"struct":["ListHead","SlabCache"]};
+window.SIDEBAR_ITEMS = {"struct":["SlabCache"]};

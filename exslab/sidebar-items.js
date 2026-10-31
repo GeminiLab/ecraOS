@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cache","error","page","size_class","slab"]};
+window.SIDEBAR_ITEMS = {"mod":["alloc","cache","error","layout","size_class","slab_page"],"struct":["SlabLayout"]};

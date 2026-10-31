@@ -1,6 +1,142 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Slab allocator core."><title>exslab - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="exslab" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate exslab</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../exslab/index.html">exslab</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>exslab</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/exslab/lib.rs.html#1-27">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Slab allocator core.</p>
-<p>Provides small-object allocation up to 2048 bytes within caller-supplied
-slab pages. The crate does not allocate pages, install mappings, provide
-locking, or manage per-CPU state. Host kernels compose those policies around
-<a href="slab/struct.SlabAllocator.html" title="struct exslab::slab::SlabAllocator"><code>SlabAllocator</code></a>.</p>
-</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.AllocError"><code>pub use error::<a class="enum" href="error/enum.AllocError.html" title="enum exslab::error::AllocError">AllocError</a>;</code></dt><dt id="reexport.AllocResult"><code>pub use error::<a class="type" href="error/type.AllocResult.html" title="type exslab::error::AllocResult">AllocResult</a>;</code></dt><dt id="reexport.SizeClass"><code>pub use size_class::<a class="enum" href="size_class/enum.SizeClass.html" title="enum exslab::size_class::SizeClass">SizeClass</a>;</code></dt><dt id="reexport.SlabAllocResult"><code>pub use slab::<a class="enum" href="slab/enum.SlabAllocResult.html" title="enum exslab::slab::SlabAllocResult">SlabAllocResult</a>;</code></dt><dt id="reexport.SlabAllocator"><code>pub use slab::<a class="struct" href="slab/struct.SlabAllocator.html" title="struct exslab::slab::SlabAllocator">SlabAllocator</a>;</code></dt><dt id="reexport.SlabDeallocResult"><code>pub use slab::<a class="enum" href="slab/enum.SlabDeallocResult.html" title="enum exslab::slab::SlabDeallocResult">SlabDeallocResult</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="cache/index.html" title="mod exslab::cache">cache</a></dt><dd>Per-size-class slab cache.</dd><dt><a class="mod" href="error/index.html" title="mod exslab::error">error</a></dt><dd>Error types for slab allocation operations.</dd><dt><a class="mod" href="page/index.html" title="mod exslab::page">page</a></dt><dd>Slab page header, bitmap-based object tracking, and lock-free remote free.</dd><dt><a class="mod" href="size_class/index.html" title="mod exslab::size_class">size_<wbr>class</a></dt><dd>Object size classes for the slab allocator.</dd><dt><a class="mod" href="slab/index.html" title="mod exslab::slab">slab</a></dt><dd>Slab allocator core.</dd></dl></section></div></main></body></html>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`exslab`"><title>exslab - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="exslab" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate exslab</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../exslab/index.html">exslab</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#exslab" title="`exslab`"><code>exslab</code></a><ul><li><a href="#concepts" title="Concepts">Concepts</a></li><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#allocating-and-freeing" title="Allocating and freeing">Allocating and freeing</a></li><li><a href="#local-and-remote-frees" title="Local and remote frees">Local and remote frees</a></li><li><a href="#slab-memory" title="Slab memory">Slab memory</a></li><li><a href="#precomputed-layouts" title="Precomputed layouts">Precomputed layouts</a></li><li><a href="#validation-and-performance" title="Validation and performance">Validation and performance</a></li></ul></li></ul><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>exslab</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/exslab/lib.rs.html#1-20">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="exslab"><a class="doc-anchor" href="#exslab">§</a><code>exslab</code></h2>
+<p><code>exslab</code> is a <code>no_std</code> slab allocator for objects whose size and alignment are at most 2048 bytes.
+It allocates no memory of its own. Page allocation, virtual mappings, locking, and per-CPU
+allocator selection belong to the caller.</p>
+<h3 id="concepts"><a class="doc-anchor" href="#concepts">§</a>Concepts</h3>
+<ul>
+<li>A <strong>slot</strong> is the region reserved for one object. It may be larger than the requested size.</li>
+<li>A <strong>size class</strong> is one of nine power-of-two slot sizes from 8 to 2048 bytes.
+<a href="size_class/enum.SizeClass.html#method.from_layout" title="associated function exslab::size_class::SizeClass::from_layout"><code>SizeClass::from_layout</code></a> selects the smallest class that satisfies both the size and the
+alignment of an allocation layout (<a href="https://doc.rust-lang.org/nightly/core/alloc/layout/struct.Layout.html" title="struct core::alloc::layout::Layout"><code>core::alloc::Layout</code></a>).</li>
+<li>A <strong>slab</strong> is a memory region aligned to its own size. It holds a
+<a href="slab_page/struct.SlabPageHeader.html" title="struct exslab::slab_page::SlabPageHeader"><code>SlabPageHeader</code></a>, allocation bitmaps, and a fixed number of slots
+of one size class. <strong>Slab memory</strong> is the complete region, supplied by the caller.</li>
+<li>A <strong>cache</strong> is a list of slabs of one size class.</li>
+<li>The <strong>owner</strong> of a slab is the allocator or standalone cache that registered it. Each slab also
+records a logical CPU identifier, <code>owner_cpu</code>, which the caller uses to route frees.</li>
+</ul>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>This host example obtains slab memory from the standard allocator. A kernel instead supplies
+physical pages and passes their mapped virtual address, with the same complete-span alignment.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::{alloc::{alloc_zeroed, dealloc, Layout}, ptr::NonNull};
+
+<span class="kw">use </span>exslab::{SlabAllocResult, SlabAllocator, SlabDeallocResult};
+<span class="kw">use </span>memory_addr::VirtAddr;
+
+<span class="kw">let </span><span class="kw-2">mut </span>allocator = SlabAllocator::new(<span class="number">4096</span>).unwrap();
+<span class="kw">let </span>layout = Layout::from_size_align(<span class="number">64</span>, <span class="number">8</span>).unwrap();
+
+<span class="comment">// The first allocation reports that this size class needs slab memory.
+</span><span class="kw">let </span>SlabAllocResult::NeedsSlab { size_class, pages } = allocator.alloc(layout).unwrap() <span class="kw">else </span>{
+    <span class="macro">unreachable!</span>();
+};
+<span class="kw">let </span>span = pages * <span class="number">4096</span>;
+<span class="kw">let </span>slab_memory_layout = Layout::from_size_align(span, span).unwrap();
+<span class="kw">let </span>slab_memory = NonNull::new(<span class="kw">unsafe </span>{ alloc_zeroed(slab_memory_layout) }).unwrap();
+<span class="kw">let </span>base = VirtAddr::from_mut_ptr_of(slab_memory.as_ptr());
+
+<span class="comment">// SAFETY: The allocation supplies exclusive writable slab memory of the requested span, aligned
+// to that span.
+</span><span class="kw">unsafe </span>{ allocator.add_slab(size_class, base, <span class="number">0</span>) }.unwrap();
+
+<span class="kw">let </span>SlabAllocResult::Allocated(object) = allocator.alloc(layout).unwrap() <span class="kw">else </span>{
+    <span class="macro">unreachable!</span>();
+};
+<span class="comment">// SAFETY: The object is live and retains its allocation layout and hardware page size.
+</span><span class="macro">assert_eq!</span>(<span class="kw">unsafe </span>{ SlabAllocator::owner_cpu(object, layout, <span class="number">4096</span>) }, <span class="prelude-val">Ok</span>(<span class="number">0</span>));
+<span class="comment">// SAFETY: The object is a live allocation of this allocator, released once with its layout.
+</span><span class="macro">assert!</span>(<span class="macro">matches!</span>(
+    <span class="kw">unsafe </span>{ allocator.dealloc(object, layout) },
+    SlabDeallocResult::Done
+));
+
+<span class="comment">// One empty slab stays cached, so drop the allocator before releasing the example's slab memory.
+</span>drop(allocator);
+<span class="comment">// SAFETY: All slab users have finished and the allocation layout is unchanged.
+</span><span class="kw">unsafe </span>{ dealloc(slab_memory.as_ptr(), slab_memory_layout) };</code></pre></div><h3 id="allocating-and-freeing"><a class="doc-anchor" href="#allocating-and-freeing">§</a>Allocating and freeing</h3>
+<p><a href="alloc/struct.SlabAllocator.html" title="struct exslab::alloc::SlabAllocator"><code>SlabAllocator</code></a> keeps one cache per size class. <a href="alloc/struct.SlabAllocator.html#method.alloc" title="method exslab::alloc::SlabAllocator::alloc"><code>SlabAllocator::alloc</code></a> selects the class from
+the allocation layout and takes a slot from that cache. When the cache cannot supply a slot, the
+call returns <a href="alloc/enum.SlabAllocResult.html#variant.NeedsSlab" title="variant exslab::alloc::SlabAllocResult::NeedsSlab"><code>SlabAllocResult::NeedsSlab</code></a> with the class and exact page count. The caller then
+allocates that many contiguous mapped writable pages aligned to the complete span, registers them
+with <a href="alloc/struct.SlabAllocator.html#method.add_slab" title="method exslab::alloc::SlabAllocator::add_slab"><code>SlabAllocator::add_slab</code></a>, and retries. Registration takes no size argument because the
+class determines the slab size. A size or alignment above 2048 bytes returns
+<a href="error/enum.AllocError.html#variant.InvalidParam" title="variant exslab::error::AllocError::InvalidParam"><code>AllocError::InvalidParam</code></a>.</p>
+<p>Each cache keeps a list of partial slabs, a list of full slabs, and at most one retained empty
+slab. Partial slabs have locally available slots and full slabs have none. A full slab may still
+hold slots freed remotely and not yet drained, so allocation checks full slabs for pending remote
+frees before reporting that it needs a slab.</p>
+<p><a href="alloc/struct.SlabAllocator.html#method.dealloc" title="method exslab::alloc::SlabAllocator::dealloc"><code>SlabAllocator::dealloc</code></a> returns <a href="alloc/enum.SlabDeallocResult.html#variant.Done" title="variant exslab::alloc::SlabDeallocResult::Done"><code>SlabDeallocResult::Done</code></a> while the slab stays cached. When a
+slab becomes empty while another empty slab is already retained, the cache removes the newly
+emptied slab and returns its base address and exact page count through
+<a href="alloc/enum.SlabDeallocResult.html#variant.FreeSlab" title="variant exslab::alloc::SlabDeallocResult::FreeSlab"><code>SlabDeallocResult::FreeSlab</code></a>. The caller then releases that memory.</p>
+<p><a href="cache/struct.SlabCache.html" title="struct exslab::cache::SlabCache"><code>SlabCache</code></a> provides the same operations for one caller-selected slot and slab
+size. <a href="alloc/struct.SlabAllocator.html" title="struct exslab::alloc::SlabAllocator"><code>SlabAllocator</code></a> is the usual entry point.</p>
+<h3 id="local-and-remote-frees"><a class="doc-anchor" href="#local-and-remote-frees">§</a>Local and remote frees</h3>
+<p>Local operations register slab memory, allocate slots, and free slots through the owner. They take
+<code>&amp;mut</code> access to prevent concurrent operations. However, Rust’s mutable reference does not prevent
+concurrent operations from the interrupt handler and other tasks on the same CPU. It’s the caller’s
+responsibility to serialize them.</p>
+<p>A remote free does not borrow the owner. <a href="alloc/struct.SlabAllocator.html#method.remote_free_object" title="associated function exslab::alloc::SlabAllocator::remote_free_object"><code>SlabAllocator::remote_free_object</code></a> pushes the released
+slot onto an atomic list in its slab header, using the slot’s first machine word as the link. The
+owner detaches the whole list when a later allocation or deallocation uses that slab, and restores
+the slots to the local bitmap. Slots pushed after a detachment stay pending for a later drain.
+<a href="slab_page/struct.SlabPageHeader.html#method.remote_free" title="associated function exslab::slab_page::SlabPageHeader::remote_free"><code>SlabPageHeader::remote_free</code></a> documents the atomic
+protocol and memory orderings.</p>
+<p>To choose a path, the caller reads the slab’s owner with <a href="alloc/struct.SlabAllocator.html#method.owner_cpu" title="associated function exslab::alloc::SlabAllocator::owner_cpu"><code>SlabAllocator::owner_cpu</code></a>. It needs
+only the object address, the original allocation layout, and the hardware page size. It locates
+the header by masking the address and borrows no allocator state, so any CPU can call it. A kernel
+compares the result with the current CPU identifier and calls either its locked local path or
+<a href="alloc/struct.SlabAllocator.html#method.remote_free_object" title="associated function exslab::alloc::SlabAllocator::remote_free_object"><code>SlabAllocator::remote_free_object</code></a>.</p>
+<p>Both local and remote frees require a live allocation, freed exactly once with its original
+allocation layout. A remote free also requires the hardware page size used by the owner. After a
+remote free publishes the slot, the owner may reuse the slot or reclaim the slab memory at any
+time. A remote free never returns slab memory itself.</p>
+<p>Neither an allocator nor a cache releases slab memory when dropped. The caller keeps slab memory
+valid until it is returned, or until every cache operation, live slot, and remote free has
+finished. The <code># Safety</code> section of each operation states its exact requirements.</p>
+<h3 id="slab-memory"><a class="doc-anchor" href="#slab-memory">§</a>Slab memory</h3>
+<p>For slot size <code>C</code> and hardware page size <code>P</code>, a slab occupies <code>max(min(64 KiB, C * 512), P)</code> bytes
+and must be aligned to that size. <a href="alloc/struct.SlabAllocator.html#method.new" title="associated function exslab::alloc::SlabAllocator::new"><code>SlabAllocator::new</code></a> accepts 4, 16, or 64 KiB hardware pages.</p>
+<div><table><thead><tr><th>Slot size</th><th style="text-align: right">Pages with 4 KiB pages</th><th style="text-align: right">Pages with 16 KiB pages</th><th style="text-align: right">Pages with 64 KiB pages</th></tr></thead><tbody>
+<tr><td>8 B</td><td style="text-align: right">1</td><td style="text-align: right">1</td><td style="text-align: right">1</td></tr>
+<tr><td>16 B</td><td style="text-align: right">2</td><td style="text-align: right">1</td><td style="text-align: right">1</td></tr>
+<tr><td>32 B</td><td style="text-align: right">4</td><td style="text-align: right">1</td><td style="text-align: right">1</td></tr>
+<tr><td>64 B</td><td style="text-align: right">8</td><td style="text-align: right">2</td><td style="text-align: right">1</td></tr>
+<tr><td>128 B through 2048 B</td><td style="text-align: right">16</td><td style="text-align: right">4</td><td style="text-align: right">1</td></tr>
+</tbody></table>
+</div>
+<p>The header and bitmaps share the slab with the slots, so <code>C * 512</code> does not guarantee 512 slots.
+With 4 KiB pages, an 8-byte slab holds 496 slots and a 2048-byte slab holds 31. The last slot ends
+exactly at the end of the slab.</p>
+<div class="example-wrap"><pre class="language-text"><code>slab base, aligned to the slab size
+      |
+      v
++--------------------------------------+
+| SlabPageHeader, 32 bytes             |
++--------------------------------------+
+| Summary bitmap, reserved, 32 bytes   |
++--------------------------------------+
+| First-level bitmap, one bit per slot |
++--------------------------------------+
+| Padding up to the slot alignment     |
++--------------------------------------+
+| N slots of the class size            |
++--------------------------------------+  &lt;-- slab end, no trailing padding</code></pre></div>
+<p>The first-level bitmap records which slots are locally available. A slab with more than 512 slots
+also uses the summary bitmap, with one bit per group of 512 slots, so a search scans at most eight
+first-level words. Large hardware pages therefore are not limited to 512 slots. For example, an
+8-byte slab in a 64 KiB page holds 8058 slots. The <a href="slab_page/index.html" title="mod exslab::slab_page"><code>slab_page</code></a> module documents exact offsets
+and bit meanings.</p>
+<h3 id="precomputed-layouts"><a class="doc-anchor" href="#precomputed-layouts">§</a>Precomputed layouts</h3>
+<p>A <a href="struct.SlabLayout.html" title="struct exslab::SlabLayout"><code>SlabLayout</code></a> record describes the slot offset, slot count, and bitmap sizes for one slot size
+and slab size. Records for all 63 combinations of the nine slot sizes and power-of-two slab sizes
+from 4 to 256 KiB are computed during compilation. <a href="cache/struct.SlabCache.html#method.new" title="associated function exslab::cache::SlabCache::new"><code>cache::SlabCache::new</code></a> selects a record by
+the base-2 logarithms of the two sizes, and <a href="alloc/struct.SlabAllocator.html" title="struct exslab::alloc::SlabAllocator"><code>SlabAllocator</code></a> selects records by its page-size
+policy. Each cache binds one record for its entire lifetime. One shared implementation reads the
+record at runtime, instead of generic instantiations or function pointers for each layout.</p>
+<h3 id="validation-and-performance"><a class="doc-anchor" href="#validation-and-performance">§</a>Validation and performance</h3>
+<p>Host tests cover all 63 slab layouts, all nine classes with 4, 16, and 64 KiB pages, writes to
+every byte of allocated slots, exhaustion and bitmap restoration, exact reclamation, and concurrent
+remote publication. QEMU runs exercise the kernel integration separately.</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.SlabAllocResult"><code>pub use alloc::<a class="enum" href="alloc/enum.SlabAllocResult.html" title="enum exslab::alloc::SlabAllocResult">SlabAllocResult</a>;</code></dt><dt id="reexport.SlabAllocator"><code>pub use alloc::<a class="struct" href="alloc/struct.SlabAllocator.html" title="struct exslab::alloc::SlabAllocator">SlabAllocator</a>;</code></dt><dt id="reexport.SlabDeallocResult"><code>pub use alloc::<a class="enum" href="alloc/enum.SlabDeallocResult.html" title="enum exslab::alloc::SlabDeallocResult">SlabDeallocResult</a>;</code></dt><dt id="reexport.AllocError"><code>pub use error::<a class="enum" href="error/enum.AllocError.html" title="enum exslab::error::AllocError">AllocError</a>;</code></dt><dt id="reexport.AllocResult"><code>pub use error::<a class="type" href="error/type.AllocResult.html" title="type exslab::error::AllocResult">AllocResult</a>;</code></dt><dt id="reexport.SizeClass"><code>pub use size_class::<a class="enum" href="size_class/enum.SizeClass.html" title="enum exslab::size_class::SizeClass">SizeClass</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="alloc/index.html" title="mod exslab::alloc">alloc</a></dt><dd>The slab allocator.</dd><dt><a class="mod" href="cache/index.html" title="mod exslab::cache">cache</a></dt><dd>Size-class slab caches.</dd><dt><a class="mod" href="error/index.html" title="mod exslab::error">error</a></dt><dd>Error types for slab allocation operations.</dd><dt><a class="mod" href="layout/index.html" title="mod exslab::layout">layout</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Slab layout records.</dd><dt><a class="mod" href="size_class/index.html" title="mod exslab::size_class">size_<wbr>class</a></dt><dd>Slot size classes for the slab allocator.</dd><dt><a class="mod" href="slab_page/index.html" title="mod exslab::slab_page">slab_<wbr>page</a></dt><dd>Slab page layout and the operations performed on one slab.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.SlabLayout.html" title="struct exslab::SlabLayout">Slab<wbr>Layout</a></dt><dd>A slab layout.</dd></dl></section></div></main></body></html>
