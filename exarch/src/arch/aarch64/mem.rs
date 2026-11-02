@@ -201,75 +201,89 @@ fn tcr_for_mode(mode: VirtAddrSpaceMode) -> LocalRegisterCopy<u64, TCR_EL1::Regi
 /// reserved device memory, preserving usable RAM on both sides.
 pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let mut regions = RawMemoryRegions::new();
-    if let PlatformBootArg::DeviceTree(dtb_addr) = arg {
-        let dtb = unsafe {
-            DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
-                .expect("failed to parse device tree")
-        };
-        let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dtb.totalsize())
-            .align_outwards(DEVICE_TREE_ALIGN)
-            .expect("device tree range alignment overflow");
-        for node in dtb.nodes().iterator() {
-            let node = node.expect("failed to inspect device tree node");
-            let mut is_memory = false;
-            let mut is_supported = false;
-            let mut is_gic = false;
-            let mut reg_values = [0u64; 4];
-            let mut reg_count = 0;
-            for prop in node.props().iterator() {
-                let prop = prop.expect("failed to inspect device-tree property");
-                match prop.name().expect("invalid device-tree property name") {
-                    "device_type" => {
-                        is_memory = prop.str().is_ok_and(|value| value == "memory");
-                    }
-                    "compatible" => {
-                        for value in prop.iter_str().iterator() {
-                            let value = value.expect("invalid compatible string");
-                            is_gic |= value == "arm,gic-v3";
-                            is_supported |=
-                                matches!(value, "arm,gic-v3" | "arm,pl011" | "arm,armv8-timer");
-                        }
-                    }
-                    "reg" => {
-                        while reg_count < reg_values.len() {
-                            let Some(value) = prop.u64(reg_count).ok() else {
-                                break;
-                            };
-                            reg_values[reg_count] = value;
-                            reg_count += 1;
-                        }
-                    }
-                    _ => {}
+    let PlatformBootArg::DeviceTree(dtb_addr) = arg else {
+        return regions;
+    };
+    let dtb = unsafe {
+        DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
+            .expect("failed to parse device tree")
+    };
+    let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dtb.totalsize())
+        .align_outwards(DEVICE_TREE_ALIGN)
+        .expect("device tree range alignment overflow");
+    for node in dtb.nodes().iterator() {
+        let node = node.expect("failed to inspect device tree node");
+        let mut is_memory = false;
+        let mut is_supported = false;
+        let mut is_gic = false;
+        let mut reg_values = [0u64; 4];
+        let mut reg_count = 0;
+        for prop in node.props().iterator() {
+            let prop = prop.expect("failed to inspect device-tree property");
+            match prop.name().expect("invalid device-tree property name") {
+                "device_type" => {
+                    is_memory = prop.str().is_ok_and(|value| value == "memory");
                 }
-            }
-
-            if is_memory && reg_count >= 2 {
-                let start = reg_values[0];
-                let end = start
-                    .checked_add(reg_values[1])
-                    .expect("memory range overflow");
-                let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
-                let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
-                for range in [before_dtb, after_dtb]
-                    .into_iter()
-                    .flatten()
-                    .filter(|range| !range.is_empty())
-                {
-                    regions
-                        .push(MemoryRegion {
-                            range,
-                            flags: DEFAULT_RAM_FLAGS,
-                            desc: DEFAULT_RAM_DESC,
-                        })
-                        .expect("too many platform memory regions");
+                "compatible" => {
+                    for value in prop.iter_str().iterator() {
+                        let value = value.expect("invalid compatible string");
+                        is_gic |= value == "arm,gic-v3";
+                        is_supported |=
+                            matches!(value, "arm,gic-v3" | "arm,pl011" | "arm,armv8-timer");
+                    }
                 }
+                "reg" => {
+                    while reg_count < reg_values.len() {
+                        let Some(value) = prop.u64(reg_count).ok() else {
+                            break;
+                        };
+                        reg_values[reg_count] = value;
+                        reg_count += 1;
+                    }
+                }
+                _ => {}
             }
+        }
 
-            if is_supported && reg_count >= 2 {
+        if is_memory && reg_count >= 2 {
+            let start = reg_values[0];
+            let end = start
+                .checked_add(reg_values[1])
+                .expect("memory range overflow");
+            let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
+            let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
+            for range in [before_dtb, after_dtb]
+                .into_iter()
+                .flatten()
+                .filter(|range| !range.is_empty())
+            {
+                regions
+                    .push(MemoryRegion {
+                        range,
+                        flags: DEFAULT_RAM_FLAGS,
+                        desc: DEFAULT_RAM_DESC,
+                    })
+                    .expect("too many platform memory regions");
+            }
+        }
+
+        if is_supported && reg_count >= 2 {
+            let _ = regions.push(MemoryRegion {
+                range: PhysAddrRange::from_start_size(
+                    pa!(reg_values[0] as usize),
+                    reg_values[1] as usize,
+                ),
+                flags: MemoryRegionFlags::READ
+                    | MemoryRegionFlags::WRITE
+                    | MemoryRegionFlags::DEVICE
+                    | MemoryRegionFlags::RESERVED,
+                desc: "device-tree MMIO",
+            });
+            if is_gic && reg_count >= 4 {
                 let _ = regions.push(MemoryRegion {
                     range: PhysAddrRange::from_start_size(
-                        pa!(reg_values[0] as usize),
-                        reg_values[1] as usize,
+                        pa!(reg_values[2] as usize),
+                        reg_values[3] as usize,
                     ),
                     flags: MemoryRegionFlags::READ
                         | MemoryRegionFlags::WRITE
@@ -277,32 +291,18 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                         | MemoryRegionFlags::RESERVED,
                     desc: "device-tree MMIO",
                 });
-                if is_gic && reg_count >= 4 {
-                    let _ = regions.push(MemoryRegion {
-                        range: PhysAddrRange::from_start_size(
-                            pa!(reg_values[2] as usize),
-                            reg_values[3] as usize,
-                        ),
-                        flags: MemoryRegionFlags::READ
-                            | MemoryRegionFlags::WRITE
-                            | MemoryRegionFlags::DEVICE
-                            | MemoryRegionFlags::RESERVED,
-                        desc: "device-tree MMIO",
-                    });
-                }
             }
         }
-
-        regions
-            .push(MemoryRegion {
-                range: dtb_range,
-                flags: MemoryRegionFlags::READ
-                    | MemoryRegionFlags::WRITE
-                    | MemoryRegionFlags::RESERVED,
-                desc: DEVICE_TREE_DESC,
-            })
-            .expect("too many platform memory regions");
     }
+
+    regions
+        .push(MemoryRegion {
+            range: dtb_range,
+            flags: MemoryRegionFlags::READ | MemoryRegionFlags::WRITE | MemoryRegionFlags::RESERVED,
+            desc: DEVICE_TREE_DESC,
+        })
+        .expect("too many platform memory regions");
+
     regions
 }
 

@@ -13,6 +13,9 @@ use crate::trap::irq::RiscvExternalIrqConfig;
 #[cfg(target_arch = "x86_64")]
 use crate::trap::irq::X86ExternalIrqConfig;
 
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64", ecraos_doc, test))]
+pub mod dt;
+
 /// The firmware-discovered physical CPU topology.
 ///
 /// The architecture-specific platform parser owns the interpretation of CPU identifiers. The

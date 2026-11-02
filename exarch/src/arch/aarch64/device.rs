@@ -6,7 +6,9 @@ use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::*};
 
 use crate::{
-    platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
+    platform::{
+        CpuTopology, PlatformDescription, PlatformInterruptController, dt::DeviceTreeNodeExt,
+    },
     trap::irq::Aarch64ExternalIrqConfig,
 };
 
@@ -41,7 +43,6 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         "unsupported CPU address-cell count: {cpu_address_cells}"
     );
     let mut cpu_ids = Vec::new();
-    let mut gic = None;
     for node in dtb.nodes().iterator() {
         let node = node.expect("failed to inspect device-tree node");
         if node.name().is_ok_and(|name| name.starts_with("psci")) {
@@ -54,21 +55,13 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             }
         }
         let is_cpu = node
-            .props()
-            .find(|prop| Ok(prop.name()? == "device_type" && prop.str()? == "cpu"))
-            .expect("failed to inspect CPU type")
-            .is_some();
+            .is_device_type("cpu")
+            .expect("failed to inspect CPU type");
         if is_cpu {
-            let enabled = node
-                .props()
-                .find(|prop| Ok(prop.name()? == "status"))
-                .expect("failed to inspect CPU status")
-                .and_then(|prop| prop.str().ok())
-                .is_none_or(|status| status == "okay" || status == "ok");
+            let enabled = node.is_enabled().expect("failed to inspect CPU status");
             if enabled {
                 let reg = node
-                    .props()
-                    .find(|prop| Ok(prop.name()? == "reg"))
+                    .property("reg")
                     .expect("failed to inspect CPU reg")
                     .expect("CPU node has no reg property");
                 let affinity = match cpu_address_cells {
@@ -83,31 +76,27 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
                 cpu_ids.push(usize::try_from(affinity).expect("CPU affinity exceeds usize"));
             }
         }
-        let is_gic = node
-            .props()
-            .any(|prop| Ok(prop.name()? == "compatible" && prop.str()? == "arm,gic-v3"))
-            .expect("failed to inspect GIC compatibility");
-        if is_gic {
-            let reg = node
-                .props()
-                .find(|prop| Ok(prop.name()? == "reg"))
-                .expect("failed to inspect GIC reg")
-                .expect("GIC node has no reg property");
-            gic = Some(Aarch64ExternalIrqConfig {
-                gicd_base: PhysAddr::from_usize(
-                    reg.u64(0).expect("invalid GIC distributor base") as usize
-                ),
-                gicd_size: reg.u64(1).expect("invalid GIC distributor size") as usize,
-                gicr_base: PhysAddr::from_usize(
-                    reg.u64(2).expect("invalid GIC redistributor base") as usize,
-                ),
-                gicr_size: reg.u64(3).expect("invalid GIC redistributor size") as usize,
-                spi_count: 988,
-            });
-        }
     }
     let bsp_id = crate::kernel_if::current_cpu_phys_id();
     let cpu_topology = CpuTopology::new(cpu_ids.into_boxed_slice(), bsp_id);
-    let gic = gic.expect("Device Tree has no GICv3 controller");
+
+    let gic_node = dtb
+        .compatible_nodes("arm,gic-v3")
+        .next()
+        .expect("failed to inspect GIC compatible")
+        .expect("Device Tree has no GICv3 controller");
+    let reg = gic_node
+        .property("reg")
+        .expect("failed to inspect GIC reg")
+        .expect("GIC node has no reg property");
+    let gic = Aarch64ExternalIrqConfig {
+        gicd_base: PhysAddr::from_usize(reg.u64(0).expect("invalid GIC distributor base") as usize),
+        gicd_size: reg.u64(1).expect("invalid GIC distributor size") as usize,
+        gicr_base: PhysAddr::from_usize(
+            reg.u64(2).expect("invalid GIC redistributor base") as usize
+        ),
+        gicr_size: reg.u64(3).expect("invalid GIC redistributor size") as usize,
+        spi_count: 988,
+    };
     PlatformDescription::new(cpu_topology, PlatformInterruptController::Aarch64(gic))
 }

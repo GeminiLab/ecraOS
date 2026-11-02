@@ -6,7 +6,9 @@ use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, index::DevTreeIndex, prelude::*};
 
 use crate::{
-    platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
+    platform::{
+        CpuTopology, PlatformDescription, PlatformInterruptController, dt::DeviceTreeNodeExt,
+    },
     power::PhysicalCpuId,
     trap::irq::{RiscvExternalIrqConfig, RiscvPlicContext},
 };
@@ -41,19 +43,12 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         for node in index.fdt().nodes().iterator() {
             let node = node.expect("failed to inspect CPU node");
             let is_cpu = node
-                .props()
-                .find(|prop| Ok(prop.name()? == "device_type" && prop.str()? == "cpu"))
-                .expect("failed to inspect CPU type")
-                .is_some();
+                .is_device_type("cpu")
+                .expect("failed to inspect CPU type");
             if !is_cpu {
                 continue;
             }
-            let enabled = node
-                .props()
-                .find(|prop| Ok(prop.name()? == "status"))
-                .expect("failed to inspect CPU status")
-                .and_then(|prop| prop.str().ok())
-                .is_none_or(|status| status == "okay" || status == "ok");
+            let enabled = node.is_enabled().expect("failed to inspect CPU status");
             if !enabled {
                 continue;
             }
