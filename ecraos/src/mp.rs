@@ -10,8 +10,8 @@ use core::{
     time::Duration,
 };
 
-use exarch::power::CpuStartError;
 pub use exarch::power::PhysicalCpuId;
+use exarch::{platform::CpuTopology, power::CpuStartError};
 use expercpu::def_percpu;
 use expt::pte::MappingFlags;
 use kspin::SpinNoIrq;
@@ -287,7 +287,8 @@ pub fn init_cpu_id_ap(phys_id: PhysicalCpuId) {
 /// Installs the immutable CPU inventory and initial lifecycle state.
 ///
 /// The BSP occupies logical slot zero and all readiness bits begin clear.
-pub fn init_cpu_list(cpu_list: Box<[PhysicalCpuId]>, bsp_phys_id: PhysicalCpuId) {
+pub fn init_cpu_list(topology: CpuTopology) {
+    let (cpu_list, bsp_phys_id) = topology.into_parts();
     let mut cpu_list_clone = cpu_list.clone();
 
     CPU_LIST.init_once(cpu_list);

@@ -15,10 +15,9 @@ pub mod reloc_hook;
 pub mod time;
 pub mod trap;
 
-/// Runs bootstrap-CPU architecture initialization after device-tree ownership is established.
-pub fn init_early_bsp(arg: ecraldr_base::PlatformBootArg) {
+/// Runs bootstrap-CPU architecture initialization before virtual-memory setup.
+pub fn init_early_bsp(_arg: ecraldr_base::PlatformBootArg) {
     debug_console::init();
-    init::probe_platform(arg);
     time::init();
     trap::init_percpu();
 }

@@ -151,7 +151,6 @@ dependencies = [
 name = "ecraos"
 version = "0.1.0"
 dependencies = [
- "acpi",
  "bitmaps",
  "crate_interface",
  "ecraldr_base",
@@ -162,7 +161,6 @@ dependencies = [
  "expercpu",
  "expt",
  "exslab",
- "fdt-rs",
  "heapless",
  "kernel_guard",
  "kspin",
@@ -192,6 +190,7 @@ name = "exarch"
 version = "0.1.0"
 dependencies = [
  "aarch64-cpu",
+ "acpi",
  "bitflags 2.11.1",
  "cartesian_product",
  "cfg_or_dummy",

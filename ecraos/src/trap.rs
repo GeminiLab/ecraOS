@@ -132,7 +132,7 @@ pub fn default_global_irq_handler(frame: &mut TrapFrame, irq: ArchIrq) -> TrapDi
 pub fn init() {
     irq::init();
 
-    _ = register::<ExceptionHandler>(default_exception_handler);
-    _ = register::<LocalInterruptHandler>(handle_local_interrupt);
-    _ = register::<GlobalIrqHandler>(default_global_irq_handler);
+    register::<ExceptionHandler>(default_exception_handler);
+    register::<LocalInterruptHandler>(handle_local_interrupt);
+    register::<GlobalIrqHandler>(default_global_irq_handler);
 }
