@@ -30,6 +30,7 @@ use crate::{
         DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
         VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
+    platform::dt::DeviceTreeNodeExt,
 };
 
 /// Temporary identity-mapped translation tables.
@@ -213,42 +214,30 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
         .expect("device tree range alignment overflow");
     for node in dtb.nodes().iterator() {
         let node = node.expect("failed to inspect device tree node");
-        let mut is_memory = false;
-        let mut is_supported = false;
-        let mut is_gic = false;
-        let mut reg_values = [0u64; 4];
-        let mut reg_count = 0;
-        for prop in node.props().iterator() {
-            let prop = prop.expect("failed to inspect device-tree property");
-            match prop.name().expect("invalid device-tree property name") {
-                "device_type" => {
-                    is_memory = prop.str().is_ok_and(|value| value == "memory");
-                }
-                "compatible" => {
-                    for value in prop.iter_str().iterator() {
-                        let value = value.expect("invalid compatible string");
-                        is_gic |= value == "arm,gic-v3";
-                        is_supported |=
-                            matches!(value, "arm,gic-v3" | "arm,pl011" | "arm,armv8-timer");
-                    }
-                }
-                "reg" => {
-                    while reg_count < reg_values.len() {
-                        let Some(value) = prop.u64(reg_count).ok() else {
-                            break;
-                        };
-                        reg_values[reg_count] = value;
-                        reg_count += 1;
-                    }
-                }
-                _ => {}
-            }
+        let is_memory = node
+            .is_device_type("memory")
+            .expect("failed to inspect memory device type");
+        let is_gic = node
+            .is_compatible("arm,gic-v3")
+            .expect("failed to inspect GIC compatible property");
+        let is_supported = is_gic
+            || node
+                .is_compatible("arm,pl011")
+                .expect("failed to inspect UART compatible property")
+            || node
+                .is_compatible("arm,armv8-timer")
+                .expect("failed to inspect timer compatible property");
+        if !is_memory && !is_supported {
+            continue;
         }
+        let Some(reg) = node.property("reg").expect("failed to inspect device reg") else {
+            continue;
+        };
 
-        if is_memory && reg_count >= 2 {
-            let start = reg_values[0];
+        if is_memory && reg.length() >= 16 {
+            let start = reg.u64(0).expect("invalid memory base");
             let end = start
-                .checked_add(reg_values[1])
+                .checked_add(reg.u64(1).expect("invalid memory size"))
                 .expect("memory range overflow");
             let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
             let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
@@ -267,11 +256,11 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             }
         }
 
-        if is_supported && reg_count >= 2 {
+        if is_supported && reg.length() >= 16 {
             let _ = regions.push(MemoryRegion {
                 range: PhysAddrRange::from_start_size(
-                    pa!(reg_values[0] as usize),
-                    reg_values[1] as usize,
+                    pa!(reg.u64(0).expect("invalid device MMIO base") as usize),
+                    reg.u64(1).expect("invalid device MMIO size") as usize,
                 ),
                 flags: MemoryRegionFlags::READ
                     | MemoryRegionFlags::WRITE
@@ -279,11 +268,11 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                     | MemoryRegionFlags::RESERVED,
                 desc: "device-tree MMIO",
             });
-            if is_gic && reg_count >= 4 {
+            if is_gic && reg.length() >= 32 {
                 let _ = regions.push(MemoryRegion {
                     range: PhysAddrRange::from_start_size(
-                        pa!(reg_values[2] as usize),
-                        reg_values[3] as usize,
+                        pa!(reg.u64(2).expect("invalid GIC redistributor base") as usize),
+                        reg.u64(3).expect("invalid GIC redistributor size") as usize,
                     ),
                     flags: MemoryRegionFlags::READ
                         | MemoryRegionFlags::WRITE

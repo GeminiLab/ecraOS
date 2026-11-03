@@ -1,6 +1,9 @@
-use fdt_rs::prelude::{FallibleIterator, PropReader};
+use fdt_rs::prelude::FallibleIterator;
 
-use crate::time::{Nanos, Ticks, TimeValue};
+use crate::{
+    platform::dt::DeviceTreeNodeExt,
+    time::{Nanos, Ticks, TimeValue},
+};
 
 fn current_ticks() -> Ticks {
     Ticks(riscv::register::time::read() as _)
@@ -42,22 +45,17 @@ pub fn set_oneshot_timer(deadline: TimeValue) {
     sbi_rt::set_timer(absolute_ticks).expect("SBI TIME set_timer failed");
 }
 
+/// Initializes RISC-V time conversion from the device-tree timebase frequency.
 pub fn init() {
     let dtb = super::DTB.get().expect("Device Tree not initialized");
 
     let cpus = dtb
         .nodes()
-        .find(|n| n.name().map(|name| name == "cpus"))
+        .find(|node| node.is_node_kind("cpus"))
         .ok()
         .flatten();
-    let freq_prop = cpus.and_then(|cpus| {
-        cpus.props()
-            .find(|p| p.name().map(|name| name == "timebase-frequency"))
-            .ok()
-            .flatten()
-    });
-    let freq_hz = freq_prop
-        .and_then(|p| p.u32(0).ok())
+    let freq_hz = cpus
+        .and_then(|node| node.u32_property("timebase-frequency", 0).ok().flatten())
         .unwrap_or(TIME_FREQ_HZ_BLIND as _);
 
     unsafe {

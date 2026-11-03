@@ -1,15 +1,22 @@
-//! Allocation-free queries over a flattened device tree.
+//! Shared queries over a flattened device tree.
 
 use fdt_rs::{
     base::{DevTreeNode, DevTreeProp},
     error::DevTreeError,
     prelude::{FallibleIterator, PropReader},
+    spec::Phandle,
 };
 
-/// Convenient allocation-free queries for parsed device-tree nodes.
+pub mod index;
+
+#[cfg(test)]
+mod tests;
+
+/// Convenient queries for parsed device-tree nodes.
 ///
-/// The trait extends the streaming node representation. Its methods only inspect the node's
-/// existing properties and never construct an index or allocate a scratch buffer.
+/// The trait extends both the streaming and indexed node representations. Its property methods
+/// only inspect the node's existing properties. No method allocates memory or builds an index,
+/// and returned strings and property handles borrow the existing DTB.
 ///
 /// Implementations preserve parser errors and do not mutate the device tree.
 pub trait DeviceTreeNodeExt<'dt> {
@@ -25,6 +32,15 @@ pub trait DeviceTreeNodeExt<'dt> {
     ///
     /// Returns an error when the property iterator or a property name is malformed.
     fn property(&self, name: &str) -> Result<Option<Self::Property>, DevTreeError>;
+
+    /// Reports whether the node contains a property with the requested name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the property iterator or a property name is malformed.
+    fn has_property(&self, name: &str) -> Result<bool, DevTreeError> {
+        Ok(self.property(name)?.is_some())
+    }
 
     /// Reads a string property when it exists.
     ///
@@ -44,7 +60,46 @@ pub trait DeviceTreeNodeExt<'dt> {
     /// Returns an error when the property is malformed or does not contain the requested cell.
     fn u32_property(&self, name: &str, index: usize) -> Result<Option<u32>, DevTreeError> {
         self.property(name)?
-            .map(|property| property.u32(index))
+            .map(|property| {
+                // fdt-rs 0.4.5 computes index * 4 and offset + 4 using plain arithmetic.
+                // Either can overflow, causing a panic or a wrapped offset to pass its bounds check.
+                // Comparing element counts first avoids both overflowing calculations.
+                if index >= property.length() / core::mem::size_of::<u32>() {
+                    return Err(DevTreeError::InvalidOffset);
+                }
+                property.u32(index)
+            })
+            .transpose()
+    }
+
+    /// Reads one big-endian 64-bit integer from a property when it exists.
+    ///
+    /// The index counts 64-bit integers rather than the DTB's 32-bit cells. This does not interpret
+    /// address or size cell counts and is not a general decoder for a reg property.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the property is malformed or does not contain the requested cell.
+    fn u64_property(&self, name: &str, index: usize) -> Result<Option<u64>, DevTreeError> {
+        self.property(name)?
+            .map(|property| {
+                // see `u32_property` for the reason checking element counts first
+                if index >= property.length() / core::mem::size_of::<u64>() {
+                    return Err(DevTreeError::InvalidOffset);
+                }
+                property.u64(index)
+            })
+            .transpose()
+    }
+
+    /// Reads one phandle from a property when it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the property is malformed or does not contain the requested phandle.
+    fn phandle_property(&self, name: &str) -> Result<Option<Phandle>, DevTreeError> {
+        self.property(name)?
+            .map(|property| property.phandle(0))
             .transpose()
     }
 
@@ -89,6 +144,33 @@ pub trait DeviceTreeNodeExt<'dt> {
             None | Some("okay" | "ok")
         ))
     }
+
+    /// Returns the node name including its optional unit address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the node name is not valid UTF-8.
+    fn node_name(&self) -> Result<&'dt str, DevTreeError>;
+
+    /// Returns the node name before its optional unit address.
+    ///
+    /// For example, `cpu@0` has the node kind `cpu`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the node name is not valid UTF-8.
+    fn node_kind(&self) -> Result<&'dt str, DevTreeError> {
+        Ok(self.node_name()?.split('@').next().unwrap_or_default())
+    }
+
+    /// Reports whether the node has the requested kind.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the node name is not valid UTF-8.
+    fn is_node_kind(&self, kind: &str) -> Result<bool, DevTreeError> {
+        Ok(self.node_kind()? == kind)
+    }
 }
 
 impl<'a, 'dt: 'a> DeviceTreeNodeExt<'dt> for DevTreeNode<'a, 'dt> {
@@ -104,146 +186,9 @@ impl<'a, 'dt: 'a> DeviceTreeNodeExt<'dt> for DevTreeNode<'a, 'dt> {
         }
         Ok(None)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use alloc::vec;
-    use alloc::vec::Vec;
-
-    use fdt_rs::{base::DevTree, prelude::*};
-
-    use super::DeviceTreeNodeExt;
-
-    /// Adds one big-endian 32-bit word to a byte buffer.
-    fn push_word(buffer: &mut Vec<u8>, value: u32) {
-        buffer.extend_from_slice(&value.to_be_bytes());
-    }
-
-    /// Adds an FDT node name and pads it to a 32-bit boundary.
-    fn push_name(buffer: &mut Vec<u8>, name: &[u8]) {
-        buffer.extend_from_slice(name);
-        buffer.push(0);
-        while buffer.len() % 4 != 0 {
-            buffer.push(0);
-        }
-    }
-
-    /// Adds one FDT property with its name-table offset and raw value.
-    fn push_property(buffer: &mut Vec<u8>, name_offset: u32, value: &[u8]) {
-        push_word(buffer, 3);
-        push_word(buffer, value.len() as u32);
-        push_word(buffer, name_offset);
-        buffer.extend_from_slice(value);
-        while buffer.len() % 4 != 0 {
-            buffer.push(0);
-        }
-    }
-
-    /// Builds a compact aligned DTB containing CPU, disabled, and status-less nodes.
-    fn test_dtb() -> (Vec<u64>, usize) {
-        let mut structure = Vec::new();
-        push_word(&mut structure, 1);
-        push_name(&mut structure, b"");
-
-        push_word(&mut structure, 1);
-        push_name(&mut structure, b"cpu@3");
-        push_property(&mut structure, 0, b"cpu\0");
-        push_property(&mut structure, 12, b"arm,cpu\0vendor,cpu\0");
-        push_property(&mut structure, 23, b"okay\0");
-        push_property(&mut structure, 30, &[0, 0, 0, 3]);
-        push_word(&mut structure, 2);
-
-        push_word(&mut structure, 1);
-        push_name(&mut structure, b"disabled@4");
-        push_property(&mut structure, 23, b"disabled\0");
-        push_word(&mut structure, 2);
-
-        push_word(&mut structure, 1);
-        push_name(&mut structure, b"status-less@5");
-        push_word(&mut structure, 2);
-
-        push_word(&mut structure, 1);
-        push_name(&mut structure, b"malformed-status@6");
-        push_property(&mut structure, 23, b"okay");
-        push_word(&mut structure, 2);
-
-        push_word(&mut structure, 2);
-        push_word(&mut structure, 9);
-
-        let strings = b"device_type\0compatible\0status\0reg\0";
-        let structure_offset = 56;
-        let strings_offset = structure_offset + structure.len();
-        let total_size = strings_offset + strings.len();
-        let mut bytes = Vec::with_capacity(total_size);
-        for word in [
-            0xd00d_feed,
-            total_size as u32,
-            structure_offset as u32,
-            strings_offset as u32,
-            40,
-            17,
-            16,
-            0,
-            strings.len() as u32,
-            structure.len() as u32,
-        ] {
-            push_word(&mut bytes, word);
-        }
-        bytes.extend_from_slice(&[0; 16]);
-        bytes.extend_from_slice(&structure);
-        bytes.extend_from_slice(strings);
-
-        let mut aligned = vec![0u64; total_size.div_ceil(core::mem::size_of::<u64>())];
-        // SAFETY: the destination is large enough for total_size bytes and does not overlap bytes.
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                bytes.as_ptr(),
-                aligned.as_mut_ptr().cast::<u8>(),
-                total_size,
-            );
-        }
-        (aligned, total_size)
-    }
-
-    /// Reads common properties from base nodes without constructing a device-tree index.
-    #[test]
-    fn reads_properties_and_device_tree_node_semantics() {
-        let (aligned, len) = test_dtb();
-        // SAFETY: aligned owns at least len bytes and is aligned to u64.
-        let bytes = unsafe { core::slice::from_raw_parts(aligned.as_ptr().cast::<u8>(), len) };
-        // SAFETY: test_dtb creates a complete FDT in a 64-bit-aligned backing allocation.
-        let tree = unsafe { DevTree::new(bytes) }.expect("test DTB must parse");
-        let mut nodes = tree.nodes();
-        let _root = nodes
-            .next()
-            .expect("root parse must succeed")
-            .expect("root exists");
-        let cpu = nodes
-            .next()
-            .expect("CPU parse must succeed")
-            .expect("CPU node exists");
-        let disabled = nodes
-            .next()
-            .expect("disabled-node parse must succeed")
-            .expect("disabled node exists");
-        let status_less = nodes
-            .next()
-            .expect("status-less parse must succeed")
-            .expect("status-less node exists");
-        let malformed_status = nodes
-            .next()
-            .expect("malformed-status parse must succeed")
-            .expect("malformed-status node exists");
-
-        assert_eq!(cpu.string_property("device_type").unwrap(), Some("cpu"));
-        assert_eq!(cpu.u32_property("reg", 0).unwrap(), Some(3));
-        assert!(cpu.is_device_type("cpu").unwrap());
-        assert!(cpu.is_compatible("vendor,cpu").unwrap());
-        assert!(cpu.is_enabled().unwrap());
-        assert!(!disabled.is_enabled().unwrap());
-        assert!(status_less.is_enabled().unwrap());
-        assert!(malformed_status.is_enabled().is_err());
-        assert_eq!(cpu.string_property("missing").unwrap(), None);
+    /// Returns the complete streaming node name.
+    fn node_name(&self) -> Result<&'dt str, DevTreeError> {
+        self.name()
     }
 }

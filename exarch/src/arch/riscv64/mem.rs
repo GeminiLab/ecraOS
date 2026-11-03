@@ -17,9 +17,12 @@ use fdt_rs::{
 };
 use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
 
-use crate::mem::{
-    DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
-    VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
+use crate::{
+    mem::{
+        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+        VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
+    },
+    platform::dt::DeviceTreeNodeExt,
 };
 
 /// The RISC-V 64 local TLB flushing strategy.
@@ -60,20 +63,16 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             .align_outwards(DEVICE_TREE_ALIGN)
             .expect("device tree range alignment overflow");
 
-        let mems = dev_tree.nodes().filter(|node| {
-            Ok(node
-                .props()
-                .find(|p| Ok(p.name()? == "device_type" && p.str()? == "memory"))
-                .is_ok_and(|p| p.is_some()))
-        });
+        let mems = dev_tree
+            .nodes()
+            .filter(|node| node.is_device_type("memory"));
 
         for mem in mems.iterator() {
-            let mem = mem.unwrap();
+            let mem = mem.expect("failed to inspect memory device type");
             let reg = mem
-                .props()
-                .find(|p| Ok(p.name()? == "reg"))
-                .unwrap()
-                .unwrap();
+                .property("reg")
+                .expect("failed to inspect memory reg")
+                .expect("memory node has no reg property");
 
             let mut start = reg.u64(0).unwrap();
             let mut size = reg.u64(1).unwrap();
@@ -105,20 +104,19 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
         for node in dev_tree.nodes().iterator() {
             let node = node.expect("failed to inspect Device Tree node");
             let supported = node
-                .props()
-                .any(|prop| {
-                    Ok(prop.name()? == "compatible"
-                        && prop.str().is_ok_and(|compatible| {
-                            matches!(compatible, "sifive,plic-1.0.0" | "riscv,plic0" | "ns16550a")
-                        }))
-                })
-                .expect("failed to inspect Device Tree compatible property");
+                .is_compatible("sifive,plic-1.0.0")
+                .expect("failed to inspect PLIC compatible property")
+                || node
+                    .is_compatible("riscv,plic0")
+                    .expect("failed to inspect PLIC compatible property")
+                || node
+                    .is_compatible("ns16550a")
+                    .expect("failed to inspect UART compatible property");
             if !supported {
                 continue;
             }
             let Some(reg) = node
-                .props()
-                .find(|prop| Ok(prop.name()? == "reg"))
+                .property("reg")
                 .expect("failed to inspect Device Tree reg property")
             else {
                 continue;
