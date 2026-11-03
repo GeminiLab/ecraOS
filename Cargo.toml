@@ -37,5 +37,3 @@ thiserror = { version = "2.0", default-features = false }
 
 [patch.crates-io]
 page_table_entry = { path = "page_table_entry" }
-# Temporary until the doc_cfg fix is released by spinning_top.
-spinning_top = { git = "https://github.com/rust-osdev/spinning_top", branch = "master" }

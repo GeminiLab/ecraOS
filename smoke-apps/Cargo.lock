@@ -606,8 +606,9 @@ dependencies = [
 
 [[package]]
 name = "spinning_top"
-version = "0.3.0"
-source = "git+https://github.com/rust-osdev/spinning_top?branch=master#31421a6ebdffb5ce9b599488bcf55d810b7e033a"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cf02766a1eb909bc7653557c66b384e44edc3ad979e6257c6173c65ea51bc7d"
 dependencies = [
  "lock_api",
 ]
