@@ -115,7 +115,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         };
         Ok(PlatformDescription::new(
             cpu_topology,
-            PlatformInterruptController::RiscV64(controller),
+            PlatformInterruptController(controller),
         ))
     })
     .expect("failed to discover RISC-V platform from Device Tree")

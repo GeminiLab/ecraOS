@@ -3,15 +3,9 @@
 use alloc::boxed::Box;
 
 use ecraldr_base::PlatformBootArg;
+use look_at::look_at;
 
-use crate::power::PhysicalCpuId;
-
-#[cfg(target_arch = "aarch64")]
-use crate::trap::irq::Aarch64ExternalIrqConfig;
-#[cfg(target_arch = "riscv64")]
-use crate::trap::irq::RiscvExternalIrqConfig;
-#[cfg(target_arch = "x86_64")]
-use crate::trap::irq::X86ExternalIrqConfig;
+use crate::{power::PhysicalCpuId, trap::irq::ArchIrqConfig};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64", ecraos_doc, test))]
 pub mod dt;
@@ -70,17 +64,7 @@ impl CpuTopology {
 /// architecture-specific controller configuration, while initialization remains a single common
 /// operation for the kernel boot sequence. Interrupt delivery after initialization stays in the
 /// architecture-specific fast path.
-pub enum PlatformInterruptController {
-    /// An x86-64 IOAPIC topology discovered from ACPI.
-    #[cfg(target_arch = "x86_64")]
-    X86_64(X86ExternalIrqConfig),
-    /// A RISC-V PLIC topology discovered from Device Tree.
-    #[cfg(target_arch = "riscv64")]
-    RiscV64(RiscvExternalIrqConfig),
-    /// An AArch64 GICv3 topology discovered from Device Tree.
-    #[cfg(target_arch = "aarch64")]
-    Aarch64(Aarch64ExternalIrqConfig),
-}
+pub struct PlatformInterruptController(pub ArchIrqConfig);
 
 impl PlatformInterruptController {
     /// Initializes the discovered platform interrupt controller.
@@ -89,17 +73,9 @@ impl PlatformInterruptController {
     /// architecture's one-time controller state. The caller must invoke this only after the VMM
     /// maps the controller's MMIO regions.
     pub fn initialize(self) {
-        match self {
-            #[cfg(target_arch = "x86_64")]
-            Self::X86_64(config) => crate::trap::irq::init_external_controller(config),
-            #[cfg(target_arch = "riscv64")]
-            Self::RiscV64(config) => crate::trap::irq::init_external_controller(config),
-            #[cfg(target_arch = "aarch64")]
-            Self::Aarch64(config) => {
-                crate::trap::irq::init_external_controller(config);
-                crate::arch::aarch64::trap::init_percpu();
-            }
-        }
+        crate::trap::irq::init_external_controller(self.0);
+        #[cfg(target_arch = "aarch64")]
+        crate::arch::aarch64::trap::init_percpu();
     }
 }
 
@@ -129,13 +105,14 @@ impl PlatformDescription {
     }
 }
 
-/// Discovers the current platform from the boot argument.
-///
-/// The architecture-specific parser reads ACPI or Device Tree and returns only the platform
-/// structures required by the common boot sequence. This function must run after the VMM and heap
-/// are initialized because firmware parsing may allocate and access high-half mappings.
-pub fn discover(arg: PlatformBootArg) -> PlatformDescription {
-    crate::arch::current::device::discover_platform(arg)
+look_at! {
+    @crate::arch::current::device:
+    /// Discovers the current platform from the boot argument.
+    ///
+    /// The architecture-specific parser reads ACPI or Device Tree and returns only the platform
+    /// structures required by the common boot sequence. This function must run after the VMM and heap
+    /// are initialized because firmware parsing may allocate and access high-half mappings.
+    pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription;
 }
 
 #[cfg(test)]

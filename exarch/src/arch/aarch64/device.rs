@@ -80,7 +80,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         };
         Ok(PlatformDescription::new(
             cpu_topology,
-            PlatformInterruptController::Aarch64(gic),
+            PlatformInterruptController(gic),
         ))
     })
     .expect("failed to discover AArch64 platform from Device Tree")

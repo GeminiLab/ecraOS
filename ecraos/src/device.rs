@@ -8,7 +8,7 @@ use ecraldr_base::PlatformBootArg;
 /// `exarch::platform`. This module only consumes the resulting CPU topology and initializes the
 /// architecture-owned controller driver before ordinary device enumeration begins.
 pub fn init_platform(arg: PlatformBootArg) {
-    let description = exarch::platform::discover(arg);
+    let description = exarch::platform::discover_platform(arg);
     let (cpu_topology, interrupt_controller) = description.into_parts();
     crate::mp::init_cpu_list(cpu_topology);
     interrupt_controller.initialize();

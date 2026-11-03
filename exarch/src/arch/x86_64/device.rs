@@ -317,8 +317,5 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         bsp_apic_id: processors.boot_processor.local_apic_id,
     };
 
-    PlatformDescription::new(
-        cpu_topology,
-        PlatformInterruptController::X86_64(controller),
-    )
+    PlatformDescription::new(cpu_topology, PlatformInterruptController(controller))
 }

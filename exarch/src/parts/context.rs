@@ -1,8 +1,9 @@
 //! Common task context switching.
 
+use look_at::look_at;
 use memory_addr::VirtAddr;
 
-look_at::look_at! {
+look_at! {
     @crate::arch::current::context:
 
     /// A target-specific task context.
