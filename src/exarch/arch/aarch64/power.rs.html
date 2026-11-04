@@ -136,11 +136,17 @@
 <a href=#136 id=136 data-nosnippet>136</a>    }
 <a href=#137 id=137 data-nosnippet>137</a>}
 <a href=#138 id=138 data-nosnippet>138</a>
-<a href=#139 id=139 data-nosnippet>139</a><span class="doccomment">/// Requests a PSCI system shutdown and spins if firmware returns.
+<a href=#139 id=139 data-nosnippet>139</a><span class="doccomment">/// Requests a PSCI system shutdown and halts if firmware returns.
 <a href=#140 id=140 data-nosnippet>140</a></span><span class="kw">pub fn </span>shutdown(_reason: ShutdownReason) -&gt; ! {
 <a href=#141 id=141 data-nosnippet>141</a>    <span class="kw">let _ </span>= invoke_psci(PSCI_SYSTEM_OFF, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>);
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="kw">loop </span>{
-<a href=#143 id=143 data-nosnippet>143</a>        core::hint::spin_loop();
-<a href=#144 id=144 data-nosnippet>144</a>    }
-<a href=#145 id=145 data-nosnippet>145</a>}
+<a href=#142 id=142 data-nosnippet>142</a>    halt()
+<a href=#143 id=143 data-nosnippet>143</a>}
+<a href=#144 id=144 data-nosnippet>144</a>
+<a href=#145 id=145 data-nosnippet>145</a><span class="doccomment">/// Halts the current processing element after terminal firmware actions return.
+<a href=#146 id=146 data-nosnippet>146</a></span><span class="kw">pub fn </span>halt() -&gt; ! {
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="kw">loop </span>{
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="comment">// SAFETY: WFE is a non-memory architectural wait instruction and does not access memory.
+<a href=#149 id=149 data-nosnippet>149</a>        </span><span class="kw">unsafe </span>{ <span class="macro">asm!</span>(<span class="string">"wfe"</span>, options(nomem, nostack, preserves_flags)) };
+<a href=#150 id=150 data-nosnippet>150</a>    }
+<a href=#151 id=151 data-nosnippet>151</a>}
 </code></pre></div></section></main></body></html>

@@ -126,14 +126,29 @@
 <a href=#126 id=126 data-nosnippet>126</a>    irq::dispatch(frame, irq)
 <a href=#127 id=127 data-nosnippet>127</a>}
 <a href=#128 id=128 data-nosnippet>128</a>
-<a href=#129 id=129 data-nosnippet>129</a><span class="doccomment">/// Installs the exception and global semantic handlers.
+<a href=#129 id=129 data-nosnippet>129</a><span class="doccomment">/// Registers the common exception handler before an architecture installs its early vector.
 <a href=#130 id=130 data-nosnippet>130</a>///
-<a href=#131 id=131 data-nosnippet>131</a>/// The local-interrupt slot is installed before timer arming.
-<a href=#132 id=132 data-nosnippet>132</a></span><span class="kw">pub fn </span>init() {
-<a href=#133 id=133 data-nosnippet>133</a>    irq::init();
-<a href=#134 id=134 data-nosnippet>134</a>
-<a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">_ </span>= register::&lt;ExceptionHandler&gt;(default_exception_handler);
-<a href=#136 id=136 data-nosnippet>136</a>    <span class="kw">_ </span>= register::&lt;LocalInterruptHandler&gt;(handle_local_interrupt);
-<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">_ </span>= register::&lt;GlobalIrqHandler&gt;(default_global_irq_handler);
-<a href=#138 id=138 data-nosnippet>138</a>}
+<a href=#131 id=131 data-nosnippet>131</a>/// This makes synchronous faults during early initialization reach the kernel's fatal handler.
+<a href=#132 id=132 data-nosnippet>132</a></span><span class="kw">pub fn </span>init_early() {
+<a href=#133 id=133 data-nosnippet>133</a>    register::&lt;ExceptionHandler&gt;(default_exception_handler);
+<a href=#134 id=134 data-nosnippet>134</a>}
+<a href=#135 id=135 data-nosnippet>135</a>
+<a href=#136 id=136 data-nosnippet>136</a><span class="doccomment">/// Refreshes the common exception handler after the kernel changes virtual addresses.
+<a href=#137 id=137 data-nosnippet>137</a>///
+<a href=#138 id=138 data-nosnippet>138</a>/// Handler slots contain function pointers, so a pointer published before the high-address jump
+<a href=#139 id=139 data-nosnippet>139</a>/// must be replaced while the low identity mapping is still available.
+<a href=#140 id=140 data-nosnippet>140</a></span><span class="kw">pub fn </span>after_reloc() {
+<a href=#141 id=141 data-nosnippet>141</a>    register::&lt;ExceptionHandler&gt;(default_exception_handler);
+<a href=#142 id=142 data-nosnippet>142</a>}
+<a href=#143 id=143 data-nosnippet>143</a>
+<a href=#144 id=144 data-nosnippet>144</a><span class="doccomment">/// Installs the global and local interrupt handlers.
+<a href=#145 id=145 data-nosnippet>145</a>///
+<a href=#146 id=146 data-nosnippet>146</a>/// The local-interrupt slot is installed before timer arming. The exception slot is refreshed as
+<a href=#147 id=147 data-nosnippet>147</a>/// well, after relocation, so it points at the high-address handler.
+<a href=#148 id=148 data-nosnippet>148</a></span><span class="kw">pub fn </span>init() {
+<a href=#149 id=149 data-nosnippet>149</a>    irq::init();
+<a href=#150 id=150 data-nosnippet>150</a>    register::&lt;ExceptionHandler&gt;(default_exception_handler);
+<a href=#151 id=151 data-nosnippet>151</a>    register::&lt;LocalInterruptHandler&gt;(handle_local_interrupt);
+<a href=#152 id=152 data-nosnippet>152</a>    register::&lt;GlobalIrqHandler&gt;(default_global_irq_handler);
+<a href=#153 id=153 data-nosnippet>153</a>}
 </code></pre></div></section></main></body></html>

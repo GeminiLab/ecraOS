@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["FR_RXFE","FR_TXFF","PL011_BASE","UARTDR","UARTFR"],"fn":["init","read_bytes","reg","write_bytes"]};
+window.SIDEBAR_ITEMS = {"constant":["FR_RXFE","FR_TXFF","UARTDR","UARTFR"],"fn":["init","mmio_region","probe_pl011","read_bytes","register","write_bytes"],"static":["PL011_BASE","PL011_SIZE"]};

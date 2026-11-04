@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["aarch64_trap_handler","aarch64_vector_base","disable_local","enable_local","handle_external","init_percpu","local_enabled"]};
+window.SIDEBAR_ITEMS = {"fn":["aarch64_trap_handler","aarch64_vector_base","disable_local","enable_local","handle_external","init_exception_vector","init_percpu","local_enabled"]};

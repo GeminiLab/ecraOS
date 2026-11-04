@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["default_exception_handler","default_global_irq_handler","handle","handle_local_interrupt","init","register"],"mod":["irq"],"static":["HANDLERS"],"struct":["TrapHandlerImpl"]};
+window.SIDEBAR_ITEMS = {"fn":["after_reloc","default_exception_handler","default_global_irq_handler","handle","handle_local_interrupt","init","init_early","register"],"mod":["irq"],"static":["HANDLERS"],"struct":["TrapHandlerImpl"]};

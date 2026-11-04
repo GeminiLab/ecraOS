@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEVICE_TREE_RESERVED_DESC"],"fn":["append_reg_ranges","apply_device_tree_reservations","apply_reserved_region","decode_cells","parse_reservation_map","parse_reserved_memory_nodes","physical_range","property_name","read_cell_count","status_is_enabled"],"struct":["DeviceTreeReservedRegion","ReservedMemoryChild"]};

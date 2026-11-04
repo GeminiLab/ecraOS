@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["probe_device_info_sources"]};
+window.SIDEBAR_ITEMS = {"fn":["discover_platform","find_rsdp","in_u16","in_u32","in_u8","out_u16","out_u32","out_u8","pci_config_address"],"struct":["AcpiHandler"]};

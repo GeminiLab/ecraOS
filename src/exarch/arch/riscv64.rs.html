@@ -18,23 +18,24 @@
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">static </span>DTB: LazyInit&lt;DevTree&lt;<span class="lifetime">'_</span>&gt;&gt; = LazyInit::new();
 <a href=#19 id=19 data-nosnippet>19</a>
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">pub fn </span>init_early_bsp(arg: PlatformBootArg) {
-<a href=#21 id=21 data-nosnippet>21</a>    <span class="comment">// TODO: re-initialize it in the high address space after relocat
-<a href=#22 id=22 data-nosnippet>22</a>    </span><span class="kw">if let </span>PlatformBootArg::DeviceTree(dtb) = arg {
-<a href=#23 id=23 data-nosnippet>23</a>        <span class="kw">let </span>dtb_va = <span class="macro">va!</span>(dtb.as_usize());
-<a href=#24 id=24 data-nosnippet>24</a>        <span class="kw">let </span>dtb = <span class="kw">unsafe </span>{
-<a href=#25 id=25 data-nosnippet>25</a>            DevTree::from_raw_pointer(dtb_va.as_ptr()).expect(<span class="string">"failed to parse Device Tree"</span>)
-<a href=#26 id=26 data-nosnippet>26</a>        };
-<a href=#27 id=27 data-nosnippet>27</a>        DTB.init_once(dtb);
-<a href=#28 id=28 data-nosnippet>28</a>    }
-<a href=#29 id=29 data-nosnippet>29</a>
-<a href=#30 id=30 data-nosnippet>30</a>    time::init();
-<a href=#31 id=31 data-nosnippet>31</a>    trap_entry::init_percpu();
-<a href=#32 id=32 data-nosnippet>32</a>}
-<a href=#33 id=33 data-nosnippet>33</a>
-<a href=#34 id=34 data-nosnippet>34</a><span class="doccomment">/// Runs early per-hart architecture initialization.
-<a href=#35 id=35 data-nosnippet>35</a>///
-<a href=#36 id=36 data-nosnippet>36</a>/// This installs trap handling while global interrupts remain disabled.
-<a href=#37 id=37 data-nosnippet>37</a></span><span class="kw">pub fn </span>init_early_ap() {
-<a href=#38 id=38 data-nosnippet>38</a>    trap_entry::init_percpu();
-<a href=#39 id=39 data-nosnippet>39</a>}
+<a href=#21 id=21 data-nosnippet>21</a>    trap_entry::install_vector();
+<a href=#22 id=22 data-nosnippet>22</a>
+<a href=#23 id=23 data-nosnippet>23</a>    <span class="comment">// TODO: re-initialize it in the high address space after relocat
+<a href=#24 id=24 data-nosnippet>24</a>    </span><span class="kw">if let </span>PlatformBootArg::DeviceTree(dtb) = arg {
+<a href=#25 id=25 data-nosnippet>25</a>        <span class="kw">let </span>dtb_va = <span class="macro">va!</span>(dtb.as_usize());
+<a href=#26 id=26 data-nosnippet>26</a>        <span class="kw">let </span>dtb = <span class="kw">unsafe </span>{
+<a href=#27 id=27 data-nosnippet>27</a>            DevTree::from_raw_pointer(dtb_va.as_ptr()).expect(<span class="string">"failed to parse Device Tree"</span>)
+<a href=#28 id=28 data-nosnippet>28</a>        };
+<a href=#29 id=29 data-nosnippet>29</a>        DTB.init_once(dtb);
+<a href=#30 id=30 data-nosnippet>30</a>    }
+<a href=#31 id=31 data-nosnippet>31</a>
+<a href=#32 id=32 data-nosnippet>32</a>    time::init();
+<a href=#33 id=33 data-nosnippet>33</a>}
+<a href=#34 id=34 data-nosnippet>34</a>
+<a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// Runs early per-hart architecture initialization.
+<a href=#36 id=36 data-nosnippet>36</a>///
+<a href=#37 id=37 data-nosnippet>37</a>/// This installs trap handling while global interrupts remain disabled.
+<a href=#38 id=38 data-nosnippet>38</a></span><span class="kw">pub fn </span>init_early_ap() {
+<a href=#39 id=39 data-nosnippet>39</a>    trap_entry::install_vector();
+<a href=#40 id=40 data-nosnippet>40</a>}
 </code></pre></div></section></main></body></html>

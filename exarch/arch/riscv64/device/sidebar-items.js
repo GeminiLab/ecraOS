@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["probe_device_info_sources"]};
+window.SIDEBAR_ITEMS = {"fn":["discover_platform"]};

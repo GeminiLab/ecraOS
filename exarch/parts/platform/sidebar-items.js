@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["discover_platform","take_interrupt_controller_config"],"mod":["dt"],"static":["INTERRUPT_CONTROLLER_CONFIG"],"struct":["CpuTopology","PlatformDescription","PlatformInterruptController"]};
