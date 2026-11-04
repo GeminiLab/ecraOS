@@ -2,9 +2,11 @@
 
 use alloc::vec::Vec;
 
+use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
+use super::trap::Aarch64ExternalIrqConfig;
 use crate::{
     mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{
@@ -14,10 +16,10 @@ use crate::{
             index::{DeviceTreeIndexExt, with_index},
         },
     },
-    trap::irq::Aarch64ExternalIrqConfig,
 };
 
 /// Discovers the AArch64 CPU topology, PSCI conduit, and GICv3 configuration.
+#[cfg_or_dummy(target_arch = "aarch64")]
 pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
     let PlatformBootArg::DeviceTree(dtb_addr) = arg else {
         panic!("AArch64 platform discovery requires a Device Tree")

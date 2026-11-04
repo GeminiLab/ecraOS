@@ -57,6 +57,8 @@ pub struct RiscvExternalIrqConfig {
     pub contexts: Box<[RiscvPlicContext]>,
 }
 
+pub use RiscvExternalIrqConfig as ArchIrqConfig;
+
 /// Identifies one hart's supervisor PLIC context.
 #[derive(Debug, Clone, Copy)]
 pub struct RiscvPlicContext {

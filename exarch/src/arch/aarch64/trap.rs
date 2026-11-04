@@ -13,7 +13,8 @@ use crate::trap::{
 };
 
 pub use super::gicv3::{
-    Aarch64ExternalIrqConfig, ArchIrq, init_external_controller, prepare_irq, set_irq_enabled,
+    Aarch64ExternalIrqConfig, Aarch64ExternalIrqConfig as ArchIrqConfig, ArchIrq,
+    init_external_controller, prepare_irq, set_irq_enabled,
 };
 use super::{
     context::TrapFrame,

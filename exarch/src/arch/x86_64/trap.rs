@@ -65,6 +65,8 @@ pub struct X86ExternalIrqConfig {
     pub bsp_apic_id: u32,
 }
 
+pub use X86ExternalIrqConfig as ArchIrqConfig;
+
 static EXTERNAL_CONTROLLER: LazyInit<SpinNoIrq<ExternalController>> = LazyInit::new();
 static VECTOR_TO_GSI: [AtomicUsize; 256] = [const { AtomicUsize::new(0) }; 256];
 

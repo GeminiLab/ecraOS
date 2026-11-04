@@ -1,5 +1,7 @@
 //! Platform initialization functions for RISC-V.
 
+use cfg_or_dummy::cfg_or_dummy;
+
 use crate::init::PlatformBootArg;
 
 /// Runs early platform initialization.
@@ -14,6 +16,7 @@ pub fn init_early(arg: PlatformBootArg) {
 /// # Panics
 ///
 /// Panics if platform discovery did not publish the controller configuration.
+#[cfg_or_dummy(target_arch = "riscv64")]
 pub fn init_later() {
     let config = crate::platform::take_interrupt_controller_config();
     super::trap::init_external_controller(config);

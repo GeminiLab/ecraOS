@@ -4,16 +4,20 @@ use alloc::vec::Vec;
 use core::{ptr::NonNull, time::Duration};
 
 use acpi::{AcpiTables, Handler, PhysicalMapping};
+use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::{PhysAddr, PlatformBootArg};
 use memory_addr::PhysAddrRange;
 
+use super::{
+    imp::ioapic::{IoApicConfig, Polarity, TriggerMode},
+    trap::{X86ExternalIrqConfig, X86IrqOverride},
+};
 use crate::{
     kernel_if::phys_to_virt,
     mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
     power::PhysicalCpuId,
     time,
-    trap::irq::{IoApicConfig, Polarity, TriggerMode, X86ExternalIrqConfig, X86IrqOverride},
 };
 
 /// Reads one byte from an x86 I/O port.
@@ -254,6 +258,7 @@ fn find_rsdp() -> usize {
 }
 
 /// Discovers the x86-64 CPU topology and external interrupt controller.
+#[cfg_or_dummy(target_arch = "x86_64")]
 pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
     assert!(
         matches!(arg, PlatformBootArg::Multiboot(_)),

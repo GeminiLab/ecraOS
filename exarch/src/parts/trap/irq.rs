@@ -7,26 +7,7 @@ use look_at::look_at;
 
 mod registry;
 
-pub use registry::Registry;
-pub use registry::UnhandledReason;
-
-#[cfg(target_arch = "x86_64")]
-pub use crate::arch::x86_64::imp::ioapic::{IoApicConfig, Polarity, TriggerMode};
-
-#[cfg(target_arch = "x86_64")]
-pub use crate::arch::x86_64::trap::{
-    X86ExternalIrqConfig, X86ExternalIrqConfig as ArchIrqConfig, X86IrqOverride,
-};
-
-#[cfg(target_arch = "riscv64")]
-pub use crate::arch::riscv64::trap::{
-    RiscvExternalIrqConfig, RiscvExternalIrqConfig as ArchIrqConfig, RiscvPlicContext,
-};
-
-#[cfg(target_arch = "aarch64")]
-pub use crate::arch::aarch64::trap::{
-    Aarch64ExternalIrqConfig, Aarch64ExternalIrqConfig as ArchIrqConfig,
-};
+pub use registry::{Registry, UnhandledReason};
 
 /// Reports an external IRQ lifecycle or platform validation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +57,8 @@ look_at! {
     /// distinct target-specific newtypes prevent local vectors and controller source identifiers
     /// from mixing.
     pub type ArchIrq;
+
+    pub type ArchIrqConfig;
 
     /// Prepares a common external source while keeping it masked.
     ///

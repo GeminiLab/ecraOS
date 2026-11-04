@@ -2,9 +2,11 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
+use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
+use super::trap::{RiscvExternalIrqConfig, RiscvPlicContext};
 use crate::{
     mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{
@@ -15,10 +17,10 @@ use crate::{
         },
     },
     power::PhysicalCpuId,
-    trap::irq::{RiscvExternalIrqConfig, RiscvPlicContext},
 };
 
 /// Discovers the RISC-V CPU topology and PLIC from Device Tree.
+#[cfg_or_dummy(target_arch = "riscv64")]
 pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
     let PlatformBootArg::DeviceTree(dtb_addr) = arg else {
         panic!("RISC-V platform discovery requires a Device Tree")
