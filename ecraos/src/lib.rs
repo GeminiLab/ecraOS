@@ -147,8 +147,10 @@ unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
 
-    // Perform early platform initialization.
+    // Install the common exception handler.
     trap::init_early();
+
+    // Perform early platform initialization.
     exarch::init::init_early(arg_ref.plat_arg);
 
     // Print the hello banner.
@@ -177,9 +179,11 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     // pointer after relocation.
     percpu::init_bsp_after_reloc();
 
+    // Refresh the common exception handler after relocation.
+    trap::after_reloc();
+
     // Call the relocation hook.
     exarch::reloc_hook::after_reloc();
-    trap::after_reloc();
 
     // Print the hello banner.
     kprintln!(
@@ -197,36 +201,39 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     // Discover the platform and map controller MMIO before initializing any controller.
     let boot_arg = unsafe { arg.as_ref_unchecked() };
     device::discover_and_map_platform(boot_arg.plat_arg);
+
+    // Perform later platform initialization. (As for now it covers mainly the global and BSP local
+    // interrupt controller)
     exarch::init::init_later();
 
+    // Initialize the trap and IPI.
     trap::init();
     ipi::init();
     tlb::init();
     exarch::ipi::init_percpu();
+
+    // Initialize the scheduler and timer for the BSP.
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
     timer::init_bsp();
     mp::mark_current_cpu_ipi_ready();
     exarch::trap::enable_local();
 
+    // Here we go!
     kprintln!("\n\nHere we go!\n\n");
 
+    // Start up the secondary CPUs.
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
+    // Remove identical mappings.
     mem::remove_identical_mappings();
     mp::publish_boot_mapping_completion();
 
+    // Run the BSP main function of the application.
     app_main_bsp();
 
+    // If the application returns, power off the system.
     exarch::power::poweroff()
-}
-
-#[eii]
-pub fn app_main_bsp() {}
-
-#[eii]
-pub fn app_main_ap() {
-    task::run_idle()
 }
 
 /// The kernel entry function for the AP.
@@ -260,7 +267,8 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
 
     // Enable the local source only after the BSP has installed common dispatch and mailboxes.
     exarch::ipi::init_percpu();
-    // Initialize the scheduler for the AP.
+
+    // Initialize the scheduler and timer for the AP.
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
     timer::init_ap();
     mp::mark_current_cpu_ipi_ready();
@@ -270,7 +278,17 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     // Online APs keep servicing IPIs here until boot has finished all mapping changes and joins.
     mp::wait_boot_mapping_completion();
 
+    // Run the AP main function of the application.
     app_main_ap();
 
+    // If the application returns, sleep indefinitely.
+    task::run_idle()
+}
+
+#[eii]
+pub fn app_main_bsp() {}
+
+#[eii]
+pub fn app_main_ap() {
     task::run_idle()
 }
