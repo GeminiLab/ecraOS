@@ -29,6 +29,10 @@ entry address, so the firmware can be built independently of ecraldr and the
 kernel. This fits the existing build flow, where each smoke application is
 embedded in its own loader image.
 
+During early memory setup, ecraOS reserves the RAM prefix before the loader's
+link address within the same contiguous RAM range. This protects firmware that
+the device tree reports as RAM without describing as a separate reserved range.
+
 At the supervisor entry, `a0` carries the boot hart ID and `a1` carries the
 device-tree address. ecraldr already consumes these arguments. The kernel also
 uses standard SBI calls for its console (DBCN), timer (TIME), secondary hart

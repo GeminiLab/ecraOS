@@ -69,15 +69,8 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 .expect("failed to inspect memory reg")
                 .expect("memory node has no reg property");
 
-            let mut start = reg.u64(0).unwrap();
-            let mut size = reg.u64(1).unwrap();
-
-            // TODO: remove this magic number
-            if start == 0x8000_0000 {
-                start = 0x8020_0000;
-                size -= 0x20_0000;
-            }
-
+            let start = reg.u64(0).unwrap();
+            let size = reg.u64(1).unwrap();
             let memory_range = PhysAddrRange::from_start_size(pa!(start as _), size as _);
             let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
             for range in [before_dtb, after_dtb]

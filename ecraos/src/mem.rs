@@ -3,9 +3,13 @@
 //! Provides virtual memory management (VMM), physical memory management (PMM),
 //! early page allocation, and the final buddy+slab allocator integration.
 
+#[cfg(target_arch = "riscv64")]
+use exarch::mem::RawMemoryRegions;
 use exarch::mem::{MemoryRegion, MemoryRegionFlags};
 use expt::pte::MappingFlags;
 use log::info;
+#[cfg(target_arch = "riscv64")]
+use memory_addr::PhysAddrRange;
 use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange};
 use size_disp::SizeDisplay;
 
@@ -69,6 +73,103 @@ fn phys_addr_is_known(addr: PhysAddr) -> bool {
     regions.iter().any(|region| region.range.contains(addr))
 }
 
+/// Describes the conservatively reserved RAM prefix before the RISC-V loader.
+#[cfg(target_arch = "riscv64")]
+const PRE_LOADER_RAM_DESC: &str = "RAM below loader";
+
+/// Reports whether a region describes physical RAM rather than device memory.
+#[cfg(target_arch = "riscv64")]
+fn is_ram_backing_region(region: &MemoryRegion) -> bool {
+    !region.flags.contains(MemoryRegionFlags::DEVICE)
+        && (region.flags.contains(MemoryRegionFlags::FREE)
+            || region.flags.contains(MemoryRegionFlags::RESERVED))
+}
+
+/// Reserves the prefix of the RAM range containing the RISC-V loader.
+///
+/// Some firmware reports the full RAM range in the device tree while placing itself before the
+/// loader. Following the loader's physical link address avoids hard-coding the RAM base or the
+/// firmware size. Adjacent RAM-backed regions are treated as one range so existing reservations,
+/// such as the device tree blob, remain in place.
+#[cfg(target_arch = "riscv64")]
+fn reserve_ram_prefix_before_loader(regions: &mut RawMemoryRegions, loader_start: PhysAddr) {
+    let Some(mut ram_start) = regions
+        .iter()
+        .filter(|region| is_ram_backing_region(region) && region.range.contains(loader_start))
+        .map(|region| region.range.start)
+        .min()
+    else {
+        return;
+    };
+
+    loop {
+        let previous_start = regions
+            .iter()
+            .filter(|region| {
+                is_ram_backing_region(region)
+                    && region.range.start < ram_start
+                    && region.range.end >= ram_start
+            })
+            .map(|region| region.range.start)
+            .min();
+        let Some(previous_start) = previous_start else {
+            break;
+        };
+        ram_start = previous_start;
+    }
+
+    let prefix = PhysAddrRange::new(ram_start, loader_start);
+    let mut adjusted_regions = RawMemoryRegions::new();
+
+    for region in regions.iter().copied() {
+        if !region.flags.contains(MemoryRegionFlags::FREE)
+            || region.flags.contains(MemoryRegionFlags::DEVICE)
+        {
+            adjusted_regions
+                .push(region)
+                .expect("too many adjusted memory regions");
+            continue;
+        }
+
+        let reserved_start = core::cmp::max(region.range.start, prefix.start);
+        let reserved_end = core::cmp::min(region.range.end, prefix.end);
+        if reserved_start >= reserved_end {
+            adjusted_regions
+                .push(region)
+                .expect("too many adjusted memory regions");
+            continue;
+        }
+
+        if region.range.start < reserved_start {
+            adjusted_regions
+                .push(MemoryRegion {
+                    range: PhysAddrRange::new(region.range.start, reserved_start),
+                    ..region
+                })
+                .expect("too many adjusted memory regions");
+        }
+
+        adjusted_regions
+            .push(MemoryRegion {
+                range: PhysAddrRange::new(reserved_start, reserved_end),
+                flags: (region.flags & !MemoryRegionFlags::FREE) | MemoryRegionFlags::RESERVED,
+                desc: PRE_LOADER_RAM_DESC,
+            })
+            .expect("too many adjusted memory regions");
+
+        if reserved_end < region.range.end {
+            adjusted_regions
+                .push(MemoryRegion {
+                    range: PhysAddrRange::new(reserved_end, region.range.end),
+                    ..region
+                })
+                .expect("too many adjusted memory regions");
+        }
+    }
+
+    *regions = adjusted_regions;
+}
+
 /// Initializes early memory management and installs the kernel page-table.
 pub fn init_and_enable_vmm(
     entry_with_vmm: *const ecraldr_base::KernelEntryType,
@@ -79,15 +180,24 @@ pub fn init_and_enable_vmm(
     print_kernel_location("Kernel location immediately after boot:");
 
     // Get physical memory regions from the boot argument.
-    let raw_mem_regions = exarch::mem::raw_mem_regions(unsafe { arg.as_ref_unchecked().plat_arg });
-    print_mem_regions("Raw memory regions reported by platform:", &raw_mem_regions);
+    let boot_arg = *unsafe { arg.as_ref_unchecked() };
+    let raw_mem_regions = exarch::mem::raw_mem_regions(boot_arg.plat_arg);
+    // RISC-V firmware may occupy RAM that the DTB still reports as usable.
+    // Reserve the prefix before the loader to keep it out of the allocator.
+    #[cfg(target_arch = "riscv64")]
+    let raw_mem_regions = {
+        let mut regions = raw_mem_regions;
+        reserve_ram_prefix_before_loader(&mut regions, boot_arg.loader_range.start);
+        regions
+    };
+    print_mem_regions(
+        "Raw memory regions after early-boot adjustments:",
+        &raw_mem_regions,
+    );
 
     // Build the final physical memory region table by splitting raw boot
     // regions around the loader and kernel image.
-    pmm::build_phys_mem_regions(
-        &raw_mem_regions,
-        unsafe { arg.as_ref_unchecked() }.loader_range,
-    );
+    pmm::build_phys_mem_regions(&raw_mem_regions, boot_arg.loader_range);
     print_mem_regions("Final physical memory regions:", pmm::phys_mem_regions());
     // The final table is now the sole source of truth. boot_regions is never
     // used again.

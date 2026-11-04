@@ -34,6 +34,7 @@ pub fn cpu_up(
 /// Shuts down the x86-64 platform.
 pub fn shutdown(_reason: ShutdownReason) -> ! {
     unsafe {
+        // TODO: Probe the shutdown method through ACPI.
         const POWEROFF_PORT: u16 = 0x604;
         const POWEROFF_VALUE: u16 = 0x2000;
         core::arch::asm!(
