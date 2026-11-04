@@ -412,15 +412,6 @@ pub fn virt_addr_space_modes() -> VirtAddrSpaceModes {
         .position(|candidate| *candidate == current)
         .expect("active AArch64 virtual address-space mode is not supported");
 
-    dbcn_println!("  Current mode: {}", current);
-    for prop in props_for_half {
-        dbcn_println!(
-            "  Supported: {} KiB pages, {}-bit virtual addresses",
-            1usize << (prop.page_shift - 10),
-            prop.va_bits
-        );
-    }
-
     modes
 }
 

@@ -3,7 +3,7 @@
 //! Defines physical memory regions, supported address-space modes, and architecture-selected
 //! page-table descriptors specialized with the caller's page allocator and TLB flusher.
 
-use core::{fmt, num::NonZeroU8};
+use core::{fmt, num::NonZeroU8, range::RangeInclusive};
 
 use ecraldr_base::PlatformBootArg;
 use expalloc_trait::PageAllocator;
@@ -14,6 +14,7 @@ use expt::{
 use heapless::Vec as HeaplessVec;
 use look_at::look_at;
 use memory_addr::{PhysAddrRange, VirtAddr};
+use size_disp::SizeDisplay;
 
 bitflags::bitflags! {
     /// The flags for a memory region.
@@ -172,19 +173,39 @@ pub enum VirtAddrSpaceMode {
 }
 
 impl VirtAddrSpaceMode {
-    const fn lower_range_inc(low_va_bits: u8) -> (usize, usize) {
-        (0, 1usize.wrapping_shl(low_va_bits as _).wrapping_sub(1))
+    const fn lower_range(low_va_bits: u8) -> RangeInclusive<usize> {
+        RangeInclusive {
+            start: 0,
+            last: 1usize.wrapping_shl(low_va_bits as _).wrapping_sub(1),
+        }
     }
 
-    const fn upper_range_inc(high_va_bits: u8) -> (usize, usize) {
-        (
-            1usize.wrapping_shl(high_va_bits as _).wrapping_neg(),
-            usize::MAX,
-        )
+    const fn upper_range(high_va_bits: u8) -> RangeInclusive<usize> {
+        RangeInclusive {
+            start: 1usize.wrapping_shl(high_va_bits as _).wrapping_neg(),
+            last: usize::MAX,
+        }
     }
 
     const fn page_size(page_shift: u8) -> usize {
         1usize.wrapping_shl(page_shift as _)
+    }
+
+    fn print_range(
+        range: RangeInclusive<usize>,
+        bits: u8,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "{:#018x}..={:#018x} ({:>2} bits)",
+            range.start, range.last, bits
+        )
+    }
+
+    fn print_page_size(page_shift: u8, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let page_size = Self::page_size(page_shift);
+        write!(f, "{}", page_size.size_display_wide())
     }
 
     /// Combines lower and upper virtual address space properties into a mode.
@@ -274,49 +295,50 @@ impl fmt::Display for VirtAddrSpaceMode {
                 page_shift,
                 va_bits,
             }) => {
-                let (min, max) = Self::lower_range_inc(va_bits);
-                let page_size = Self::page_size(page_shift);
-                write!(
-                    f,
-                    "LowerOnly, {:#018x}..={:#018x}, page size {:#x}",
-                    min, max, page_size
-                )
+                let range = Self::lower_range(va_bits);
+                write!(f, "LowerOnly, ")?;
+                Self::print_range(range, va_bits, f)?;
+                write!(f, ", ")?;
+                Self::print_page_size(page_shift, f)?;
+                write!(f, " page")
             }
             VirtAddrSpaceMode::UpperOnly(P {
                 page_shift,
                 va_bits,
             }) => {
-                let (min, max) = Self::upper_range_inc(va_bits);
-                let page_size = Self::page_size(page_shift);
-                write!(
-                    f,
-                    "UpperOnly, {:#018x}..={:#018x}, page size {:#x}",
-                    min, max, page_size
-                )
+                let range = Self::upper_range(va_bits);
+                write!(f, "UpperOnly, ")?;
+                Self::print_range(range, va_bits, f)?;
+                write!(f, ", ")?;
+                Self::print_page_size(page_shift, f)?;
+                write!(f, " page")
             }
             VirtAddrSpaceMode::Independent { lower, upper } => {
-                let (lmin, lmax) = Self::lower_range_inc(lower.va_bits);
-                let (umin, umax) = Self::upper_range_inc(upper.va_bits);
-                let lpage_size = Self::page_size(lower.page_shift);
-                let upage_size = Self::page_size(upper.page_shift);
-                write!(
-                    f,
-                    "Independent, lower: {:#018x}..={:#018x}, lower page size {:#x}, upper: {:#018x}..={:#018x}, upper page size {:#x}",
-                    lmin, lmax, lpage_size, umin, umax, upage_size
-                )
+                let lrange = Self::lower_range(lower.va_bits);
+                let urange = Self::upper_range(upper.va_bits);
+                write!(f, "Independent, lower: ")?;
+                Self::print_range(lrange, lower.va_bits, f)?;
+                write!(f, ", ")?;
+                Self::print_page_size(lower.page_shift, f)?;
+                write!(f, " page, upper: ")?;
+                Self::print_range(urange, upper.va_bits, f)?;
+                write!(f, ", ")?;
+                Self::print_page_size(upper.page_shift, f)?;
+                write!(f, " page")
             }
             VirtAddrSpaceMode::Unified(P {
                 page_shift,
                 va_bits,
             }) => {
-                let (lmin, lmax) = Self::lower_range_inc(va_bits - 1);
-                let (umin, umax) = Self::upper_range_inc(va_bits - 1);
-                let page_size = Self::page_size(page_shift);
-                write!(
-                    f,
-                    "Unified, lower: {:#018x}..={:#018x}, upper: {:#018x}..={:#018x}, page size {:#x}",
-                    lmin, lmax, umin, umax, page_size
-                )
+                let lrange = Self::lower_range(va_bits - 1);
+                let urange = Self::upper_range(va_bits - 1);
+                write!(f, "Unified, lower: ")?;
+                Self::print_range(lrange, va_bits - 1, f)?;
+                write!(f, ", upper: ")?;
+                Self::print_range(urange, va_bits - 1, f)?;
+                write!(f, ", ")?;
+                Self::print_page_size(page_shift, f)?;
+                write!(f, " page")
             }
         }
     }

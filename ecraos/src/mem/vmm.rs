@@ -77,129 +77,6 @@ fn mapping_flags_conflict(
     })
 }
 
-/// Deferred page-table cleanup and remote invalidation tests.
-///
-/// Recording local invalidations avoids privileged instructions on the host.
-#[cfg(test)]
-mod tests {
-    use core::cell::RefCell;
-
-    use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher};
-    use expt::pte::MappingFlags;
-    use memory_addr::{PhysAddrRange, VirtAddr, VirtAddrRange, pa, va};
-
-    use crate::tlb::TlbInvalidation;
-
-    use super::{
-        MemoryRegion, MemoryRegionFlags, aligned_mmio_region, finish_local_cleanup,
-        mapping_flags_conflict, ranges_share_mapping_page,
-    };
-
-    std::thread_local! {
-        /// The local invalidations completed by the calling test thread.
-        ///
-        /// Each test starts with an independent empty recording.
-        static FLUSHES: RefCell<Vec<Option<VirtAddr>>> = const { RefCell::new(Vec::new()) };
-    }
-
-    /// A local invalidation recorder.
-    ///
-    /// It models the captured strategy without executing architecture instructions.
-    struct RecordingFlusher;
-
-    /// The host recording strategy implementation.
-    ///
-    /// Cleanup completes by storing observations in thread-local test state.
-    impl TlbFlusher<VirtAddr> for RecordingFlusher {
-        /// Records one completed local invalidation.
-        ///
-        /// The returned remote request must be inspected only after this record exists.
-        fn flush(address: Option<VirtAddr>) {
-            FLUSHES.with_borrow_mut(|flushes| flushes.push(address));
-        }
-    }
-
-    /// Completes local pages before returning the requested remote range.
-    ///
-    /// Batching must retain every pending address without widening a sufficient range.
-    #[test]
-    fn finishes_local_pages_before_remote_completion() {
-        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
-        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
-        cleanup.push_flush(TlbFlush::Page(va!(0x2000)));
-        let request = TlbInvalidation::Range(VirtAddrRange::new(va!(0x1000), va!(0x3000)));
-        let remote = finish_local_cleanup(cleanup, request);
-        FLUSHES.with_borrow(|flushes| {
-            assert_eq!(flushes.as_slice(), &[Some(va!(0x1000)), Some(va!(0x2000))]);
-        });
-        assert_eq!(remote, request);
-    }
-
-    /// Widens remote invalidation when a page-table mutation requires a full flush.
-    ///
-    /// Huge-leaf splits and accumulated flush overflow cannot be completed by one remote page.
-    #[test]
-    fn full_cleanup_requires_full_remote_invalidation() {
-        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
-        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
-        cleanup.push_flush(TlbFlush::Full);
-        let remote = finish_local_cleanup(cleanup, TlbInvalidation::Page(va!(0x1000)));
-        FLUSHES.with_borrow(|flushes| assert_eq!(flushes.as_slice(), &[None]));
-        assert_eq!(remote, TlbInvalidation::All);
-    }
-
-    /// Rounds an unaligned device range outward without changing its mapping attributes.
-    #[test]
-    fn aligns_mmio_range_outwards_to_base_pages() {
-        let region = MemoryRegion {
-            range: PhysAddrRange::new(pa!(0x1234), pa!(0x2abc)),
-            flags: MemoryRegionFlags::READ
-                | MemoryRegionFlags::WRITE
-                | MemoryRegionFlags::DEVICE
-                | MemoryRegionFlags::RESERVED,
-            desc: "UART registers",
-        };
-
-        let aligned = aligned_mmio_region(region, 0x1000);
-
-        assert_eq!(aligned.range, PhysAddrRange::new(pa!(0x1000), pa!(0x3000)));
-        assert_eq!(aligned.flags, region.flags);
-        assert_eq!(aligned.desc, region.desc);
-    }
-
-    /// Treats adjacent byte ranges in one page as a mapping conflict.
-    #[test]
-    fn detects_mmio_sharing_a_page_with_ram() {
-        let mmio = PhysAddrRange::new(pa!(0x1800), pa!(0x2000));
-        let ram = PhysAddrRange::new(pa!(0x1000), pa!(0x1800));
-
-        assert!(ranges_share_mapping_page(mmio, ram, 0x1000));
-        assert!(!ranges_share_mapping_page(
-            mmio,
-            PhysAddrRange::new(pa!(0x2000), pa!(0x2800)),
-            0x1000,
-        ));
-    }
-
-    /// Allows duplicate MMIO mappings only when their page attributes agree.
-    #[test]
-    fn rejects_overlapping_mmio_mappings_with_different_attributes() {
-        let range = PhysAddrRange::new(pa!(0x4000), pa!(0x5000));
-        let mapped = [(range, MappingFlags::READ | MappingFlags::DEVICE)];
-
-        assert!(!mapping_flags_conflict(
-            range,
-            MappingFlags::READ | MappingFlags::DEVICE,
-            &mapped,
-        ));
-        assert!(mapping_flags_conflict(
-            range,
-            MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
-            &mapped,
-        ));
-    }
-}
-
 /// The serialization lock for kernel mapping changes and delayed reuse.
 ///
 /// The request payload has one writer throughout mutation, remote completion and finalization.
@@ -825,5 +702,128 @@ impl PageAllocator for FormalPageAllocator {
     /// The final page-table roots must be active before this allocator accesses table storage.
     fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
         VirtAddr::from_usize(addr.as_usize() + direct_mapping_offset())
+    }
+}
+
+/// Deferred page-table cleanup and remote invalidation tests.
+///
+/// Recording local invalidations avoids privileged instructions on the host.
+#[cfg(test)]
+mod tests {
+    use core::cell::RefCell;
+
+    use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher};
+    use expt::pte::MappingFlags;
+    use memory_addr::{PhysAddrRange, VirtAddr, VirtAddrRange, pa, va};
+
+    use crate::tlb::TlbInvalidation;
+
+    use super::{
+        MemoryRegion, MemoryRegionFlags, aligned_mmio_region, finish_local_cleanup,
+        mapping_flags_conflict, ranges_share_mapping_page,
+    };
+
+    std::thread_local! {
+        /// The local invalidations completed by the calling test thread.
+        ///
+        /// Each test starts with an independent empty recording.
+        static FLUSHES: RefCell<Vec<Option<VirtAddr>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// A local invalidation recorder.
+    ///
+    /// It models the captured strategy without executing architecture instructions.
+    struct RecordingFlusher;
+
+    /// The host recording strategy implementation.
+    ///
+    /// Cleanup completes by storing observations in thread-local test state.
+    impl TlbFlusher<VirtAddr> for RecordingFlusher {
+        /// Records one completed local invalidation.
+        ///
+        /// The returned remote request must be inspected only after this record exists.
+        fn flush(address: Option<VirtAddr>) {
+            FLUSHES.with_borrow_mut(|flushes| flushes.push(address));
+        }
+    }
+
+    /// Completes local pages before returning the requested remote range.
+    ///
+    /// Batching must retain every pending address without widening a sufficient range.
+    #[test]
+    fn finishes_local_pages_before_remote_completion() {
+        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
+        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
+        cleanup.push_flush(TlbFlush::Page(va!(0x2000)));
+        let request = TlbInvalidation::Range(VirtAddrRange::new(va!(0x1000), va!(0x3000)));
+        let remote = finish_local_cleanup(cleanup, request);
+        FLUSHES.with_borrow(|flushes| {
+            assert_eq!(flushes.as_slice(), &[Some(va!(0x1000)), Some(va!(0x2000))]);
+        });
+        assert_eq!(remote, request);
+    }
+
+    /// Widens remote invalidation when a page-table mutation requires a full flush.
+    ///
+    /// Huge-leaf splits and accumulated flush overflow cannot be completed by one remote page.
+    #[test]
+    fn full_cleanup_requires_full_remote_invalidation() {
+        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
+        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
+        cleanup.push_flush(TlbFlush::Full);
+        let remote = finish_local_cleanup(cleanup, TlbInvalidation::Page(va!(0x1000)));
+        FLUSHES.with_borrow(|flushes| assert_eq!(flushes.as_slice(), &[None]));
+        assert_eq!(remote, TlbInvalidation::All);
+    }
+
+    /// Rounds an unaligned device range outward without changing its mapping attributes.
+    #[test]
+    fn aligns_mmio_range_outwards_to_base_pages() {
+        let region = MemoryRegion {
+            range: PhysAddrRange::new(pa!(0x1234), pa!(0x2abc)),
+            flags: MemoryRegionFlags::READ
+                | MemoryRegionFlags::WRITE
+                | MemoryRegionFlags::DEVICE
+                | MemoryRegionFlags::RESERVED,
+            desc: "UART registers",
+        };
+
+        let aligned = aligned_mmio_region(region, 0x1000);
+
+        assert_eq!(aligned.range, PhysAddrRange::new(pa!(0x1000), pa!(0x3000)));
+        assert_eq!(aligned.flags, region.flags);
+        assert_eq!(aligned.desc, region.desc);
+    }
+
+    /// Treats adjacent byte ranges in one page as a mapping conflict.
+    #[test]
+    fn detects_mmio_sharing_a_page_with_ram() {
+        let mmio = PhysAddrRange::new(pa!(0x1800), pa!(0x2000));
+        let ram = PhysAddrRange::new(pa!(0x1000), pa!(0x1800));
+
+        assert!(ranges_share_mapping_page(mmio, ram, 0x1000));
+        assert!(!ranges_share_mapping_page(
+            mmio,
+            PhysAddrRange::new(pa!(0x2000), pa!(0x2800)),
+            0x1000,
+        ));
+    }
+
+    /// Allows duplicate MMIO mappings only when their page attributes agree.
+    #[test]
+    fn rejects_overlapping_mmio_mappings_with_different_attributes() {
+        let range = PhysAddrRange::new(pa!(0x4000), pa!(0x5000));
+        let mapped = [(range, MappingFlags::READ | MappingFlags::DEVICE)];
+
+        assert!(!mapping_flags_conflict(
+            range,
+            MappingFlags::READ | MappingFlags::DEVICE,
+            &mapped,
+        ));
+        assert!(mapping_flags_conflict(
+            range,
+            MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
+            &mapped,
+        ));
     }
 }

@@ -211,6 +211,7 @@ dependencies = [
  "raw-cpuid 11.6.0",
  "riscv",
  "sbi-rt",
+ "size_disp",
  "tock-registers",
  "uart_16550",
  "x2apic",
