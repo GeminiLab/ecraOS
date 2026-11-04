@@ -6,6 +6,7 @@ use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
 use crate::{
+    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{
         CpuTopology, PlatformDescription, PlatformInterruptController,
         dt::{
@@ -56,6 +57,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
                 .find_compatible("riscv,plic0")?
                 .expect("Device Tree has no supported PLIC node"),
         };
+        assert!(plic_node.is_enabled()?, "Device Tree PLIC is disabled");
         let plic_reg = plic_node
             .property("reg")?
             .expect("PLIC node has no reg property");
@@ -113,9 +115,18 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             source_count: plic_ndev,
             contexts: contexts.into_boxed_slice(),
         };
+        let mmio_regions = alloc::vec![MemoryRegion {
+            range: memory_addr::PhysAddrRange::from_start_size(
+                controller.physical_base,
+                controller.size,
+            ),
+            flags: DEFAULT_MMIO_FLAGS,
+            desc: "PLIC registers",
+        }];
         Ok(PlatformDescription::new(
             cpu_topology,
             PlatformInterruptController(controller),
+            mmio_regions,
         ))
     })
     .expect("failed to discover RISC-V platform from Device Tree")

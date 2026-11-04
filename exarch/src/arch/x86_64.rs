@@ -16,18 +16,27 @@ pub fn init_early() {
     debug_console::init();
     crate::dbcn_println!("\n\n");
 
-    // Check if the required features are supported
-    check_required_features();
-
     // Initialize the GDT and IDT
     imp::gdt::init_gdt();
     imp::idt::init_idt();
+
+    // Check if the required features are supported after exception handling is available.
+    check_required_features();
 
     // Initialize the time module
     time::init_early();
 }
 
+/// Initializes the discovered global controller and this CPU's local APIC.
+///
+/// Consumes the controller configuration published after discovery and MMIO mapping.
+///
+/// # Panics
+///
+/// Panics if platform discovery did not publish the controller configuration.
 pub fn init_later() {
+    let config = crate::platform::take_interrupt_controller_config();
+    trap::init_external_controller(config);
     imp::apic::init_bsp();
 }
 

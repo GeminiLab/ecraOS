@@ -23,17 +23,34 @@ look_at! {
     /// - Interrupts are disabled.
     ///
     /// This method should:
-    /// - Initialize the debug console.
-    /// - Initialize the interrupt controller and interrupt handling, while keeping interrupts
-    ///   disabled.
-    /// - Initialize the time module.
-    /// - Prepare for calling other initialization functions.
+    /// - Initialize the early debug console.
+    /// - Install the CPU's exception vector so synchronous exceptions can be handled.
+    /// - Initialize architecture timekeeping needed by subsequent early setup.
+    /// - Prepare other CPU-local state required before memory initialization and later architecture
+    ///   initialization hooks.
+    ///
+    /// It must leave the current CPU able to take and handle exceptions. It does not initialize an
+    /// interrupt controller or enable interrupt delivery.
+    ///
+    /// Architectures choose their own order. The recommended order is to initialize the debug
+    /// console, install the exception vector, then perform other early initialization. Interrupt
+    /// delivery must remain disabled.
     pub fn init_early(arg: PlatformBootArg);
-    /// Later platform initialization. Yet to be implemented.
+
+    /// Initializes the global and BSP local interrupt controllers.
+    ///
+    /// The caller has completed platform discovery, mapped all reported MMIO regions, and
+    /// published the discovered controller configuration. Implementations retain shared controller
+    /// state needed by AP initialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics if platform discovery did not publish the controller configuration.
     pub fn init_later();
 
-    /// Early platform initialization for APs.
+    /// Installs the AP's exception path without enabling interrupt delivery.
     pub fn init_early_ap();
-    /// Later platform initialization for APs.
+
+    /// Initializes the AP-local interrupt controller using BSP-published architecture state.
     pub fn init_later_ap();
 }

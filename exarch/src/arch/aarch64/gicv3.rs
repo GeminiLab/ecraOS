@@ -236,28 +236,28 @@ pub fn init_external_controller(config: Aarch64ExternalIrqConfig) {
 
 /// Initializes this PE's redistributor and EL1 CPU interface.
 ///
-/// Early vector installation may precede mapped controller discovery, so selection waits until
-/// the existing late platform initialization supplies the complete MMIO regions.
+/// Global GIC discovery and MMIO mapping must complete before this per-CPU step.
 pub fn init_percpu() {
-    if let Some(gic) = GIC.get() {
-        let mpidr = MPIDR_EL1.get();
-        let offset = select_redistributor(gic.redist_size, mpidr, |offset| {
-            Some(read64(gic.redist, offset + GICR_TYPER))
-        })
-        .unwrap_or_else(|error| {
-            panic!(
-                "GIC redistributor physical={mpidr:#x} region={:#x} size={:#x}: {error:?}",
-                gic.redist, gic.redist_size
-            )
-        });
-        let redist = gic.redist + offset;
-        LOCAL_REDISTRIBUTOR.write_current(redist.as_usize());
-        write32(redist, GICR_WAKER, read32(redist, GICR_WAKER) & !(1 << 1));
-        wait_clear(redist, GICR_WAKER, 1 << 2, "redistributor wake");
-        write32(redist, SGI_BASE + IGROUPR, u32::MAX);
-        write8(redist, SGI_BASE + IPRIORITYR + 27, 0x80);
-        write32(redist, SGI_BASE + ISENABLER, 1 << 27);
-    }
+    let gic = GIC
+        .get()
+        .expect("GIC global controller must initialize before local controllers");
+    let mpidr = MPIDR_EL1.get();
+    let offset = select_redistributor(gic.redist_size, mpidr, |offset| {
+        Some(read64(gic.redist, offset + GICR_TYPER))
+    })
+    .unwrap_or_else(|error| {
+        panic!(
+            "GIC redistributor physical={mpidr:#x} region={:#x} size={:#x}: {error:?}",
+            gic.redist, gic.redist_size
+        )
+    });
+    let redist = gic.redist + offset;
+    LOCAL_REDISTRIBUTOR.write_current(redist.as_usize());
+    write32(redist, GICR_WAKER, read32(redist, GICR_WAKER) & !(1 << 1));
+    wait_clear(redist, GICR_WAKER, 1 << 2, "redistributor wake");
+    write32(redist, SGI_BASE + IGROUPR, u32::MAX);
+    write8(redist, SGI_BASE + IPRIORITYR + 27, 0x80);
+    write32(redist, SGI_BASE + ISENABLER, 1 << 27);
     // aarch64-cpu does not expose the ICC registers used by this EL1-only backend.
     unsafe {
         asm!("msr icc_sre_el1, {value}", "isb", value = in(reg) 7u64, options(nostack));

@@ -5,9 +5,11 @@ use core::{ptr::NonNull, time::Duration};
 
 use acpi::{AcpiTables, Handler, PhysicalMapping};
 use ecraldr_base::{PhysAddr, PlatformBootArg};
+use memory_addr::PhysAddrRange;
 
 use crate::{
     kernel_if::phys_to_virt,
+    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
     power::PhysicalCpuId,
     time,
@@ -292,6 +294,14 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         })
         .collect::<Vec<_>>()
         .into_boxed_slice();
+    let mmio_regions: Vec<MemoryRegion> = io_apics
+        .iter()
+        .map(|ioapic| MemoryRegion {
+            range: PhysAddrRange::from_start_size(ioapic.physical_base, 4096),
+            flags: DEFAULT_MMIO_FLAGS,
+            desc: "IOAPIC registers",
+        })
+        .collect();
     let overrides = apic
         .interrupt_source_overrides
         .iter()
@@ -317,5 +327,9 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         bsp_apic_id: processors.boot_processor.local_apic_id,
     };
 
-    PlatformDescription::new(cpu_topology, PlatformInterruptController(controller))
+    PlatformDescription::new(
+        cpu_topology,
+        PlatformInterruptController(controller),
+        mmio_regions,
+    )
 }

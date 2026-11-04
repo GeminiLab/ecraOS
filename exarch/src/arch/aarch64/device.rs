@@ -6,6 +6,7 @@ use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
 use crate::{
+    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{
         CpuTopology, PlatformDescription, PlatformInterruptController,
         dt::{
@@ -64,6 +65,10 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         let gic_node = index
             .find_compatible("arm,gic-v3")?
             .expect("Device Tree has no GICv3 controller");
+        assert!(
+            gic_node.is_enabled()?,
+            "Device Tree GICv3 controller is disabled"
+        );
         let reg = gic_node
             .property("reg")?
             .expect("GIC node has no reg property");
@@ -78,9 +83,25 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             gicr_size: reg.u64(3).expect("invalid GIC redistributor size") as usize,
             spi_count: 988,
         };
+        let mut mmio_regions = alloc::vec![
+            MemoryRegion {
+                range: memory_addr::PhysAddrRange::from_start_size(gic.gicd_base, gic.gicd_size),
+                flags: DEFAULT_MMIO_FLAGS,
+                desc: "GIC distributor registers",
+            },
+            MemoryRegion {
+                range: memory_addr::PhysAddrRange::from_start_size(gic.gicr_base, gic.gicr_size),
+                flags: DEFAULT_MMIO_FLAGS,
+                desc: "GIC redistributor registers",
+            },
+        ];
+        if let Some(console_region) = super::debug_console::mmio_region() {
+            mmio_regions.push(console_region);
+        }
         Ok(PlatformDescription::new(
             cpu_topology,
             PlatformInterruptController(gic),
+            mmio_regions,
         ))
     })
     .expect("failed to discover AArch64 platform from Device Tree")

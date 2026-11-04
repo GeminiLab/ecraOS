@@ -286,6 +286,10 @@ pub fn set_irq_enabled(irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
 ///
 /// Global interrupt delivery remains controlled separately through [`enable_local`].
 pub(super) fn init_percpu() {
+    assert!(
+        PLIC.get().is_some(),
+        "PLIC global controller must initialize before local interrupt sources"
+    );
     // SAFETY: global interrupts remain disabled until the kernel installs and arms the timer.
     unsafe {
         supervisor::enable_interrupt(RiscVInterrupt::SupervisorTimer);

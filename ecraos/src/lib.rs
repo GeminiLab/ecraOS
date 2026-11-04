@@ -148,6 +148,7 @@ unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     let arg_ref = unsafe { arg.as_ref_unchecked() };
 
     // Perform early platform initialization.
+    trap::init_early();
     exarch::init::init_early(arg_ref.plat_arg);
 
     // Print the hello banner.
@@ -178,6 +179,7 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
 
     // Call the relocation hook.
     exarch::reloc_hook::after_reloc();
+    trap::after_reloc();
 
     // Print the hello banner.
     kprintln!(
@@ -192,12 +194,10 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     // Finish memory initialization after enabling VMM.
     mem::init_after_enable_vmm();
 
-    // Perform later platform initialization.
+    // Discover the platform and map controller MMIO before initializing any controller.
     let boot_arg = unsafe { arg.as_ref_unchecked() };
+    device::discover_and_map_platform(boot_arg.plat_arg);
     exarch::init::init_later();
-
-    // Discover CPU topology and initialize the platform interrupt controller.
-    device::init_platform(boot_arg.plat_arg);
 
     trap::init();
     ipi::init();
@@ -206,6 +206,7 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
     timer::init_bsp();
     mp::mark_current_cpu_ipi_ready();
+    exarch::trap::enable_local();
 
     kprintln!("\n\nHere we go!\n\n");
 
@@ -242,14 +243,14 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     // Initialize the CPU ID for the AP.
     mp::init_cpu_id_ap(phys_id);
 
+    // Perform early platform initialization for the AP.
+    exarch::init::init_early_ap();
+
     info!(
         "Kernel entry on AP {}(hart_id: {})",
         mp::current_cpu_id(),
         phys_id
     );
-
-    // Perform early platform initialization for the AP.
-    exarch::init::init_early_ap();
 
     // Initialize memory for the AP.
     mem::init_ap();
@@ -263,6 +264,7 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     task::init_scheduler_current_cpu(mp::current_cpu_boot_stack_range());
     timer::init_ap();
     mp::mark_current_cpu_ipi_ready();
+    exarch::trap::enable_local();
     mp::mark_ap_up(cpu_id);
 
     // Online APs keep servicing IPIs here until boot has finished all mapping changes and joins.

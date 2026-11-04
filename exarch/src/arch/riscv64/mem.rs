@@ -32,11 +32,6 @@ pub type LocalTlbFlusher = expt::arch::riscv64::Riscv64LocalTlbFlusher;
 
 core::arch::global_asm!(include_str!("mem.S"),);
 
-/// The description attached to device-tree MMIO regions.
-///
-/// These ranges are reserved from allocation and mapped with device-memory attributes.
-const DEVICE_MMIO_DESC: &str = "device-tree MMIO";
-
 /// The description attached to the device tree memory range.
 ///
 /// Identifies the reserved device-tree blob rather than MMIO described by its nodes.
@@ -47,10 +42,10 @@ const DEVICE_TREE_DESC: &str = "device tree";
 /// Covers whole base pages so the blob cannot share an allocatable page with RAM.
 const DEVICE_TREE_ALIGN: usize = 4096;
 
-/// Collects physical memory regions reported by the device tree.
+/// Collects usable RAM and regions that must remain mapped during early boot.
 ///
-/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
-/// reserved device memory, preserving usable RAM on both sides.
+/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as reserved
+/// boot data, preserving usable RAM on both sides. Later-discovered devices are mapped separately.
 pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let mut regions = RawMemoryRegions::new();
 
@@ -98,41 +93,6 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                     })
                     .expect("too many platform memory regions");
             }
-        }
-
-        // TODO: handle other devices
-        for node in dev_tree.nodes().iterator() {
-            let node = node.expect("failed to inspect Device Tree node");
-            let supported = node
-                .is_compatible("sifive,plic-1.0.0")
-                .expect("failed to inspect PLIC compatible property")
-                || node
-                    .is_compatible("riscv,plic0")
-                    .expect("failed to inspect PLIC compatible property")
-                || node
-                    .is_compatible("ns16550a")
-                    .expect("failed to inspect UART compatible property");
-            if !supported {
-                continue;
-            }
-            let Some(reg) = node
-                .property("reg")
-                .expect("failed to inspect Device Tree reg property")
-            else {
-                continue;
-            };
-            let start = reg.u64(0).expect("invalid device MMIO base");
-            let size = reg.u64(1).expect("invalid device MMIO size");
-            regions
-                .push(MemoryRegion {
-                    range: PhysAddrRange::from_start_size(pa!(start as usize), size as usize),
-                    flags: MemoryRegionFlags::READ
-                        | MemoryRegionFlags::WRITE
-                        | MemoryRegionFlags::DEVICE
-                        | MemoryRegionFlags::RESERVED,
-                    desc: DEVICE_MMIO_DESC,
-                })
-                .expect("too many platform memory regions");
         }
 
         regions

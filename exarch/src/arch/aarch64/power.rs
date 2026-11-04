@@ -136,10 +136,16 @@ pub fn cpu_up(
     }
 }
 
-/// Requests a PSCI system shutdown and spins if firmware returns.
+/// Requests a PSCI system shutdown and halts if firmware returns.
 pub fn shutdown(_reason: ShutdownReason) -> ! {
     let _ = invoke_psci(PSCI_SYSTEM_OFF, 0, 0, 0);
+    halt()
+}
+
+/// Halts the current processing element after terminal firmware actions return.
+pub fn halt() -> ! {
     loop {
-        core::hint::spin_loop();
+        // SAFETY: WFE is a non-memory architectural wait instruction and does not access memory.
+        unsafe { asm!("wfe", options(nomem, nostack, preserves_flags)) };
     }
 }

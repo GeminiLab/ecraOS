@@ -7,8 +7,18 @@ pub fn init_early(arg: PlatformBootArg) {
     super::init_early_bsp(arg);
 }
 
-/// Runs late bootstrap-CPU initialization.
-pub fn init_later() {}
+/// Initializes the BSP global controller and its local interrupt interface.
+///
+/// Consumes the controller configuration published after discovery and MMIO mapping.
+///
+/// # Panics
+///
+/// Panics if platform discovery did not publish the controller configuration.
+pub fn init_later() {
+    let config = crate::platform::take_interrupt_controller_config();
+    super::trap::init_external_controller(config);
+    super::trap::init_percpu();
+}
 
 /// Runs early application-CPU initialization.
 pub fn init_early_ap() {

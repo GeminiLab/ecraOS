@@ -10,7 +10,7 @@ use expt::{
     pt::cleanup::TlbFlusher,
     pte::x86_64::X64PTE,
 };
-use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddr};
+use memory_addr::{PhysAddr, PhysAddrRange, VirtAddr};
 use multiboot::information::{MemoryManagement, MemoryType, Multiboot, PAddr};
 use raw_cpuid::CpuId;
 use x86_64::registers::control::{Cr4, Cr4Flags};
@@ -36,9 +36,8 @@ struct MultibootMem;
 
 impl MemoryManagement for MultibootMem {
     unsafe fn paddr_to_slice(&self, addr: PAddr, length: usize) -> Option<&'static [u8]> {
-        // SAFETY: We only use this implementation before the early
-        // initialization is complete, when paddr is guaranteed to be equal to
-        // vaddr.
+        // SAFETY: Multiboot is read only during early memory discovery, before the kernel jumps
+        // to its high-half entry, so these physical addresses are identity-mapped.
         unsafe { Some(core::slice::from_raw_parts(addr as *const u8, length)) }
     }
 
@@ -57,13 +56,6 @@ const LOW_MEMORT_DESC: &str = "low memory";
 const ACPI_MEMORY_DESC: &str = "ACPI memory";
 /// The description for the ACPI NVS memory region.
 const NVS_MEMORY_DESC: &str = "ACPI NVS memory";
-/// The description for the PCI MMIO memory region.
-const PCI_MMIO_DESC: &str = "PCI mmio range";
-/// The start of the PCI MMIO memory range.
-const PCI_MMIO_START: usize = 0xc0000000;
-/// The end of the PCI MMIO memory range.
-const PCI_MMIO_END: usize = 0xfffc0000;
-
 /// Get the memory regions from the multiboot information.
 fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegions {
     // Basically, this function just reads memory regions from the multiboot information, and
@@ -71,9 +63,7 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegi
     //
     // 1. The low memory range (0x00000000 - 0x000fffff), which is always reserved. Any conflicting
     //    multiboot memory region will be ignored.
-    // 2. The ACPI memory range (0xc0000000 - 0xfffc0000), which is always reserved. Unlike the low
-    //    memory range, any conflicting multiboot memory region will prevent this region from being
-    //    added.
+    // 2. The ACPI memory ranges reported by Multiboot, which remain reserved.
 
     let mut memory_regions = RawMemoryRegions::new();
     let mut mem = MultibootMem;
@@ -135,26 +125,6 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegi
                 break;
             }
         }
-    }
-
-    // Add the PCI MMIO region, if no other memory region conflicts with it.
-    let pci_mmio_region = PhysAddrRange::new(
-        PhysAddr::from_usize(PCI_MMIO_START),
-        PhysAddr::from_usize(PCI_MMIO_END),
-    );
-
-    if memory_regions
-        .iter()
-        .all(|region| !region.range.overlaps(pci_mmio_region))
-    {
-        _ = memory_regions.push(MemoryRegion {
-            range: pci_mmio_region,
-            flags: MemoryRegionFlags::READ
-                | MemoryRegionFlags::WRITE
-                | MemoryRegionFlags::DEVICE
-                | MemoryRegionFlags::RESERVED,
-            desc: PCI_MMIO_DESC,
-        });
     }
 
     memory_regions

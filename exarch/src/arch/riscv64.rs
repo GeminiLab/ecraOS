@@ -18,6 +18,8 @@ pub mod trap_entry;
 static DTB: LazyInit<DevTree<'_>> = LazyInit::new();
 
 pub fn init_early_bsp(arg: PlatformBootArg) {
+    trap_entry::install_vector();
+
     // TODO: re-initialize it in the high address space after relocat
     if let PlatformBootArg::DeviceTree(dtb) = arg {
         let dtb_va = va!(dtb.as_usize());
@@ -28,12 +30,11 @@ pub fn init_early_bsp(arg: PlatformBootArg) {
     }
 
     time::init();
-    trap_entry::init_percpu();
 }
 
 /// Runs early per-hart architecture initialization.
 ///
 /// This installs trap handling while global interrupts remain disabled.
 pub fn init_early_ap() {
-    trap_entry::init_percpu();
+    trap_entry::install_vector();
 }

@@ -28,18 +28,16 @@ static NEXT_DEADLINE_NANOS: u64 = 0;
 
 /// Initializes the periodic timer on the bootstrap hart.
 ///
-/// This registers the shared handler before arming and enabling local interrupts.
+/// The shared handler must be installed before this call. Interrupt delivery remains disabled.
 pub fn init_bsp() {
     program_next_timer();
-    exarch::trap::enable_local();
 }
 
-/// Initializes the periodic timer on an application hart.
+/// Initializes the periodic timer on an application hart without enabling interrupts.
 ///
 /// The bootstrap hart has already installed the shared timer handler.
 pub fn init_ap() {
     program_next_timer();
-    exarch::trap::enable_local();
 }
 
 /// Handles a supervisor timer interrupt on the current hart.

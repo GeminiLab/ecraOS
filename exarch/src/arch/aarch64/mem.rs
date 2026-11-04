@@ -196,10 +196,11 @@ fn tcr_for_mode(mode: VirtAddrSpaceMode) -> LocalRegisterCopy<u64, TCR_EL1::Regi
     tcr
 }
 
-/// Collects RAM and device regions reported by the device tree.
+/// Collects usable RAM, the early console, and memory that must remain mapped during early boot.
 ///
 /// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
-/// reserved device memory, preserving usable RAM on both sides.
+/// reserved boot data, preserving usable RAM on both sides. Later-discovered MMIO is mapped
+/// separately.
 pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let mut regions = RawMemoryRegions::new();
     let PlatformBootArg::DeviceTree(dtb_addr) = arg else {
@@ -217,17 +218,7 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
         let is_memory = node
             .is_device_type("memory")
             .expect("failed to inspect memory device type");
-        let is_gic = node
-            .is_compatible("arm,gic-v3")
-            .expect("failed to inspect GIC compatible property");
-        let is_supported = is_gic
-            || node
-                .is_compatible("arm,pl011")
-                .expect("failed to inspect UART compatible property")
-            || node
-                .is_compatible("arm,armv8-timer")
-                .expect("failed to inspect timer compatible property");
-        if !is_memory && !is_supported {
+        if !is_memory {
             continue;
         }
         let Some(reg) = node.property("reg").expect("failed to inspect device reg") else {
@@ -255,33 +246,12 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                     .expect("too many platform memory regions");
             }
         }
+    }
 
-        if is_supported && reg.length() >= 16 {
-            let _ = regions.push(MemoryRegion {
-                range: PhysAddrRange::from_start_size(
-                    pa!(reg.u64(0).expect("invalid device MMIO base") as usize),
-                    reg.u64(1).expect("invalid device MMIO size") as usize,
-                ),
-                flags: MemoryRegionFlags::READ
-                    | MemoryRegionFlags::WRITE
-                    | MemoryRegionFlags::DEVICE
-                    | MemoryRegionFlags::RESERVED,
-                desc: "device-tree MMIO",
-            });
-            if is_gic && reg.length() >= 32 {
-                let _ = regions.push(MemoryRegion {
-                    range: PhysAddrRange::from_start_size(
-                        pa!(reg.u64(2).expect("invalid GIC redistributor base") as usize),
-                        reg.u64(3).expect("invalid GIC redistributor size") as usize,
-                    ),
-                    flags: MemoryRegionFlags::READ
-                        | MemoryRegionFlags::WRITE
-                        | MemoryRegionFlags::DEVICE
-                        | MemoryRegionFlags::RESERVED,
-                    desc: "device-tree MMIO",
-                });
-            }
-        }
+    if let Some(console) = super::debug_console::mmio_region() {
+        regions
+            .push(console)
+            .expect("too many early memory regions");
     }
 
     regions

@@ -35,14 +35,13 @@ unsafe extern "C" {
 /// Installs the supervisor trap vector for the current hart.
 ///
 /// The caller must invoke [`after_reloc`] after code addresses change through relocation.
-pub(super) fn init_percpu() {
+pub(super) fn install_vector() {
     let vector = stvec::Stvec::new(
         trap_vector_base as *const () as usize,
         stvec::TrapMode::Direct,
     );
     // SAFETY: the assembly symbol is aligned and remains valid until the next relocation hook.
     unsafe { stvec::write(vector) };
-    super::trap::init_percpu();
 }
 
 /// Reloads the supervisor trap vector after relocation.

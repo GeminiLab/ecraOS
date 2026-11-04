@@ -16,13 +16,15 @@ pub mod time;
 pub mod trap;
 
 /// Runs bootstrap-CPU architecture initialization before virtual-memory setup.
-pub fn init_early_bsp(_arg: ecraldr_base::PlatformBootArg) {
-    debug_console::init();
+pub fn init_early_bsp(arg: ecraldr_base::PlatformBootArg) {
+    if !debug_console::init(arg) {
+        power::shutdown(crate::power::ShutdownReason::Panicked);
+    }
+    trap::init_exception_vector();
     time::init();
-    trap::init_percpu();
 }
 
 /// Runs application-CPU architecture initialization.
 pub fn init_early_ap() {
-    trap::init_percpu();
+    trap::init_exception_vector();
 }

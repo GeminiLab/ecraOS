@@ -126,12 +126,27 @@ pub fn default_global_irq_handler(frame: &mut TrapFrame, irq: ArchIrq) -> TrapDi
     irq::dispatch(frame, irq)
 }
 
-/// Installs the exception and global semantic handlers.
+/// Registers the common exception handler before an architecture installs its early vector.
 ///
-/// The local-interrupt slot is installed before timer arming.
+/// This makes synchronous faults during early initialization reach the kernel's fatal handler.
+pub fn init_early() {
+    register::<ExceptionHandler>(default_exception_handler);
+}
+
+/// Refreshes the common exception handler after the kernel changes virtual addresses.
+///
+/// Handler slots contain function pointers, so a pointer published before the high-address jump
+/// must be replaced while the low identity mapping is still available.
+pub fn after_reloc() {
+    register::<ExceptionHandler>(default_exception_handler);
+}
+
+/// Installs the global and local interrupt handlers.
+///
+/// The local-interrupt slot is installed before timer arming. The exception slot is refreshed as
+/// well, after relocation, so it points at the high-address handler.
 pub fn init() {
     irq::init();
-
     register::<ExceptionHandler>(default_exception_handler);
     register::<LocalInterruptHandler>(handle_local_interrupt);
     register::<GlobalIrqHandler>(default_global_irq_handler);

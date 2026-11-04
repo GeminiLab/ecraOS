@@ -92,6 +92,12 @@ pub const DEFAULT_RESERVED_FLAGS: MemoryRegionFlags = MemoryRegionFlags::READ
     .union(MemoryRegionFlags::WRITE)
     .union(MemoryRegionFlags::RESERVED);
 
+/// The default flags for a readable and writable reserved MMIO region.
+pub const DEFAULT_MMIO_FLAGS: MemoryRegionFlags = MemoryRegionFlags::READ
+    .union(MemoryRegionFlags::WRITE)
+    .union(MemoryRegionFlags::DEVICE)
+    .union(MemoryRegionFlags::RESERVED);
+
 /// The default description for a normal free RAM region.
 pub const DEFAULT_RAM_DESC: &str = "free memory";
 /// The default description for a reserved memory region.
@@ -355,9 +361,11 @@ look_at! {
 
     /// Collects the memory regions from the platform boot argument.
     ///
-    /// The returned memory regions should not contain the
-    /// [`MemoryRegionFlags::KERNEL`] flag, which is supposed to be used by the
-    /// kernel itself.
+    /// The returned regions describe usable physical RAM and every physical range that must stay
+    /// mapped throughout early initialization and the initial VMM transition, such as an early
+    /// debug console. Devices first needed after platform discovery are returned separately by
+    /// [`crate::platform::discover_platform`]. The returned regions must not use
+    /// [`MemoryRegionFlags::KERNEL`], which is reserved for kernel image sections.
     ///
     /// When this function is called, allocation is not available.
     pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;

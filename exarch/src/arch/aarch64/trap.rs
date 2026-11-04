@@ -29,11 +29,19 @@ unsafe extern "C" {
     fn aarch64_vector_base();
 }
 
-/// Installs the current PE's EL1 vectors and local controller interface.
+/// Installs the current PE's EL1 exception vector.
 ///
-/// The complete redistributor region is available during late platform initialization.
-pub fn init_percpu() {
+/// This operation does not initialize the GIC or enable maskable interrupt delivery.
+pub fn init_exception_vector() {
     VBAR_EL1.set(aarch64_vector_base as *const () as usize as u64);
+    aarch64_cpu::asm::barrier::isb(aarch64_cpu::asm::barrier::SY);
+}
+
+/// Initializes the current PE's GIC redistributor and EL1 CPU interface.
+///
+/// The BSP must initialize the global distributor first.
+pub fn init_percpu() {
+    init_exception_vector();
     gicv3::init_percpu();
     aarch64_cpu::asm::barrier::isb(aarch64_cpu::asm::barrier::SY);
 }

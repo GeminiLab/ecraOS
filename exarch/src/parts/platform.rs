@@ -1,11 +1,13 @@
 //! Firmware-backed platform discovery.
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 
 use ecraldr_base::PlatformBootArg;
+use kspin::SpinNoIrq;
+use lazyinit::LazyInit;
 use look_at::look_at;
 
-use crate::{power::PhysicalCpuId, trap::irq::ArchIrqConfig};
+use crate::{mem::MemoryRegion, power::PhysicalCpuId, trap::irq::ArchIrqConfig};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64", ecraos_doc, test))]
 pub mod dt;
@@ -58,25 +60,47 @@ impl CpuTopology {
     }
 }
 
-/// A discovered platform interrupt-controller driver.
+/// Discovered architecture-specific interrupt-controller configuration.
 ///
 /// The architecture parser creates this value from firmware data. The value owns the
-/// architecture-specific controller configuration, while initialization remains a single common
-/// operation for the kernel boot sequence. Interrupt delivery after initialization stays in the
-/// architecture-specific fast path.
+/// architecture-specific controller configuration. After mapping its MMIO ranges, the BSP
+/// publishes the configuration for exarch initialization hooks to consume. Architecture code
+/// retains initialized controller state for local-controller setup on the BSP and APs.
 pub struct PlatformInterruptController(pub ArchIrqConfig);
 
+/// The pending discovered controller configuration before BSP controller initialization.
+static INTERRUPT_CONTROLLER_CONFIG: LazyInit<SpinNoIrq<Option<ArchIrqConfig>>> = LazyInit::new();
+
 impl PlatformInterruptController {
-    /// Initializes the discovered platform interrupt controller.
+    /// Publishes the discovered configuration for BSP controller initialization.
     ///
-    /// This consumes the driver because the controller configuration is installed into the
-    /// architecture's one-time controller state. The caller must invoke this only after the VMM
-    /// maps the controller's MMIO regions.
-    pub fn initialize(self) {
-        crate::trap::irq::init_external_controller(self.0);
-        #[cfg(target_arch = "aarch64")]
-        crate::arch::aarch64::trap::init_percpu();
+    /// Call this after the MMIO regions in the containing platform description are mapped. The
+    /// BSP later-initialization hook consumes the configuration once and stores any state required
+    /// by local-controller setup on the BSP and APs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another controller configuration was already published.
+    pub fn publish(self) {
+        INTERRUPT_CONTROLLER_CONFIG.init_once(SpinNoIrq::new(Some(self.0)));
     }
+}
+
+/// Takes the discovered controller configuration for one-time global-controller initialization.
+///
+/// The BSP calls this only after platform discovery and MMIO mapping. The architecture controller
+/// then retains the shared state needed by later BSP/AP-local initialization.
+///
+/// # Panics
+///
+/// Panics if no configuration was published or the configuration was already consumed.
+pub(crate) fn take_interrupt_controller_config() -> ArchIrqConfig {
+    INTERRUPT_CONTROLLER_CONFIG
+        .get()
+        .expect("platform interrupt-controller configuration was not published")
+        .lock()
+        .take()
+        .expect("platform interrupt-controller configuration was already consumed")
 }
 
 /// The platform data needed by the common kernel during early device initialization.
@@ -85,6 +109,8 @@ pub struct PlatformDescription {
     cpu_topology: CpuTopology,
     /// The platform interrupt-controller driver.
     interrupt_controller: PlatformInterruptController,
+    /// The device MMIO ranges that need direct mappings before controller initialization.
+    mmio_regions: Vec<MemoryRegion>,
 }
 
 impl PlatformDescription {
@@ -92,16 +118,22 @@ impl PlatformDescription {
     pub(crate) fn new(
         cpu_topology: CpuTopology,
         interrupt_controller: PlatformInterruptController,
+        mmio_regions: Vec<MemoryRegion>,
     ) -> Self {
         Self {
             cpu_topology,
             interrupt_controller,
+            mmio_regions,
         }
     }
 
-    /// Separates the CPU topology from the platform interrupt-controller driver.
-    pub fn into_parts(self) -> (CpuTopology, PlatformInterruptController) {
-        (self.cpu_topology, self.interrupt_controller)
+    /// Separates the CPU topology, interrupt-controller configuration, and MMIO ranges.
+    pub fn into_parts(self) -> (CpuTopology, PlatformInterruptController, Vec<MemoryRegion>) {
+        (
+            self.cpu_topology,
+            self.interrupt_controller,
+            self.mmio_regions,
+        )
     }
 }
 
@@ -109,9 +141,11 @@ look_at! {
     @crate::arch::current::device:
     /// Discovers the current platform from the boot argument.
     ///
-    /// The architecture-specific parser reads ACPI or Device Tree and returns only the platform
-    /// structures required by the common boot sequence. This function must run after the VMM and heap
-    /// are initialized because firmware parsing may allocate and access high-half mappings.
+    /// The architecture-specific parser reads ACPI or Device Tree and returns the CPU topology,
+    /// controller configuration, and MMIO regions needed by discovered platform devices. This
+    /// function must run after the VMM and heap are initialized because firmware parsing may
+    /// allocate and access high-half mappings. The caller maps the returned MMIO regions before
+    /// invoking the BSP later-initialization hook.
     pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription;
 }
 
