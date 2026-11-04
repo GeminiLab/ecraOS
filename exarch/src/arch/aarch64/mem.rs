@@ -30,7 +30,7 @@ use crate::{
         DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
         VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
-    platform::dt::DeviceTreeNodeExt,
+    platform::dt::{DeviceTreeNodeExt, reserved::apply_device_tree_reservations},
 };
 
 /// Temporary identity-mapped translation tables.
@@ -261,6 +261,9 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             desc: DEVICE_TREE_DESC,
         })
         .expect("too many platform memory regions");
+
+    apply_device_tree_reservations(dtb, &mut regions)
+        .expect("failed to inspect device-tree memory reservations");
 
     regions
 }

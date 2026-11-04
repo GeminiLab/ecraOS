@@ -9,6 +9,8 @@ use super::{
     index::{DeviceTreeIndexExt, DeviceTreeIndexNodeExt, with_index, with_index_in},
 };
 
+mod reserved;
+
 /// An aligned DTB with CPU, interrupt-controller, and disabled-device nodes.
 struct TestTree {
     /// Aligned storage for the complete device-tree blob.
@@ -83,7 +85,19 @@ impl TestTree {
         word(&mut structure, 2);
         word(&mut structure, 9);
 
-        let structure_offset = 56;
+        Self::from_parts(structure, strings, &[])
+    }
+
+    /// Encodes a tree structure, string block, and memory-reservation entries as an aligned DTB.
+    fn from_parts(structure: Vec<u8>, strings: Vec<u8>, reservations: &[(u64, u64)]) -> Self {
+        let mut reservation_map = Vec::new();
+        for (address, size) in reservations {
+            reservation_map.extend_from_slice(&address.to_be_bytes());
+            reservation_map.extend_from_slice(&size.to_be_bytes());
+        }
+        reservation_map.extend_from_slice(&[0; 16]);
+
+        let structure_offset = 40 + reservation_map.len();
         let strings_offset = structure_offset + structure.len();
         let len = strings_offset + strings.len();
         let mut bytes = Vec::new();
@@ -101,7 +115,7 @@ impl TestTree {
         ] {
             word(&mut bytes, value);
         }
-        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(&reservation_map);
         bytes.extend_from_slice(&structure);
         bytes.extend_from_slice(&strings);
 

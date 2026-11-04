@@ -370,7 +370,10 @@ pub fn vmalloc_range() -> VirtAddrRange {
     VIRTUAL_ADDRESS_SPACE.layout.vmalloc_range
 }
 
-/// Translates a direct-map virtual address into a physical address.
+/// Computes the physical address corresponding to a direct-map virtual address.
+///
+/// Checks only whether the address lies in the configured direct-map window. It does not verify
+/// that a page-table mapping exists for the address, so callers must only pass mapped addresses.
 ///
 /// Returns [`None`] when the layout is unavailable or the address lies outside the direct map.
 pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
@@ -384,7 +387,11 @@ pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
     ))
 }
 
-/// Translates a physical address into an active direct-map virtual address.
+/// Computes the direct-map virtual address corresponding to a physical address.
+///
+/// Checks that the final roots are active and that the address fits in the reserved direct-map
+/// window. It does not check whether that physical address is mapped there. NO_MAP regions
+/// intentionally have no direct-map mapping.
 ///
 /// Returns [`None`] before the final roots are active or when the offset exceeds the reservation.
 pub fn direct_mapping_phys_to_virt(addr: PhysAddr) -> Option<VirtAddr> {
@@ -672,6 +679,9 @@ pub(super) fn init_vmm_mapping_early(phys_mem_regions: &MemoryRegions) {
     // urgent issue now, because free memory regions and kernel sections are
     // almost guaranteed to be page-aligned. We should fix this in the future.
     for region in phys_mem_regions {
+        if region.flags.contains(MemoryRegionFlags::NO_MAP) {
+            continue;
+        }
         let mapping_flags = region_flags_to_mapping(region.flags);
         if mapping_flags.is_empty() {
             continue;

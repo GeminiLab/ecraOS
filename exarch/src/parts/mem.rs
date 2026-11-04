@@ -41,6 +41,8 @@ bitflags::bitflags! {
         const BOOT_SERVICE = 1 << 8;
         /// Memory region used for the kernel.
         const KERNEL       = 1 << 9;
+        /// Reserved memory, do not map.
+        const NO_MAP       = 1 << 10;
     }
 }
 
@@ -51,7 +53,8 @@ impl MemoryRegionFlags {
         const ROLE_BITS: usize = MemoryRegionFlags::RESERVED.bits()
             | MemoryRegionFlags::FREE.bits()
             | MemoryRegionFlags::BOOT_SERVICE.bits()
-            | MemoryRegionFlags::KERNEL.bits();
+            | MemoryRegionFlags::KERNEL.bits()
+            | MemoryRegionFlags::NO_MAP.bits();
         let role_flags = self.bits() & ROLE_BITS;
         role_flags.count_ones() == 1
     }
@@ -74,7 +77,7 @@ impl fmt::Display for MemoryRegionFlags {
         fmt_flag_bits!(
             READ:'R', WRITE:'W', EXECUTE:'X', -,
             DEVICE:'D', UNCACHED:'U',
-            RESERVED:'R', FREE:'F', BOOT_SERVICE:'B', KERNEL:'K'
+            RESERVED:'R', FREE:'F', BOOT_SERVICE:'B', KERNEL:'K', NO_MAP:'N'
         );
 
         Ok(())
@@ -368,6 +371,9 @@ look_at! {
     /// [`MemoryRegionFlags::KERNEL`], which is reserved for kernel image sections.
     ///
     /// When this function is called, allocation is not available.
+    ///
+    /// Firmware that provides a device tree must either describe occupied physical memory in the
+    /// FDT reservation map or /reserved-memory node, or exclude it from the reported RAM ranges.
     pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
 
     /// Gets the supported and current virtual address space modes.

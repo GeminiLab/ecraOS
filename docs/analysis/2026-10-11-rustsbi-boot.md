@@ -29,9 +29,11 @@ entry address, so the firmware can be built independently of ecraldr and the
 kernel. This fits the existing build flow, where each smoke application is
 embedded in its own loader image.
 
-During early memory setup, ecraOS reserves the RAM prefix before the loader's
-link address within the same contiguous RAM range. This protects firmware that
-the device tree reports as RAM without describing as a separate reserved range.
+During early memory setup, ecraOS applies the DTB memory reservation map and
+static /reserved-memory ranges to the reported RAM. Firmware must describe
+occupied physical ranges through one of these mechanisms or exclude them from
+the RAM ranges it reports. The /reserved-memory no-map property also keeps
+those ranges out of the kernel's direct mapping.
 
 At the supervisor entry, `a0` carries the boot hart ID and `a1` carries the
 device-tree address. ecraldr already consumes these arguments. The kernel also

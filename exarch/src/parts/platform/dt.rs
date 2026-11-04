@@ -8,6 +8,7 @@ use fdt_rs::{
 };
 
 pub mod index;
+pub mod reserved;
 
 #[cfg(test)]
 mod tests;

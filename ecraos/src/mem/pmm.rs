@@ -169,6 +169,7 @@ pub fn build_phys_mem_regions(raw_mem_regions: &RawMemoryRegions, loader_range: 
 
     for raw_region in raw_mem_regions {
         if raw_region.flags.contains(MemoryRegionFlags::RESERVED)
+            || raw_region.flags.contains(MemoryRegionFlags::NO_MAP)
             || raw_region.flags.contains(MemoryRegionFlags::BOOT_SERVICE)
         {
             push_phys_mem_region_no_overlap(&mut final_mem_regions, *raw_region)
