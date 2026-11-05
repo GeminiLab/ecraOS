@@ -14,7 +14,7 @@
 <a href=#14 id=14 data-nosnippet>14</a>    time::Duration,
 <a href=#15 id=15 data-nosnippet>15</a>};
 <a href=#16 id=16 data-nosnippet>16</a>
-<a href=#17 id=17 data-nosnippet>17</a><span class="kw">use </span>kspin::SpinNoIrq;
+<a href=#17 id=17 data-nosnippet>17</a><span class="kw">use </span>exspin::SpinNoIrq;
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>lazyinit::LazyInit;
 <a href=#19 id=19 data-nosnippet>19</a>
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use super</span>::{JoinHandle, Task};
@@ -258,7 +258,7 @@
 <a href=#258 id=258 data-nosnippet>258</a>        <span class="comment">// Lock order is NoPreemptIrqSave -&gt; ownership -&gt; domain metadata -&gt; CPU membership.
 <a href=#259 id=259 data-nosnippet>259</a>        // A future lock-free ownership and CPU-membership structure may replace these locks after
 <a href=#260 id=260 data-nosnippet>260</a>        // its memory-ordering proof.
-<a href=#261 id=261 data-nosnippet>261</a>        </span><span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#261 id=261 data-nosnippet>261</a>        </span><span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span>_ownership = <span class="self">self</span>.ownership.lock();
 <a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">let </span>lifecycle = <span class="self">self</span>.lifecycle.lock();
 <a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">if </span><span class="kw-2">*</span>lifecycle != DomainLifecycle::Active {
@@ -272,7 +272,7 @@
 <a href=#272 id=272 data-nosnippet>272</a>        <span class="comment">// Lock order is NoPreemptIrqSave -&gt; ownership -&gt; domain metadata -&gt; CPU membership.
 <a href=#273 id=273 data-nosnippet>273</a>        // A future lock-free ownership and CPU-membership structure may replace these locks after
 <a href=#274 id=274 data-nosnippet>274</a>        // its memory-ordering proof.
-<a href=#275 id=275 data-nosnippet>275</a>        </span><span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#275 id=275 data-nosnippet>275</a>        </span><span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">let </span>_ownership = <span class="self">self</span>.ownership.lock();
 <a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>lifecycle = <span class="self">self</span>.lifecycle.lock();
 <a href=#278 id=278 data-nosnippet>278</a>        <span class="kw">match </span><span class="kw-2">*</span>lifecycle {
@@ -354,7 +354,7 @@
 <a href=#354 id=354 data-nosnippet>354</a>        <span class="comment">// Lock order is NoPreemptIrqSave -&gt; ownership -&gt; suspended runnable ownership. Queue locks
 <a href=#355 id=355 data-nosnippet>355</a>        // have already been released before this handoff. A future lock-free suspended structure
 <a href=#356 id=356 data-nosnippet>356</a>        // may replace this lock after its memory-ordering proof.
-<a href=#357 id=357 data-nosnippet>357</a>        </span><span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#357 id=357 data-nosnippet>357</a>        </span><span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">let </span>_ownership = <span class="self">self</span>.ownership.lock();
 <a href=#359 id=359 data-nosnippet>359</a>        <span class="self">self</span>.suspended.lock().append(<span class="kw-2">&amp;mut </span>tasks);
 <a href=#360 id=360 data-nosnippet>360</a>    }

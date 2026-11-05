@@ -17,7 +17,7 @@
 <a href=#17 id=17 data-nosnippet>17</a>
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>expercpu::def_percpu;
 <a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>exslab::{AllocResult, SlabAllocResult, SlabAllocator, SlabDeallocResult};
-<a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span>kspin::SpinNoIrq;
+<a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span>exspin::SpinNoIrq;
 <a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>lazyinit::LazyInit;
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>log::info;
 <a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span>memory_addr::{VirtAddr, pa, va};
@@ -84,7 +84,7 @@
 <a href=#84 id=84 data-nosnippet>84</a>///
 <a href=#85 id=85 data-nosnippet>85</a>/// Pins the CPU before selecting its slot and prevents interrupt reentry while it is borrowed.
 <a href=#86 id=86 data-nosnippet>86</a></span><span class="kw">fn </span>with_current_slab&lt;R&gt;(f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;</span>PerCpuSlab) -&gt; R) -&gt; R {
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#88 id=88 data-nosnippet>88</a>    CURRENT_SLAB.with_current(|slot| f(<span class="kw-2">&amp;*</span>slot))
 <a href=#89 id=89 data-nosnippet>89</a>}
 <a href=#90 id=90 data-nosnippet>90</a>

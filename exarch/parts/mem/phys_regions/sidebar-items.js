@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PhysMemoryRegionsError"],"fn":["append","clipped","intersection","validate_range","validate_region"],"struct":["PhysMemoryRegions"],"trait":["PhysMemoryRegionsStorage"]};

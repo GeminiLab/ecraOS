@@ -9,7 +9,7 @@
 <a href=#9 id=9 data-nosnippet>9</a>};
 <a href=#10 id=10 data-nosnippet>10</a>
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>expercpu::def_percpu;
-<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>kspin::SpinNoIrq;
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>exspin::SpinNoIrq;
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>lazyinit::LazyInit;
 <a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>memory_addr::VirtAddrRange;
 <a href=#15 id=15 data-nosnippet>15</a>
@@ -194,7 +194,7 @@
 <a href=#194 id=194 data-nosnippet>194</a>    // A future lock-free queue/membership implementation may replace these structures after a
 <a href=#195 id=195 data-nosnippet>195</a>    // complete memory-ordering proof.
 <a href=#196 id=196 data-nosnippet>196</a>    </span><span class="kw">let </span>selected_cpu = {
-<a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(domain) = task.domain() <span class="kw">else </span>{
 <a href=#199 id=199 data-nosnippet>199</a>            <span class="kw">return</span>;
 <a href=#200 id=200 data-nosnippet>200</a>        };
@@ -647,7 +647,7 @@
 <a href=#647 id=647 data-nosnippet>647</a>    // task lifecycle. This transaction drops every queue lock before changing task metadata and
 <a href=#648 id=648 data-nosnippet>648</a>    // never crosses exarch::context::switch. A future lock-free queue and membership structure
 <a href=#649 id=649 data-nosnippet>649</a>    // may replace these locks after a complete memory-ordering proof.
-<a href=#650 id=650 data-nosnippet>650</a>    </span><span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#650 id=650 data-nosnippet>650</a>    </span><span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#651 id=651 data-nosnippet>651</a>    <span class="kw">let </span>cpu_id = <span class="kw">crate</span>::mp::current_cpu_id();
 <a href=#652 id=652 data-nosnippet>652</a>    <span class="kw">let </span>current = <span class="kw">unsafe </span>{ current_task() };
 <a href=#653 id=653 data-nosnippet>653</a>    <span class="kw">let </span>idle = <span class="kw">unsafe </span>{ idle_task() };
@@ -1091,7 +1091,7 @@
 <a href=#1091 id=1091 data-nosnippet>1091</a>    <span class="comment">// Lock order is NoPreemptIrqSave -&gt; domain metadata -&gt; Queue locks by CpuId -&gt; task
 <a href=#1092 id=1092 data-nosnippet>1092</a>    // lifecycle. No queue or task lifecycle lock survives the context handoff. A future lock-free
 <a href=#1093 id=1093 data-nosnippet>1093</a>    // scheduler queue may replace these locks after a complete memory-ordering proof.
-<a href=#1094 id=1094 data-nosnippet>1094</a>    </span><span class="kw">let </span>_guard = kernel_guard::NoPreemptIrqSave::new();
+<a href=#1094 id=1094 data-nosnippet>1094</a>    </span><span class="kw">let </span>_guard = exspin::NoPreemptIrqSave::new();
 <a href=#1095 id=1095 data-nosnippet>1095</a>    finish_switch();
 <a href=#1096 id=1096 data-nosnippet>1096</a>    <span class="kw">let </span><span class="kw-2">mut </span>queue = run_queue(cpu_id).lock();
 <a href=#1097 id=1097 data-nosnippet>1097</a>    <span class="kw">if </span>queue.state() != QueueState::Active(domain.id()) || queue.is_empty() {
