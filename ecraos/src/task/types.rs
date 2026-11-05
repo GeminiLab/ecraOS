@@ -9,7 +9,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 
 use super::TaskError;
 use super::wait_queue::{TaskWaitQueue, TaskWaitQueueGuard, validate_join};
@@ -669,7 +669,7 @@ impl Task {
         if self.sleep_generation.load(Ordering::Acquire) != generation {
             return false;
         }
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let mut state = self.state.lock();
         if *state != TaskState::TimedWaiting {
             return false;

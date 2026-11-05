@@ -56,44 +56,52 @@ const LOW_MEMORT_DESC: &str = "low memory";
 const ACPI_MEMORY_DESC: &str = "ACPI memory";
 /// The description for the ACPI NVS memory region.
 const NVS_MEMORY_DESC: &str = "ACPI NVS memory";
-/// Get the memory regions from the multiboot information.
-fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegions {
+/// Fills an empty region table from Multiboot information during identity-mapped boot.
+fn get_multiboot_memory_regions(
+    multiboot_arg: PlatformBootArg,
+    memory_regions: &mut RawMemoryRegions,
+) {
     // Basically, this function just reads memory regions from the multiboot information, and
-    // returns them. However, it handles two ranges in a special way:
+    // records them. However, it handles two ranges in a special way:
     //
     // 1. The low memory range (0x00000000 - 0x000fffff), which is always reserved. Any conflicting
     //    multiboot memory region will be ignored.
     // 2. The ACPI memory ranges reported by Multiboot, which remain reserved.
 
-    let mut memory_regions = RawMemoryRegions::new();
     let mut mem = MultibootMem;
     let PlatformBootArg::Multiboot(arg) = multiboot_arg else {
-        return memory_regions;
+        return;
     };
     let info = unsafe { Multiboot::from_ptr(arg.as_usize() as _, &mut mem).unwrap() };
 
     // Add the low memory region.
-    _ = memory_regions.push(MemoryRegion {
-        range: PhysAddrRange::new(PhysAddr::from_usize(0), imp::ap::AP_START_PAGE_RANGE.start),
-        flags: DEFAULT_RESERVED_FLAGS,
-        desc: LOW_MEMORT_DESC,
-    });
-    _ = memory_regions.push(MemoryRegion {
-        range: imp::ap::AP_START_PAGE_RANGE,
-        flags: MemoryRegionFlags::READ
-            | MemoryRegionFlags::WRITE
-            | MemoryRegionFlags::EXECUTE
-            | MemoryRegionFlags::RESERVED,
-        desc: "AP start page",
-    });
-    _ = memory_regions.push(MemoryRegion {
-        range: PhysAddrRange::new(
-            imp::ap::AP_START_PAGE_RANGE.end,
-            PhysAddr::from_usize(LOW_MEMORY_END),
-        ),
-        flags: DEFAULT_RESERVED_FLAGS,
-        desc: LOW_MEMORT_DESC,
-    });
+    memory_regions
+        .insert_disjoint(MemoryRegion {
+            range: PhysAddrRange::new(PhysAddr::from_usize(0), imp::ap::AP_START_PAGE_RANGE.start),
+            flags: DEFAULT_RESERVED_FLAGS,
+            desc: LOW_MEMORT_DESC,
+        })
+        .expect("invalid low memory region");
+    memory_regions
+        .insert_disjoint(MemoryRegion {
+            range: imp::ap::AP_START_PAGE_RANGE,
+            flags: MemoryRegionFlags::READ
+                | MemoryRegionFlags::WRITE
+                | MemoryRegionFlags::EXECUTE
+                | MemoryRegionFlags::RESERVED,
+            desc: "AP start page",
+        })
+        .expect("invalid AP start page region");
+    memory_regions
+        .insert_disjoint(MemoryRegion {
+            range: PhysAddrRange::new(
+                imp::ap::AP_START_PAGE_RANGE.end,
+                PhysAddr::from_usize(LOW_MEMORY_END),
+            ),
+            flags: DEFAULT_RESERVED_FLAGS,
+            desc: LOW_MEMORT_DESC,
+        })
+        .expect("invalid low memory region");
 
     // Add the multiboot memory regions.
     if let Some(multiboot_memory_regions) = info.memory_regions() {
@@ -115,19 +123,15 @@ fn get_multiboot_memory_regions(multiboot_arg: PlatformBootArg) -> RawMemoryRegi
                 MemoryType::Defect => continue,
             };
 
-            let push_result = memory_regions.push(MemoryRegion {
+            let push_result = memory_regions.insert_disjoint(MemoryRegion {
                 range: region,
                 flags,
                 desc,
             });
 
-            if push_result.is_err() {
-                break;
-            }
+            push_result.expect("invalid or excessive Multiboot memory regions");
         }
     }
-
-    memory_regions
 }
 
 const PAGE_SHIFT: u8 = 12;
@@ -163,9 +167,17 @@ core::arch::global_asm!(
     data_selector = const GdtStruct::KDATA_SELECTOR.0,
 );
 
-/// Collects physical memory regions reported by Multiboot.
-pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
-    get_multiboot_memory_regions(arg)
+/// Collects physical memory regions reported by Multiboot into an empty output table.
+///
+/// # Panics
+///
+/// Panics if the output table is not empty, memory data is invalid, or capacity is insufficient.
+pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
+    assert!(
+        regions.is_empty(),
+        "raw memory discovery requires an empty table"
+    );
+    get_multiboot_memory_regions(arg, regions);
 }
 
 /// Returns supported and current x86-64 virtual address-space modes.

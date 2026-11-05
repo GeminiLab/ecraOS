@@ -14,7 +14,7 @@ use core::{
     time::Duration,
 };
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 
 use super::{JoinHandle, Task};
@@ -258,7 +258,7 @@ impl SchedulingDomain {
         // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
         // A future lock-free ownership and CPU-membership structure may replace these locks after
         // its memory-ordering proof.
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let _ownership = self.ownership.lock();
         let lifecycle = self.lifecycle.lock();
         if *lifecycle != DomainLifecycle::Active {
@@ -272,7 +272,7 @@ impl SchedulingDomain {
         // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
         // A future lock-free ownership and CPU-membership structure may replace these locks after
         // its memory-ordering proof.
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let _ownership = self.ownership.lock();
         let lifecycle = self.lifecycle.lock();
         match *lifecycle {
@@ -354,7 +354,7 @@ impl SchedulingDomain {
         // Lock order is NoPreemptIrqSave -> ownership -> suspended runnable ownership. Queue locks
         // have already been released before this handoff. A future lock-free suspended structure
         // may replace this lock after its memory-ordering proof.
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let _ownership = self.ownership.lock();
         self.suspended.lock().append(&mut tasks);
     }

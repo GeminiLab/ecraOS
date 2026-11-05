@@ -12,70 +12,27 @@ use core::{
 use exarch::mem::{LocalTlbFlusher, VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
 use expt::{
-    opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType, PageTableAction},
+    opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType},
     pt::cleanup::{PendingCleanup, TlbFlushes},
-    pte::MappingFlags,
 };
-use kspin::{SpinNoIrq, SpinNoPreempt, SpinNoPreemptGuard};
+use exspin::{SpinNoIrq, SpinNoPreempt, SpinNoPreemptGuard};
 use lazyinit::LazyInit;
-use log::info;
-use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange, va};
+use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
 use crate::{
     kprintln,
-    mem::{
-        MemoryRegion, MemoryRegionFlags, allocs, early, pmm::MemoryRegions, region_flags_to_mapping,
-    },
+    mem::allocs,
     mp::{self, LogicalCpuId},
     tlb::{self, TlbInvalidation, TlbShootdownError},
 };
 
-/// Rounds an MMIO description to the base pages required by the direct map.
-///
-/// Device registers may be smaller than, or unaligned to, the selected page size. Mapping the
-/// outward-aligned range keeps the physical and virtual direct-map offsets identical.
-fn aligned_mmio_region(region: MemoryRegion, page_size: usize) -> MemoryRegion {
-    assert!(
-        page_size.is_power_of_two(),
-        "base page size must be a power of two"
-    );
-    assert!(!region.range.is_empty(), "MMIO range must not be empty");
-    MemoryRegion {
-        range: region
-            .range
-            .align_outwards(page_size)
-            .expect("MMIO range alignment overflow"),
-        ..region
-    }
-}
+mod phys_mapping;
 
-/// Reports whether two physical ranges require any of the same base pages.
-///
-/// Adjacent byte ranges can still conflict when page rounding makes them share a mapping.
-fn ranges_share_mapping_page(left: PhysAddrRange, right: PhysAddrRange, page_size: usize) -> bool {
-    let left = left
-        .align_outwards(page_size)
-        .expect("physical range alignment overflow");
-    let right = right
-        .align_outwards(page_size)
-        .expect("physical range alignment overflow");
-    left.overlaps(right)
-}
-
-/// Reports whether an overlapping mapping changes page attributes.
-///
-/// Callers pass page-aligned ranges so duplicate early-console and platform mappings can be
-/// reused while incompatible aliases are rejected.
-fn mapping_flags_conflict(
-    range: PhysAddrRange,
-    flags: MappingFlags,
-    mapped: &[(PhysAddrRange, MappingFlags)],
-) -> bool {
-    mapped.iter().any(|(previous_range, previous_flags)| {
-        previous_range.overlaps(range) && *previous_flags != flags
-    })
-}
+pub use phys_mapping::map_mmio_regions;
+pub(super) use phys_mapping::{
+    init_vmm_mapping_early, remove_identical_mapping, use_dynamic_mapping_storage,
+};
 
 /// The serialization lock for kernel mapping changes and delayed reuse.
 ///
@@ -300,98 +257,6 @@ where
     f(&mut pt)
 }
 
-/// Maps discovered device regions through the physical-memory direct map.
-///
-/// The bootstrap CPU calls this after the formal allocator is ready and before starting APs.
-/// Ranges are rounded to base pages, checked against existing direct-map aliases and the
-/// direct-map capacity, and mapped with their declared device attributes. Identical overlaps are
-/// reused so an early console range can also appear in platform discovery.
-pub fn map_mmio_regions(regions: &[MemoryRegion]) {
-    let page_size = page_size();
-    let physical_memory = crate::mem::pmm::phys_mem_regions();
-    let mut mapped = Vec::with_capacity(regions.len());
-
-    for region in regions {
-        assert!(
-            region.flags.contains(MemoryRegionFlags::DEVICE),
-            "platform MMIO range is missing the device-memory flag: {region:?}"
-        );
-        assert!(
-            region.flags.role_sanity_check() && region.flags.contains(MemoryRegionFlags::RESERVED),
-            "platform MMIO range must have only the reserved ownership role: {region:?}"
-        );
-
-        let aligned = aligned_mmio_region(*region, page_size);
-        let mapping_flags = region_flags_to_mapping(aligned.flags);
-        assert!(
-            !mapping_flags.is_empty(),
-            "platform MMIO range has no mapping permissions: {region:?}"
-        );
-
-        assert!(
-            !mapping_flags_conflict(aligned.range, mapping_flags, &mapped),
-            "overlapping platform MMIO ranges have different page attributes: {region:?}"
-        );
-        let mut is_already_mapped = false;
-        for memory_region in physical_memory {
-            if !ranges_share_mapping_page(memory_region.range, aligned.range, page_size) {
-                continue;
-            }
-            let existing_range = memory_region
-                .range
-                .align_outwards(page_size)
-                .expect("physical memory range alignment overflow");
-            let existing_flags = region_flags_to_mapping(memory_region.flags);
-            assert_eq!(
-                existing_flags, mapping_flags,
-                "platform MMIO range conflicts with an existing direct-map page: mmio={region:?}, existing={memory_region:?}"
-            );
-            if existing_range.start <= aligned.range.start
-                && existing_range.end >= aligned.range.end
-            {
-                is_already_mapped = true;
-            }
-        }
-        mapped.push((aligned.range, mapping_flags));
-
-        let virtual_start = direct_mapping_phys_to_virt(aligned.range.start)
-            .expect("platform MMIO start exceeds direct-map capacity");
-        let last_physical = PhysAddr::from_usize(
-            aligned
-                .range
-                .end
-                .as_usize()
-                .checked_sub(1)
-                .expect("aligned MMIO range must not be empty"),
-        );
-        direct_mapping_phys_to_virt(last_physical)
-            .expect("platform MMIO end exceeds direct-map capacity");
-
-        if is_already_mapped {
-            info!(
-                "Reusing direct-mapped platform MMIO: {} {:#x}",
-                region.desc, aligned.range
-            );
-            continue;
-        }
-
-        info!(
-            "Mapping platform MMIO: {} {:#x} flags={}",
-            region.desc, aligned.range, region.flags
-        );
-        with_page_table(|page_table| {
-            page_table
-                .map(
-                    virtual_start,
-                    aligned.range.start,
-                    aligned.range.size(),
-                    mapping_flags,
-                )
-                .expect("failed to map platform MMIO range");
-        });
-    }
-}
-
 /// Completes local cleanup and preserves its required remote invalidation scope.
 ///
 /// The caller releases the page-table lock before calling this helper and supplies a request
@@ -542,62 +407,6 @@ fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
     }
 }
 
-/// Initializes the page table with identity mappings and the physical-memory direct map.
-pub(super) fn init_vmm_mapping_early(phys_mem_regions: &MemoryRegions) {
-    let virt_phys_offset = direct_mapping_offset();
-    let mut pt = VIRTUAL_ADDRESS_SPACE
-        .page_table_type_mutex
-        .lock()
-        .new_pagetable_alloc()
-        .unwrap();
-
-    // TODO: the physical memory regions are not guaranteed to be page-aligned,
-    // that may cause issues when mapping them. Luckily, it's not a serious or
-    // urgent issue now, because free memory regions and kernel sections are
-    // almost guaranteed to be page-aligned. We should fix this in the future.
-    for region in phys_mem_regions {
-        if region.flags.contains(MemoryRegionFlags::NO_MAP) {
-            continue;
-        }
-        let mapping_flags = region_flags_to_mapping(region.flags);
-        if mapping_flags.is_empty() {
-            continue;
-        }
-
-        let paddr = region.range.start;
-        let vaddr_low = VirtAddr::from_usize(paddr.as_usize());
-        let vaddr_high = vaddr_low + virt_phys_offset;
-        let size = region.range.size();
-
-        // The high direct map is needed for all physical memory. The low
-        // identity map only needs to cover code/data used before the jump and
-        // pages allocated for the bootstrap page tables.
-        let early_range = early::phys_addr_range();
-        let needs_full_identity = region.flags.intersects(
-            MemoryRegionFlags::KERNEL
-                | MemoryRegionFlags::BOOT_SERVICE
-                | MemoryRegionFlags::EXECUTE,
-        );
-        if needs_full_identity {
-            pt.map(vaddr_low, paddr, size, mapping_flags).unwrap();
-        } else if region.range.start < early_range.end && early_range.start < region.range.end {
-            let identity_start = region.range.start.max(early_range.start);
-            let identity_end = region.range.end.min(early_range.end);
-            let identity_size = identity_end.as_usize() - identity_start.as_usize();
-            pt.map(
-                VirtAddr::from_usize(identity_start.as_usize()),
-                identity_start,
-                identity_size,
-                mapping_flags,
-            )
-            .unwrap();
-        }
-        pt.map(vaddr_high, paddr, size, mapping_flags).unwrap();
-    }
-
-    *VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock() = pt;
-}
-
 /// Transfers the active page-table owner to the formal allocator.
 ///
 /// Refreshes relocated function pointers and transfers the early owner's roots to the formal
@@ -617,42 +426,6 @@ pub(super) fn use_formal_page_table_allocator() {
     // SAFETY: leak transfers the existing roots and all their table pages out of the only owner.
     // The refreshed descriptor has the same geometry and can access and release those pages.
     *page_table_guard = unsafe { page_table_type.new_pagetable_at(root) };
-}
-
-/// Removes temporary low-half identity mappings from every ready CPU's active view.
-///
-/// Failure is fatal after local mutation and never restores an inconsistent local mapping.
-pub(super) fn remove_identical_mapping(phys_mem_regions: &MemoryRegions) {
-    info!("Removing identical mappings...");
-    let transaction = MappingTransaction::begin().expect("identity mapping transaction rejected");
-
-    let cleanup = with_page_table(|pt| {
-        pt.apply_actions_with_cleanup(phys_mem_regions.iter().map(|region| {
-            let vaddr_low = va!(region.range.start.as_usize());
-            let size = region.range.size();
-            info!(
-                "identity-map clearing range={:#x}",
-                VirtAddrRange::from_start_size(vaddr_low, size)
-            );
-            PageTableAction::Unmap {
-                vaddr: vaddr_low,
-                size,
-            }
-        }))
-        .expect("identity mapping mutation failed")
-    });
-    // The page-table guard is released before cleanup and remote completion.
-    let request = finish_local_cleanup(cleanup, TlbInvalidation::All);
-    transaction.complete(request).unwrap_or_else(|error| {
-        panic!(
-            "identity-map completion failed ranges={phys_mem_regions:?} targets={:?}: {error:?}",
-            transaction.targets()
-        );
-    });
-    info!(
-        "identity-map completion targets={:?} operation=All",
-        transaction.targets()
-    );
 }
 
 /// The kernel's formal page allocator for page-table storage.
@@ -713,15 +486,11 @@ mod tests {
     use core::cell::RefCell;
 
     use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher};
-    use expt::pte::MappingFlags;
-    use memory_addr::{PhysAddrRange, VirtAddr, VirtAddrRange, pa, va};
+    use memory_addr::{VirtAddr, VirtAddrRange, va};
 
     use crate::tlb::TlbInvalidation;
 
-    use super::{
-        MemoryRegion, MemoryRegionFlags, aligned_mmio_region, finish_local_cleanup,
-        mapping_flags_conflict, ranges_share_mapping_page,
-    };
+    use super::finish_local_cleanup;
 
     std::thread_local! {
         /// The local invalidations completed by the calling test thread.
@@ -774,56 +543,5 @@ mod tests {
         let remote = finish_local_cleanup(cleanup, TlbInvalidation::Page(va!(0x1000)));
         FLUSHES.with_borrow(|flushes| assert_eq!(flushes.as_slice(), &[None]));
         assert_eq!(remote, TlbInvalidation::All);
-    }
-
-    /// Rounds an unaligned device range outward without changing its mapping attributes.
-    #[test]
-    fn aligns_mmio_range_outwards_to_base_pages() {
-        let region = MemoryRegion {
-            range: PhysAddrRange::new(pa!(0x1234), pa!(0x2abc)),
-            flags: MemoryRegionFlags::READ
-                | MemoryRegionFlags::WRITE
-                | MemoryRegionFlags::DEVICE
-                | MemoryRegionFlags::RESERVED,
-            desc: "UART registers",
-        };
-
-        let aligned = aligned_mmio_region(region, 0x1000);
-
-        assert_eq!(aligned.range, PhysAddrRange::new(pa!(0x1000), pa!(0x3000)));
-        assert_eq!(aligned.flags, region.flags);
-        assert_eq!(aligned.desc, region.desc);
-    }
-
-    /// Treats adjacent byte ranges in one page as a mapping conflict.
-    #[test]
-    fn detects_mmio_sharing_a_page_with_ram() {
-        let mmio = PhysAddrRange::new(pa!(0x1800), pa!(0x2000));
-        let ram = PhysAddrRange::new(pa!(0x1000), pa!(0x1800));
-
-        assert!(ranges_share_mapping_page(mmio, ram, 0x1000));
-        assert!(!ranges_share_mapping_page(
-            mmio,
-            PhysAddrRange::new(pa!(0x2000), pa!(0x2800)),
-            0x1000,
-        ));
-    }
-
-    /// Allows duplicate MMIO mappings only when their page attributes agree.
-    #[test]
-    fn rejects_overlapping_mmio_mappings_with_different_attributes() {
-        let range = PhysAddrRange::new(pa!(0x4000), pa!(0x5000));
-        let mapped = [(range, MappingFlags::READ | MappingFlags::DEVICE)];
-
-        assert!(!mapping_flags_conflict(
-            range,
-            MappingFlags::READ | MappingFlags::DEVICE,
-            &mapped,
-        ));
-        assert!(mapping_flags_conflict(
-            range,
-            MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
-            &mapped,
-        ));
     }
 }

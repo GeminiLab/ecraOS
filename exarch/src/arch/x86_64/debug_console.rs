@@ -1,6 +1,6 @@
 //! COM1 (`0x3F8`) UART 16550 debug console with a spinlock for exclusive access.
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use uart_16550::SerialPort;
 
 /// Standard PC COM1 I/O base port.

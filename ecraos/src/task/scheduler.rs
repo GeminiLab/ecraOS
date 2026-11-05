@@ -9,7 +9,7 @@ use core::{
 };
 
 use expercpu::def_percpu;
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::VirtAddrRange;
 
@@ -194,7 +194,7 @@ fn enqueue_task(task: Arc<Task>, preferred_cpu: usize) {
     // A future lock-free queue/membership implementation may replace these structures after a
     // complete memory-ordering proof.
     let selected_cpu = {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let Some(domain) = task.domain() else {
             return;
         };
@@ -647,7 +647,7 @@ pub(super) fn switch_current_to(domain: &DomainRef) -> Result<(), DomainError> {
     // task lifecycle. This transaction drops every queue lock before changing task metadata and
     // never crosses exarch::context::switch. A future lock-free queue and membership structure
     // may replace these locks after a complete memory-ordering proof.
-    let _guard = kernel_guard::NoPreemptIrqSave::new();
+    let _guard = exspin::NoPreemptIrqSave::new();
     let cpu_id = crate::mp::current_cpu_id();
     let current = unsafe { current_task() };
     let idle = unsafe { idle_task() };
@@ -1091,7 +1091,7 @@ pub(super) fn interrupt_exit() {
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
     // lifecycle. No queue or task lifecycle lock survives the context handoff. A future lock-free
     // scheduler queue may replace these locks after a complete memory-ordering proof.
-    let _guard = kernel_guard::NoPreemptIrqSave::new();
+    let _guard = exspin::NoPreemptIrqSave::new();
     finish_switch();
     let mut queue = run_queue(cpu_id).lock();
     if queue.state() != QueueState::Active(domain.id()) || queue.is_empty() {

@@ -36,17 +36,18 @@ struct ReservedMemoryChild<'dt> {
     enabled: bool,
 }
 
-/// Applies all static FDT memory reservations to discovered RAM regions.
+/// Records all static FDT memory reservations in the physical region table.
 ///
-/// Reads the FDT reservation map and static reg properties below /reserved-memory. Intersections
-/// with usable RAM become reserved regions. A /reserved-memory child with no-map becomes a NO_MAP
-/// region so the early direct map omits it. Dynamic size requests are not allocated here because
-/// this function runs before the kernel allocator is available.
+/// Reads the FDT reservation map and static reg properties below /reserved-memory. Complete
+/// ranges are recorded, including gaps in discovered RAM. Existing access and device attributes
+/// are retained. Gaps receive only a RESERVED or NO_MAP role. A /reserved-memory child with no-map
+/// becomes a NO_MAP region so both early aliases omit it. Dynamic size requests are not allocated
+/// here because this function runs before the kernel allocator is available.
 ///
 /// # Errors
 ///
 /// Returns an error when the reservation map, structure block, reserved-memory properties, or
-/// region capacity is invalid.
+/// region capacity is invalid. All failures leave the input region table unchanged.
 pub fn apply_device_tree_reservations(
     dev_tree: DevTree<'_>,
     regions: &mut RawMemoryRegions,
@@ -57,10 +58,12 @@ pub fn apply_device_tree_reservations(
     parse_reservation_map(dev_tree, &mut reserved)?;
     parse_reserved_memory_nodes(dev_tree, &mut reserved)?;
 
-    // Apply each physical reservation to RAM without allocating temporary storage.
+    // Keep all input regions intact if any reservation exceeds the fixed storage capacity.
+    let mut adjusted = regions.clone();
     for reservation in reserved {
-        apply_reserved_region(regions, reservation)?;
+        apply_reserved_region(&mut adjusted, reservation)?;
     }
+    *regions = adjusted;
 
     Ok(())
 }
@@ -324,75 +327,57 @@ fn physical_range(address: u64, size: u64) -> Result<PhysAddrRange, DevTreeError
     Ok(PhysAddrRange::new(pa!(start), pa!(end)))
 }
 
-/// Splits discovered regions where a device-tree reservation overlaps usable RAM.
+/// Records a complete reservation while preserving existing access and device attributes.
 fn apply_reserved_region(
     regions: &mut RawMemoryRegions,
     reservation: DeviceTreeReservedRegion,
 ) -> Result<(), DevTreeError> {
-    let mut adjusted = RawMemoryRegions::new();
-    for region in regions.iter().copied() {
-        // Reservations outside this discovered region do not affect it.
-        let start = core::cmp::max(region.range.start, reservation.range.start);
-        let end = core::cmp::min(region.range.end, reservation.range.end);
-        if start >= end {
-            adjusted
-                .push(region)
-                .map_err(|_| DevTreeError::NotEnoughMemory)?;
-            continue;
-        }
-
-        let role = region.flags
-            & (MemoryRegionFlags::FREE | MemoryRegionFlags::RESERVED | MemoryRegionFlags::NO_MAP);
-        // A regular reservation changes only free RAM. no-map must also override a prior
-        // reservation so the final mapping policy is unambiguous.
-        let should_reserve = role.contains(MemoryRegionFlags::FREE);
-        let should_unmap = reservation.no_map && !role.contains(MemoryRegionFlags::NO_MAP);
-        if !should_reserve && !should_unmap {
-            adjusted
-                .push(region)
-                .map_err(|_| DevTreeError::NotEnoughMemory)?;
-            continue;
-        }
-
-        // Preserve any RAM before the intersection, replace the intersection's role, then keep
-        // any RAM after it. Existing access and device attributes are retained.
-        if region.range.start < start {
-            adjusted
-                .push(MemoryRegion {
-                    range: PhysAddrRange::new(region.range.start, start),
-                    ..region
-                })
-                .map_err(|_| DevTreeError::NotEnoughMemory)?;
-        }
-
-        let flags = (region.flags
-            & !(MemoryRegionFlags::FREE
-                | MemoryRegionFlags::RESERVED
-                | MemoryRegionFlags::NO_MAP
-                | MemoryRegionFlags::BOOT_SERVICE
-                | MemoryRegionFlags::KERNEL))
-            | if reservation.no_map {
-                MemoryRegionFlags::NO_MAP
-            } else {
-                MemoryRegionFlags::RESERVED
-            };
-        adjusted
-            .push(MemoryRegion {
-                range: PhysAddrRange::new(start, end),
-                flags,
-                desc: DEVICE_TREE_RESERVED_DESC,
-            })
-            .map_err(|_| DevTreeError::NotEnoughMemory)?;
-
-        if end < region.range.end {
-            adjusted
-                .push(MemoryRegion {
-                    range: PhysAddrRange::new(end, region.range.end),
-                    ..region
-                })
-                .map_err(|_| DevTreeError::NotEnoughMemory)?;
-        }
+    // Preserve evidence of required mappings before replacing any role with NO_MAP. Otherwise
+    // the page planner would only see a barrier and silently omit boot data or the console.
+    let required = MemoryRegionFlags::BOOT_SERVICE
+        | MemoryRegionFlags::KERNEL
+        | MemoryRegionFlags::DEVICE
+        | MemoryRegionFlags::EXECUTE;
+    if reservation.no_map
+        && regions.overlaps(reservation.range).any(|old| {
+            !old.flags.contains(MemoryRegionFlags::NO_MAP) && old.flags.intersects(required)
+        })
+    {
+        return Err(DevTreeError::InvalidParameter(
+            "no-map reservation overlaps a required early mapping",
+        ));
     }
-    *regions = adjusted;
-    Ok(())
+    let role = if reservation.no_map {
+        MemoryRegionFlags::NO_MAP
+    } else {
+        MemoryRegionFlags::RESERVED
+    };
+    regions
+        .overlay_with(
+            MemoryRegion {
+                range: reservation.range,
+                // Gaps have no known access or device attributes. Record ownership only.
+                flags: role,
+                desc: DEVICE_TREE_RESERVED_DESC,
+            },
+            |old| {
+                // An ordinary reservation cannot weaken an existing no-map declaration.
+                if old.flags.contains(MemoryRegionFlags::NO_MAP)
+                    || !reservation.no_map && !old.flags.contains(MemoryRegionFlags::FREE)
+                {
+                    return old;
+                }
+                let roles = MemoryRegionFlags::FREE
+                    | MemoryRegionFlags::RESERVED
+                    | MemoryRegionFlags::NO_MAP
+                    | MemoryRegionFlags::BOOT_SERVICE
+                    | MemoryRegionFlags::KERNEL;
+                MemoryRegion {
+                    flags: (old.flags & !roles) | role,
+                    desc: DEVICE_TREE_RESERVED_DESC,
+                    ..old
+                }
+            },
+        )
+        .map_err(|_| DevTreeError::NotEnoughMemory)
 }

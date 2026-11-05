@@ -37,6 +37,13 @@ pub fn test(root: &Path) -> TaskResult<()> {
     process::run(
         process::cargo(root)
             .args(["test", "--locked", "--manifest-path"])
+            .arg(root.join("Cargo.toml"))
+            .args(["-p", "exspin", "--features", "host-test"]),
+        None,
+    )?;
+    process::run(
+        process::cargo(root)
+            .args(["test", "--locked", "--manifest-path"])
             .arg(root.join("ecraldr/Cargo.toml"))
             .args(["-p", "ecraldr_base", "-p", "ecraldr_base_macros"]),
         None,

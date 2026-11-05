@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use memory_addr::PhysAddr;
 use x2apic::ioapic::{IoApic, IrqFlags, IrqMode};
 

@@ -3,7 +3,11 @@
 //! The pure model defines the publication and block-commit protocol shared by host tests and the
 //! kernel completion queue. Architecture-specific switching is layered on top by the scheduler.
 
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+
+use exspin::{SpinNoIrq, SpinNoIrqGuard};
+
+use super::{Task, TaskId};
 
 /// Errors returned before a join waiter is published.
 ///
@@ -27,11 +31,6 @@ pub fn validate_join(
         Ok(())
     }
 }
-
-use alloc::sync::Arc;
-use kspin::{SpinNoIrq, SpinNoIrqGuard};
-
-use super::{Task, TaskId};
 
 /// Errors returned by the kernel completion waiter queue.
 ///
@@ -90,7 +89,7 @@ impl TaskWaitQueue {
         // -> completion locks. A future lock-free wait queue could replace this lock after its
         // memory-ordering proof.
         TaskWaitQueueGuard {
-            _preempt: kernel_guard::NoPreemptIrqSave::new(),
+            _preempt: exspin::NoPreemptIrqSave::new(),
             guard: self.inner.lock(),
         }
     }
@@ -101,7 +100,7 @@ impl TaskWaitQueue {
 /// The guard owns the lock across waiter publication and block commit to close the wakeup race.
 pub(super) struct TaskWaitQueueGuard<'a> {
     /// Scheduler guard held for the lifetime of the queue lock.
-    _preempt: kernel_guard::NoPreemptIrqSave,
+    _preempt: exspin::NoPreemptIrqSave,
     /// The IRQ-safe queue lock guard.
     guard: SpinNoIrqGuard<'a, VecDeque<TaskWaiter>>,
 }

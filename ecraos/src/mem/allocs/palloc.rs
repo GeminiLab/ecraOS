@@ -2,7 +2,7 @@
 
 use exarch::mem::MemoryRegionFlags;
 use exbuddy::{AllocatorStats, BuddyAllocator};
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use log::{debug, info};
 use memory_addr::{AddrRangeBounds, PhysAddr};
 use size_disp::SizeDisplay;
@@ -17,7 +17,7 @@ static BUDDY: SpinNoIrq<BuddyAllocator> = SpinNoIrq::new(BuddyAllocator::new());
 
 /// Initializes the page allocator.
 pub fn init_palloc() {
-    let phys_regions = pmm::phys_mem_regions();
+    let phys_regions = pmm::clone_early_regions();
     let page_size_shift = vmm::page_size_shift();
     let page_size = vmm::page_size();
     let dmo = vmm::direct_mapping_offset();
@@ -37,7 +37,7 @@ pub fn init_palloc() {
     // SAFETY: we believe that we have mapped the physical memory to the virtual memory correctly.
     unsafe { buddy.init(page_size_shift, dmo) }.expect("failed to init buddy allocator");
 
-    for region in phys_regions {
+    for region in &phys_regions {
         if !region.flags.contains(MemoryRegionFlags::FREE) {
             continue;
         }

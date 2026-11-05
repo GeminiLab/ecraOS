@@ -6,7 +6,7 @@ use core::{arch::asm, time::Duration};
 
 use aarch64_cpu::registers::{MPIDR_EL1, Readable};
 use expercpu::def_percpu;
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::{PhysAddr, VirtAddr, va};
 

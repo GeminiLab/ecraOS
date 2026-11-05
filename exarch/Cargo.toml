@@ -12,8 +12,8 @@ ecraldr_base.workspace = true
 expalloc_trait = { path = "../expalloc_trait" }
 expercpu = { path = "../expercpu/expercpu" }
 expt = { path = "../expt" }
+exspin.workspace = true
 heapless = "0.9"
-kspin.workspace = true
 lazyinit.workspace = true
 log.workspace = true
 look_at = { path = "../utils/look_at" }
@@ -22,6 +22,7 @@ page_table_entry = "0.6.1"
 size_disp = { path = "../utils/size_disp" }
 
 [dev-dependencies]
+exspin = { workspace = true, features = ["host-test"] }
 fdt-rs = { version = "0.4", default-features = false }
 
 [target.'cfg(any(target_arch = "x86_64", ecraos_doc))'.dependencies]

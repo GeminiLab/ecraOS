@@ -14,7 +14,7 @@ pub use exarch::power::PhysicalCpuId;
 use exarch::{platform::CpuTopology, power::CpuStartError};
 use expercpu::def_percpu;
 use expt::pte::MappingFlags;
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{debug, info, warn};
 use memory_addr::VirtAddrRange;

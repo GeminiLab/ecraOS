@@ -8,7 +8,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 
 use super::{TaskError, TaskRef, WaitResult};
 
@@ -31,7 +31,7 @@ impl WaitQueue {
         // Lock order is NoPreemptIrqSave -> domain metadata -> Queue -> task lifecycle ->
         // completion/wait queue. A future lock-free wait queue may replace this lock after its
         // memory-ordering proof.
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         task.claim_waiting()?;
         self.queue.lock().push_back(task);
         Ok(())
@@ -45,7 +45,7 @@ impl WaitQueue {
         // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
         // lifecycle -> completion or wait-queue locks. A future lock-free wait queue may replace
         // these locks after a complete memory-ordering proof.
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let mut queue = self.queue.lock();
         task.claim_waiting()?;
         if task.block(cpu_id).is_err() {
@@ -62,7 +62,7 @@ impl WaitQueue {
         task: TaskRef,
         cpu_id: usize,
     ) -> Result<u64, TaskError> {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let mut queue = self.queue.lock();
         task.claim_waiting()?;
         let generation = match task.begin_timed_wait(cpu_id) {
@@ -81,7 +81,7 @@ impl WaitQueue {
     ///
     /// Queue and timer bookkeeping finish before remote scheduler notification.
     pub fn wake_one(&self) -> Option<TaskRef> {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         loop {
             let task = self.take_one()?;
             if !matches!(
@@ -111,7 +111,7 @@ impl WaitQueue {
     ///
     /// Selected ownership is retained while IRQ-saving bookkeeping ends before queue publication.
     pub fn wake_all(&self) -> alloc::vec::Vec<TaskRef> {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let tasks = self.queue.lock().drain(..).collect::<alloc::vec::Vec<_>>();
         let mut selected = alloc::vec::Vec::with_capacity(tasks.len());
         for task in &tasks {
@@ -159,7 +159,7 @@ impl WaitQueue {
 
     /// Removes one exact waiter during timeout processing.
     pub(crate) fn remove_task(&self, task_id: u64) -> Option<TaskRef> {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let mut queue = self.queue.lock();
         let index = queue.iter().position(|task| task.id() == task_id)?;
         queue.remove(index)
@@ -216,7 +216,7 @@ impl<T> Mutex<T> {
         if (reserved != 0 && reserved != caller) || (!self.waiters.is_empty() && reserved == 0) {
             return Err(TaskError::CannotBlock);
         }
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         let mut value = self.value.lock();
         let Some(inner) = value.take() else {
             return Err(TaskError::CannotBlock);
@@ -256,7 +256,7 @@ impl<T> Mutex<T> {
     ///
     /// Remote queue notification follows release of the IRQ-saving publication guard.
     fn unlock(&self, value: T) {
-        let _guard = kernel_guard::NoPreemptIrqSave::new();
+        let _guard = exspin::NoPreemptIrqSave::new();
         *self.value.lock() = Some(value);
         self.owner.store(0, Ordering::Release);
         let waiter = self.waiters.take_one();

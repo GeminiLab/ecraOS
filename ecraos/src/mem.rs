@@ -3,7 +3,7 @@
 //! Provides virtual memory management (VMM), physical memory management (PMM),
 //! early page allocation, and the final buddy+slab allocator integration.
 
-use exarch::mem::{MemoryRegion, MemoryRegionFlags};
+use exarch::mem::{MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
 use expt::pte::MappingFlags;
 use log::info;
 use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange};
@@ -65,12 +65,12 @@ fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
     allocs::vmalloc::virt_to_phys(addr)
 }
 
+/// Checks discovered ownership without retaining a borrow across address-translation callers.
 fn phys_addr_is_known(addr: PhysAddr) -> bool {
-    let Some(regions) = pmm::try_phys_mem_regions() else {
-        return true;
-    };
-
-    regions.iter().any(|region| region.range.contains(addr))
+    pmm::try_with_phys_mem_regions(|regions| {
+        regions.iter().any(|region| region.range.contains(addr))
+    })
+    .unwrap_or(true)
 }
 
 /// Initializes early memory management and installs the kernel page-table.
@@ -84,13 +84,20 @@ pub fn init_and_enable_vmm(
 
     // Get physical memory regions from the boot argument.
     let boot_arg = *unsafe { arg.as_ref_unchecked() };
-    let raw_mem_regions = exarch::mem::raw_mem_regions(boot_arg.plat_arg);
-    print_mem_regions("Raw memory regions reported by platform:", &raw_mem_regions);
+    let mut raw_mem_regions = RawMemoryRegions::new();
+    exarch::mem::raw_mem_regions(boot_arg.plat_arg, &mut raw_mem_regions);
+    print_mem_regions(
+        "Raw memory regions reported by platform:",
+        raw_mem_regions.as_slice(),
+    );
 
     // Build the final physical memory region table by splitting raw boot
     // regions around the loader and kernel image.
     pmm::build_phys_mem_regions(&raw_mem_regions, boot_arg.loader_range);
-    print_mem_regions("Final physical memory regions:", pmm::phys_mem_regions());
+    // RISC-V console output translates its buffer through this table, so print a snapshot
+    // after releasing the table lock. The same snapshot supplies the early mapping plan below.
+    let phys_regions = pmm::clone_early_regions();
+    print_mem_regions("Final physical memory regions:", phys_regions.as_slice());
     // The final table is now the sole source of truth. boot_regions is never
     // used again.
 
@@ -102,7 +109,7 @@ pub fn init_and_enable_vmm(
     early::init_early_page_allocator();
 
     // Create the page table and early mappings. It depends on the early page allocator.
-    vmm::init_vmm_mapping_early(pmm::phys_mem_regions());
+    vmm::init_vmm_mapping_early(phys_regions.as_slice());
 
     // Allocate the BSP stack area.
     early::init_bsp_stack(vmm::vmalloc_base());
@@ -171,6 +178,10 @@ pub fn init_after_enable_vmm() {
     // Initialize the small object allocator.
     allocs::malloc::init_malloc_current_cpu();
 
+    // Promote boot-time region and mapping metadata after the formal heap is available.
+    pmm::use_dynamic_storage();
+    vmm::use_dynamic_mapping_storage();
+
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
     allocs::vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
@@ -196,7 +207,7 @@ pub fn init_ap() {
 /// Runs after secondary CPUs finish early startup. Page-table operations use the formal allocator
 /// captured by the owner during post-relocation memory initialization.
 pub fn remove_identical_mappings() {
-    vmm::remove_identical_mapping(pmm::phys_mem_regions());
+    vmm::remove_identical_mapping();
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.
@@ -262,18 +273,15 @@ unsafe fn call_fn_new_stack_arg2(
     }
 }
 
+/// Prints a borrowed list whose owner does not hold the global region lock during output.
 fn print_mem_regions(heading: &str, mem_regions: &[MemoryRegion]) {
     kprintln!("{}", heading);
     for region in mem_regions {
-        let start_usize = region.range.start.as_usize();
-        let end_usize = region.range.end.as_usize();
-        let size = region.range.size();
-
         kprintln!(
             "  {:<#018x} - {:<#018x}, {}, {} ({})",
-            start_usize,
-            end_usize,
-            size.size_display_wide(),
+            region.range.start.as_usize(),
+            region.range.end.as_usize(),
+            region.range.size().size_display_wide(),
             region.flags,
             region.desc,
         );

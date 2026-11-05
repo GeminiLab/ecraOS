@@ -17,7 +17,7 @@ use core::{
 
 use expercpu::def_percpu;
 use exslab::{AllocResult, SlabAllocResult, SlabAllocator, SlabDeallocResult};
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::info;
 use memory_addr::{VirtAddr, pa, va};
@@ -84,7 +84,7 @@ impl PerCpuSlab {
 ///
 /// Pins the CPU before selecting its slot and prevents interrupt reentry while it is borrowed.
 fn with_current_slab<R>(f: impl FnOnce(&PerCpuSlab) -> R) -> R {
-    let _guard = kernel_guard::NoPreemptIrqSave::new();
+    let _guard = exspin::NoPreemptIrqSave::new();
     CURRENT_SLAB.with_current(|slot| f(&*slot))
 }
 

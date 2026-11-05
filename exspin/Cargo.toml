@@ -1,0 +1,13 @@
+[package]
+name = "exspin"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+host-test = ["expercpu/host-test"]
+
+[dependencies]
+expercpu = { path = "../expercpu/expercpu" }
+kernel_guard = { version = "0.2", features = ["preempt"] }
+kspin = { version = "0.2", features = ["smp"] }

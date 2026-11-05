@@ -5,7 +5,7 @@
 use alloc::boxed::Box;
 
 use cfg_or_dummy::cfg_or_dummy;
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::PhysAddr;
 use riscv::{

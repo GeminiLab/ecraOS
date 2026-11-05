@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 ecraos = { workspace = true }
+exspin = { path = "../../exspin" }
 log = { workspace = true }

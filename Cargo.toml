@@ -10,6 +10,7 @@ members = [
     "expercpu/expercpu_macros",
     "expt",
     "exslab",
+    "exspin",
     "page_table_entry",
     "utils/cartesian_product",
     "utils/cfg_or_dummy",
@@ -29,7 +30,7 @@ exclude = [
 cfg-if = "1.0"
 # TODO: move it out of ecraldr, rename it, add version number when passing arguments to kernel
 ecraldr_base = { path = "ecraldr/ecraldr_base" }
-kspin = "0.2"
+exspin = { path = "exspin" }
 lazyinit = "0.2"
 log = "0.4"
 memory_addr = "0.5.0-alpha.const-addr-and-ranges.0"

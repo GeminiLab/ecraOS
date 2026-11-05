@@ -161,9 +161,9 @@ dependencies = [
  "expercpu",
  "expt",
  "exslab",
+ "exspin",
  "heapless",
  "kernel_guard",
- "kspin",
  "lazyinit",
  "log",
  "memory_addr",
@@ -199,9 +199,9 @@ dependencies = [
  "expalloc_trait",
  "expercpu",
  "expt",
+ "exspin",
  "fdt-rs",
  "heapless",
- "kspin",
  "lazyinit",
  "log",
  "look_at",
@@ -281,6 +281,15 @@ name = "exslab"
 version = "0.1.0"
 dependencies = [
  "memory_addr",
+]
+
+[[package]]
+name = "exspin"
+version = "0.1.0"
+dependencies = [
+ "expercpu",
+ "kernel_guard",
+ "kspin",
 ]
 
 [[package]]
@@ -653,6 +662,7 @@ name = "sync-preemption"
 version = "0.1.0"
 dependencies = [
  "ecraos",
+ "exspin",
  "log",
 ]
 

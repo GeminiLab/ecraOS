@@ -44,10 +44,17 @@ const DEVICE_TREE_ALIGN: usize = 4096;
 
 /// Collects usable RAM and regions that must remain mapped during early boot.
 ///
-/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as reserved
-/// boot data, preserving usable RAM on both sides. Later-discovered devices are mapped separately.
-pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
-    let mut regions = RawMemoryRegions::new();
+/// Reserves the page-aligned device-tree blob as boot data and fills uncovered RAM around it.
+/// Later-discovered devices are mapped separately.
+///
+/// # Panics
+///
+/// Panics if the output table is not empty, memory data is invalid, or capacity is insufficient.
+pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
+    assert!(
+        regions.is_empty(),
+        "raw memory discovery requires an empty table"
+    );
 
     if let PlatformBootArg::DeviceTree(dtb_addr) = arg {
         let dev_tree = unsafe {
@@ -57,6 +64,16 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
         let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dev_tree.totalsize())
             .align_outwards(DEVICE_TREE_ALIGN)
             .expect("device tree range alignment overflow");
+
+        regions
+            .insert_disjoint(MemoryRegion {
+                range: dtb_range,
+                flags: MemoryRegionFlags::READ
+                    | MemoryRegionFlags::WRITE
+                    | MemoryRegionFlags::BOOT_SERVICE,
+                desc: DEVICE_TREE_DESC,
+            })
+            .expect("invalid device tree memory region");
 
         let mems = dev_tree
             .nodes()
@@ -72,37 +89,18 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
             let start = reg.u64(0).unwrap();
             let size = reg.u64(1).unwrap();
             let memory_range = PhysAddrRange::from_start_size(pa!(start as _), size as _);
-            let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
-            for range in [before_dtb, after_dtb]
-                .into_iter()
-                .flatten()
-                .filter(|range| !range.is_empty())
-            {
-                regions
-                    .push(MemoryRegion {
-                        range,
-                        flags: DEFAULT_RAM_FLAGS,
-                        desc: DEFAULT_RAM_DESC,
-                    })
-                    .expect("too many platform memory regions");
-            }
+            regions
+                .insert_uncovered(MemoryRegion {
+                    range: memory_range,
+                    flags: DEFAULT_RAM_FLAGS,
+                    desc: DEFAULT_RAM_DESC,
+                })
+                .expect("invalid or excessive platform RAM regions");
         }
 
-        regions
-            .push(MemoryRegion {
-                range: dtb_range,
-                flags: MemoryRegionFlags::READ
-                    | MemoryRegionFlags::WRITE
-                    | MemoryRegionFlags::RESERVED,
-                desc: DEVICE_TREE_DESC,
-            })
-            .expect("too many platform memory regions");
-
-        apply_device_tree_reservations(dev_tree, &mut regions)
+        apply_device_tree_reservations(dev_tree, regions)
             .expect("failed to inspect device-tree memory reservations");
     }
-
-    regions
 }
 
 /// Returns supported and current RISC-V virtual address-space modes.

@@ -3,7 +3,7 @@
 use alloc::{boxed::Box, vec::Vec};
 
 use ecraldr_base::PlatformBootArg;
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use look_at::look_at;
 

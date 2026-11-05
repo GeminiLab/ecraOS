@@ -5,8 +5,10 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use ecraos::{app_main_bsp, reexport::exarch, task};
+use ecraos::{app_main_ap, app_main_bsp, reexport::exarch, task};
 use log::info;
+
+mod irq_nesting;
 
 /// Runs the Stage 2B preemption and synchronization smoke workload.
 ///
@@ -87,5 +89,12 @@ fn run_sync_preemption_smoke() {
 /// Runs the synchronization and preemption smoke from the BSP application hook.
 #[app_main_bsp]
 fn main() {
+    irq_nesting::check();
     run_sync_preemption_smoke();
+}
+
+/// Checks the independent IRQ nesting state on every secondary CPU.
+#[app_main_ap]
+fn ap_main() {
+    irq_nesting::check();
 }

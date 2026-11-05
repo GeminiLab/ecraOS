@@ -25,7 +25,6 @@ use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
 use tock_registers::LocalRegisterCopy;
 
 use crate::{
-    dbcn_println,
     mem::{
         DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
         VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
@@ -198,13 +197,19 @@ fn tcr_for_mode(mode: VirtAddrSpaceMode) -> LocalRegisterCopy<u64, TCR_EL1::Regi
 
 /// Collects usable RAM, the early console, and memory that must remain mapped during early boot.
 ///
-/// Subtracts the page-aligned device-tree blob from each RAM range and reports it once as
-/// reserved boot data, preserving usable RAM on both sides. Later-discovered MMIO is mapped
-/// separately.
-pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
-    let mut regions = RawMemoryRegions::new();
+/// Reserves the page-aligned device-tree blob as boot data and fills uncovered RAM around it.
+/// Later-discovered MMIO is mapped separately.
+///
+/// # Panics
+///
+/// Panics if the output table is not empty, memory data is invalid, or capacity is insufficient.
+pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
+    assert!(
+        regions.is_empty(),
+        "raw memory discovery requires an empty table"
+    );
     let PlatformBootArg::DeviceTree(dtb_addr) = arg else {
-        return regions;
+        return;
     };
     let dtb = unsafe {
         DevTree::from_raw_pointer(VirtAddr::from_usize(dtb_addr.as_usize()).as_ptr())
@@ -213,6 +218,20 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
     let dtb_range = PhysAddrRange::from_start_size(dtb_addr, dtb.totalsize())
         .align_outwards(DEVICE_TREE_ALIGN)
         .expect("device tree range alignment overflow");
+    regions
+        .insert_disjoint(MemoryRegion {
+            range: dtb_range,
+            flags: MemoryRegionFlags::READ
+                | MemoryRegionFlags::WRITE
+                | MemoryRegionFlags::BOOT_SERVICE,
+            desc: DEVICE_TREE_DESC,
+        })
+        .expect("invalid device tree memory region");
+    if let Some(console) = super::debug_console::mmio_region() {
+        regions
+            .insert_disjoint(console)
+            .expect("invalid early console memory region");
+    }
     for node in dtb.nodes().iterator() {
         let node = node.expect("failed to inspect device tree node");
         let is_memory = node
@@ -231,41 +250,18 @@ pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions {
                 .checked_add(reg.u64(1).expect("invalid memory size"))
                 .expect("memory range overflow");
             let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
-            let (before_dtb, after_dtb) = memory_range.subtract(dtb_range);
-            for range in [before_dtb, after_dtb]
-                .into_iter()
-                .flatten()
-                .filter(|range| !range.is_empty())
-            {
-                regions
-                    .push(MemoryRegion {
-                        range,
-                        flags: DEFAULT_RAM_FLAGS,
-                        desc: DEFAULT_RAM_DESC,
-                    })
-                    .expect("too many platform memory regions");
-            }
+            regions
+                .insert_uncovered(MemoryRegion {
+                    range: memory_range,
+                    flags: DEFAULT_RAM_FLAGS,
+                    desc: DEFAULT_RAM_DESC,
+                })
+                .expect("invalid or excessive platform RAM regions");
         }
     }
 
-    if let Some(console) = super::debug_console::mmio_region() {
-        regions
-            .push(console)
-            .expect("too many early memory regions");
-    }
-
-    regions
-        .push(MemoryRegion {
-            range: dtb_range,
-            flags: MemoryRegionFlags::READ | MemoryRegionFlags::WRITE | MemoryRegionFlags::RESERVED,
-            desc: DEVICE_TREE_DESC,
-        })
-        .expect("too many platform memory regions");
-
-    apply_device_tree_reservations(dtb, &mut regions)
+    apply_device_tree_reservations(dtb, regions)
         .expect("failed to inspect device-tree memory reservations");
-
-    regions
 }
 
 /// Returns whether a [`VirtAddrSpaceProps`] is supported by the CPU.

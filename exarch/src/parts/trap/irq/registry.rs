@@ -3,7 +3,7 @@ use core::{
     mem,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 
 use super::{ArchIrq, IrqError, IrqHandler};
 

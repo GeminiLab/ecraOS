@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use log::{Level, Log};
 
 use crate::{kprintln, logging::colors::ColorForLevel};

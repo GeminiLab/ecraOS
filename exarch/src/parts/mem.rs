@@ -16,6 +16,10 @@ use look_at::look_at;
 use memory_addr::{PhysAddrRange, VirtAddr};
 use size_disp::SizeDisplay;
 
+mod phys_regions;
+
+pub use phys_regions::{PhysMemoryRegions, PhysMemoryRegionsError, PhysMemoryRegionsStorage};
+
 bitflags::bitflags! {
     /// The flags for a memory region.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +127,7 @@ pub struct MemoryRegion {
 pub const MAX_RAW_MEM_REGIONS: usize = 32;
 
 /// The memory regions collected by [`raw_mem_regions`].
-pub type RawMemoryRegions = HeaplessVec<MemoryRegion, MAX_RAW_MEM_REGIONS>;
+pub type RawMemoryRegions = PhysMemoryRegions<HeaplessVec<MemoryRegion, MAX_RAW_MEM_REGIONS>>;
 
 /// The properties of a virtual address space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -384,19 +388,30 @@ look_at! {
     /// for strategy selection and synchronization requirements.
     pub type LocalTlbFlusher: TlbFlusher<VirtAddr>;
 
-    /// Collects the memory regions from the platform boot argument.
+    /// Collects platform memory regions into an empty caller-provided table.
     ///
-    /// The returned regions describe usable physical RAM and every physical range that must stay
+    /// The collected regions describe usable physical RAM and every physical range that must stay
     /// mapped throughout early initialization and the initial VMM transition, such as an early
     /// debug console. Devices first needed after platform discovery are returned separately by
-    /// [`crate::platform::discover_platform`]. The returned regions must not use
+    /// [`crate::platform::discover_platform`]. The collected regions must not use
     /// [`MemoryRegionFlags::KERNEL`], which is reserved for kernel image sections.
     ///
-    /// When this function is called, allocation is not available.
+    /// Firmware reservations are recorded in full, including those outside reported usable RAM.
+    /// A reservation in such a gap has an ownership role but no implied access permissions or
+    /// memory-type flags. NO_MAP ranges are retained in the table but omitted from both early
+    /// mapping aliases.
+    ///
+    /// The caller provides an empty table, which is populated in place without allocation.
+    /// A panic during discovery can leave partially collected regions in the table.
     ///
     /// Firmware that provides a device tree must either describe occupied physical memory in the
     /// FDT reservation map or /reserved-memory node, or exclude it from the reported RAM ranges.
-    pub fn raw_mem_regions(arg: PlatformBootArg) -> RawMemoryRegions;
+    ///
+    /// # Panics
+    ///
+    /// Panics if the table is not empty, platform memory data is invalid, or the table capacity
+    /// cannot hold the discovered regions.
+    pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions);
 
     /// Gets the supported and current virtual address space modes.
     ///

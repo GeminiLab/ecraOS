@@ -3,7 +3,7 @@
 use alloc::{boxed::Box, vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use x86_64::instructions::interrupts;
 

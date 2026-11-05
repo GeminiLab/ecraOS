@@ -40,7 +40,7 @@ static EARLY_PAGE_ALLOCATOR: EarlyPageAllocator = EarlyPageAllocator::new_uninit
 
 /// Initializes the early page allocator at the given physical base address.
 pub fn init_early_page_allocator() {
-    let range = find_early_page_allocator_range(pmm::phys_mem_regions())
+    let range = pmm::with_phys_mem_regions(find_early_page_allocator_range)
         .expect("Cannot find early page allocator range");
     let base_paddr = range.start;
 

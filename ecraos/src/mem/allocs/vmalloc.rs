@@ -8,7 +8,7 @@ use core::range::Range;
 
 use ecraldr_base::PhysAddrRange;
 use expt::{opaque::PageTableAction, pte::MappingFlags};
-use kspin::SpinNoIrq;
+use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{error, info};
 use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange, pa};
