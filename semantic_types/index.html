@@ -1,7 +1,7 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`semantic_types`"><title>semantic_types - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="semantic_types" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate semantic_types</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../semantic_types/index.html">semantic_<wbr>types</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#semantic_types" title="`semantic_types`"><code>semantic_types</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#formatting" title="Formatting">Formatting</a></li></ul></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#attributes" title="Attribute Macros">Attribute Macros</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>semantic_<wbr>types</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/semantic_types/lib.rs.html#1-279">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="semantic_types"><a class="doc-anchor" href="#semantic_types">§</a><code>semantic_types</code></h2>
-<p><code>semantic_types</code> provides the <a href="attr.semantic_type.html" title="attr semantic_types::semantic_type"><code>semantic_type</code></a> attribute macro for numeric newtypes. It
-adds construction and inner-value access, conversions, comparisons with the inner value, and
-optional formatting implementations to a single-field tuple struct.</p>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`semantic_types`"><title>semantic_types - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="semantic_types" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate semantic_types</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../semantic_types/index.html">semantic_<wbr>types</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#semantic_types" title="`semantic_types`"><code>semantic_types</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#options" title="Options">Options</a></li></ul></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#attributes" title="Attribute Macros">Attribute Macros</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>semantic_<wbr>types</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/semantic_types/lib.rs.html#1-387">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="semantic_types"><a class="doc-anchor" href="#semantic_types">§</a><code>semantic_types</code></h2>
+<p><code>semantic_types</code> provides the <a href="attr.semantic_type.html" title="attr semantic_types::semantic_type"><code>semantic_type</code></a> attribute macro for semantic types represented by
+primitive integer types. It adds configurable construction and conversion APIs, optional comparison,
+hashing, and formatting trait implementations to a single-field tuple struct.</p>
 <h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
 <p>Add the crate as a dependency:</p>
 <div class="example-wrap"><pre class="language-toml"><code>[dependencies]
@@ -11,57 +11,87 @@ semantic_types = &quot;0.1&quot;</code></pre></div>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>semantic_types::semantic_type;
 
 <span class="doccomment">/// A power value.
-</span><span class="attr">#[semantic_type(lower_hex, upper_hex, display)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+</span><span class="attr">#[semantic_type(eq_repr, ord, hash, lower_hex, upper_hex, display)]
 </span><span class="kw">struct </span>Power(
-    <span class="doccomment">/// The wrapped power value.
+    <span class="doccomment">/// The underlying primitive representation.
     </span>u64,
 );
 
 <span class="kw">let </span>power = Power::new(<span class="number">42</span>);
-<span class="macro">assert_eq!</span>(power.inner(), <span class="number">42</span>);
+<span class="macro">assert_eq!</span>(power.into_repr(), <span class="number">42</span>);
+<span class="macro">assert_eq!</span>(u64::from(power), <span class="number">42</span>);
+<span class="macro">assert_eq!</span>(Power::from(<span class="number">42</span>), power);
+<span class="macro">assert_eq!</span>(power, <span class="number">42_u64</span>);
+<span class="macro">assert_eq!</span>(<span class="number">42_u64</span>, power);
 <span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{power}"</span>), <span class="string">"42"</span>);
 <span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{power:x}"</span>), <span class="string">"2a"</span>);
-<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{power:X}"</span>), <span class="string">"2A"</span>);
-<span class="macro">assert_eq!</span>(Power::from(<span class="number">42</span>), power);
-<span class="macro">assert_eq!</span>(u64::from(power), <span class="number">42</span>);
-<span class="macro">assert_eq!</span>(power, <span class="number">42_u64</span>);
-<span class="macro">assert_eq!</span>(<span class="number">42_u64</span>, power);</code></pre></div>
-<p>The supported field types are <code>u8</code>, <code>u16</code>, <code>u32</code>, <code>u64</code>, <code>u128</code>, <code>usize</code>, <code>i8</code>, <code>i16</code>, <code>i32</code>,
-<code>i64</code>, <code>i128</code>, and <code>isize</code>. The struct must have exactly one unnamed field. The macro preserves
-attributes on the struct and adds <code>#[repr(transparent)]</code> if the struct has no <code>repr</code> attribute.</p>
-<p>The macro generates public <code>const fn new(inner)</code> and <code>const fn inner(self)</code> methods. The <code>inner</code>
-method consumes the wrapper and returns its primitive value. It also implements
-<code>From&lt;Inner&gt; for Wrapper</code>, <code>From&lt;Wrapper&gt; for Inner</code>, <code>PartialEq&lt;Inner&gt; for Wrapper</code>,
-and <code>PartialEq&lt;Wrapper&gt; for Inner</code>. It does not derive traits or implement <code>PartialEq</code> between two
-wrappers. Add the desired derives to the struct itself.</p>
-<h3 id="formatting"><a class="doc-anchor" href="#formatting">§</a>Formatting</h3>
-<p>Formatting is opt-in. The bare options use the standard numeric format strings shown below:</p>
-<div><table><thead><tr><th>Argument</th><th>Trait</th><th>Default format string</th></tr></thead><tbody>
-<tr><td><code>lower_hex</code></td><td><code>core::fmt::LowerHex</code></td><td><code>{:x}</code></td></tr>
-<tr><td><code>upper_hex</code></td><td><code>core::fmt::UpperHex</code></td><td><code>{:X}</code></td></tr>
-<tr><td><code>display</code></td><td><code>core::fmt::Display</code></td><td><code>{:}</code></td></tr>
+<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{power:X}"</span>), <span class="string">"2A"</span>);</code></pre></div>
+<p>Supported underlying primitive types are <code>u8</code>, <code>u16</code>, <code>u32</code>, <code>u64</code>, <code>u128</code>, <code>usize</code>, <code>i8</code>, <code>i16</code>, <code>i32</code>,
+<code>i64</code>, <code>i128</code>, and <code>isize</code>. The struct must have exactly one unnamed field, whose visibility does
+not matter. The macro preserves struct attributes and adds <code>#[repr(transparent)]</code> if the struct has
+no explicit <code>repr</code> attribute.</p>
+<p>Every annotated struct derives <code>Debug</code>, <code>Copy</code>, and <code>Clone</code> automatically. The macro always provides
+a <code>const fn into_repr(self) -&gt; Repr</code> method and <code>impl From&lt;Target&gt; for Repr</code> to retrieve the underlying
+primitive representation. Here, <code>Repr</code> means the underlying primitive type, and <code>Target</code> means the
+struct. By default, the generated code also provides <code>const fn new(Repr) -&gt; Target</code> and <code>impl From&lt;Repr&gt; for Target</code> to construct the struct from the underlying primitive representation.</p>
+<h3 id="options"><a class="doc-anchor" href="#options">§</a>Options</h3>
+<p>The following bare options control construction, comparisons, hashing, and formatting:</p>
+<div><table><thead><tr><th>Option</th><th>Generated API</th></tr></thead><tbody>
+<tr><td><code>no_from_repr</code></td><td>Omits <code>fn new(Repr) -&gt; Target</code> and <code>impl From&lt;Repr&gt; for Target</code>.</td></tr>
+<tr><td><code>eq</code></td><td>Derives <code>PartialEq</code> and <code>Eq</code> between two <code>Target</code> values.</td></tr>
+<tr><td><code>eq_repr</code></td><td>Implements bidirectional <code>PartialEq</code> between <code>Target</code> and <code>Repr</code></td></tr>
+<tr><td><code>ord</code></td><td>Derives <code>PartialOrd</code> and <code>Ord</code> between two <code>Target</code> values, and implies <code>eq</code>.</td></tr>
+<tr><td><code>ord_repr</code></td><td>Implements bidirectional <code>PartialOrd</code> between <code>Target</code> and <code>Repr</code>, and implies <code>eq_repr</code>.</td></tr>
+<tr><td><code>hash</code></td><td>Derives <code>Hash</code> for <code>Target</code>.</td></tr>
+<tr><td><code>lower_hex</code></td><td>Implements <code>core::fmt::LowerHex</code>, using <code>{:x}</code> by default.</td></tr>
+<tr><td><code>upper_hex</code></td><td>Implements <code>core::fmt::UpperHex</code>, using <code>{:X}</code> by default.</td></tr>
+<tr><td><code>display</code></td><td>Implements <code>core::fmt::Display</code>, using <code>{:}</code> by default.</td></tr>
 </tbody></table>
 </div>
-<p>An option can take a custom format string. The wrapped value is passed as the first positional
-argument to that string:</p>
+<p>Note that <code>ord</code> implies <code>eq</code>, and <code>ord_repr</code> implies <code>eq_repr</code>. But <code>eq</code> and <code>eq_repr</code> do not imply
+each other, and <code>ord</code> and <code>ord_repr</code> do not imply each other.</p>
+
+<div class="example-wrap compile_fail"><a href="#" class="tooltip" title="This example deliberately fails to compile">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">use </span>semantic_types::semantic_type;
+
+<span class="doccomment">/// A power value.
+</span><span class="attr">#[semantic_type(ord)]
+</span><span class="kw">struct </span>Power(u64);
+
+<span class="comment">// error: Power is not PartialEq&lt;u64&gt;
+</span><span class="macro">assert_eq!</span>(Power::new(<span class="number">42</span>), <span class="number">42u64</span>);</code></pre></div>
+<p>Use <code>no_from_repr</code> when construction must validate a representation. Define a constructor on the
+struct to enforce that validation:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>semantic_types::semantic_type;
+
+<span class="doccomment">/// A validated nonzero identifier.
+</span><span class="attr">#[semantic_type(no_from_repr)]
+</span><span class="kw">struct </span>NonZeroId(u32);
+
+<span class="kw">impl </span>NonZeroId {
+    <span class="doccomment">/// Constructs an identifier if its value is nonzero.
+    </span><span class="kw">pub const fn </span>new(value: u32) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">if </span>value == <span class="number">0 </span>{ <span class="prelude-val">None </span>} <span class="kw">else </span>{ <span class="prelude-val">Some</span>(<span class="self">Self</span>(value)) }
+    }
+}
+
+<span class="macro">assert!</span>(NonZeroId::new(<span class="number">0</span>).is_none());
+<span class="macro">assert_eq!</span>(NonZeroId::new(<span class="number">7</span>).unwrap().into_repr(), <span class="number">7</span>);</code></pre></div>
+<p>Formatting options can take a string literal in parentheses to customize their format string. The
+represented value is passed as the first positional argument:</p>
 
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>semantic_types::semantic_type;
 
 <span class="doccomment">/// A formatted power value.
 </span><span class="attr">#[semantic_type(lower_hex(<span class="string">"0x{:x}"</span>), display(<span class="string">"power={}"</span>))]
-#[derive(Clone, Copy)]
 </span><span class="kw">struct </span>FormattedPower(
-    <span class="doccomment">/// The wrapped power value.
+    <span class="doccomment">/// The represented power value.
     </span>u64,
 );
 
-<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{:x}"</span>, FormattedPower(<span class="number">42</span>)), <span class="string">"0x2a"</span>);
-<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{}"</span>, FormattedPower(<span class="number">42</span>)), <span class="string">"power=42"</span>);</code></pre></div>
-<p>The formatting flags on the outer formatting call are not forwarded to the configured format
-string. Put the desired formatting flags in the macro argument instead. A type that enables any
-formatting option must implement <code>Copy</code> because the generated formatter calls
-<code>inner(self)</code>, which consumes the wrapper.</p>
-<p>Unknown arguments, structs without exactly one unnamed field, and fields that are not primitive
-integer types produce compile-time errors.</p>
-</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.SemanticTypeArguments.html" title="struct semantic_types::SemanticTypeArguments">Semantic<wbr>Type<wbr>Arguments</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The optional formatting implementations requested by one macro invocation.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.generate_display_impl.html" title="fn semantic_types::generate_display_impl">generate_<wbr>display_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates one optional formatting trait implementation.</dd><dt><a class="fn" href="fn.is_primitive_numeric_type.html" title="fn semantic_types::is_primitive_numeric_type">is_<wbr>primitive_<wbr>numeric_<wbr>type</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Reports whether a type path ends in a primitive signed or unsigned integer type.</dd><dt><a class="fn" href="fn.semantic_type_impl.html" title="fn semantic_types::semantic_type_impl">semantic_<wbr>type_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates the semantic type API for a single-field tuple struct.</dd></dl><h2 id="attributes" class="section-header">Attribute Macros<a href="#attributes" class="anchor">§</a></h2><dl class="item-table"><dt><a class="attr" href="attr.semantic_type.html" title="attr semantic_types::semantic_type">semantic_<wbr>type</a></dt><dd>Generates a numeric newtype API for a single-field tuple struct.</dd></dl></section></div></main></body></html>
+<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{:x}"</span>, FormattedPower::new(<span class="number">42</span>)), <span class="string">"0x2a"</span>);
+<span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{}"</span>, FormattedPower::new(<span class="number">42</span>)), <span class="string">"power=42"</span>);</code></pre></div>
+<p>Do not derive <code>Debug</code>, <code>Copy</code>, or <code>Clone</code> on the annotated type, or derive any trait that an option
+generates. Other derives remain available. Unknown options, structs without exactly one unnamed
+field, and fields that are not primitive integer types produce compile-time errors.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.SemanticTypeArguments.html" title="struct semantic_types::SemanticTypeArguments">Semantic<wbr>Type<wbr>Arguments</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The options requested by one macro invocation.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.generate_display_impl.html" title="fn semantic_types::generate_display_impl">generate_<wbr>display_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates one optional formatting trait implementation.</dd><dt><a class="fn" href="fn.generate_repr_eq_impl.html" title="fn semantic_types::generate_repr_eq_impl">generate_<wbr>repr_<wbr>eq_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates bidirectional equality implementations with the representation.</dd><dt><a class="fn" href="fn.generate_repr_ord_impl.html" title="fn semantic_types::generate_repr_ord_impl">generate_<wbr>repr_<wbr>ord_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates bidirectional ordering implementations with the representation.</dd><dt><a class="fn" href="fn.is_primitive_integer_type.html" title="fn semantic_types::is_primitive_integer_type">is_<wbr>primitive_<wbr>integer_<wbr>type</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Reports whether a type path ends in a primitive signed or unsigned integer type.</dd><dt><a class="fn" href="fn.semantic_type_impl.html" title="fn semantic_types::semantic_type_impl">semantic_<wbr>type_<wbr>impl</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Generates the semantic type API for a single-field tuple struct.</dd></dl><h2 id="attributes" class="section-header">Attribute Macros<a href="#attributes" class="anchor">§</a></h2><dl class="item-table"><dt><a class="attr" href="attr.semantic_type.html" title="attr semantic_types::semantic_type">semantic_<wbr>type</a></dt><dd>Generates a configurable API for a semantic type represented by a primitive integer.</dd></dl></section></div></main></body></html>

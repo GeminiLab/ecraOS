@@ -68,7 +68,7 @@
 <a href=#68 id=68 data-nosnippet>68</a>    <span class="kw">let </span>percpu_area_base = PERCPU_AREAS
 <a href=#69 id=69 data-nosnippet>69</a>        .get()
 <a href=#70 id=70 data-nosnippet>70</a>        .expect(<span class="string">"percpu areas must be initialized"</span>)
-<a href=#71 id=71 data-nosnippet>71</a>        .get(cpu_id)
+<a href=#71 id=71 data-nosnippet>71</a>        .get(cpu_id.into_repr())
 <a href=#72 id=72 data-nosnippet>72</a>        .copied()
 <a href=#73 id=73 data-nosnippet>73</a>        .expect(<span class="string">"invalid cpu id"</span>);
 <a href=#74 id=74 data-nosnippet>74</a>

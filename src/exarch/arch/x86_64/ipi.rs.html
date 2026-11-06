@@ -15,7 +15,7 @@
 <a href=#15 id=15 data-nosnippet>15</a>///
 <a href=#16 id=16 data-nosnippet>16</a>/// Wider identifiers and the all-ones broadcast destination are rejected before submission.
 <a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">fn </span>destination(target: PhysicalCpuId) -&gt; <span class="prelude-ty">Result</span>&lt;u32, IpiError&gt; {
-<a href=#18 id=18 data-nosnippet>18</a>    <span class="kw">let </span>target = u32::try_from(target.inner()).map_err(|<span class="kw">_</span>| IpiError::InvalidTarget)<span class="question-mark">?</span>;
+<a href=#18 id=18 data-nosnippet>18</a>    <span class="kw">let </span>target = u32::try_from(target.into_repr()).map_err(|<span class="kw">_</span>| IpiError::InvalidTarget)<span class="question-mark">?</span>;
 <a href=#19 id=19 data-nosnippet>19</a>    <span class="kw">if </span>target == u32::MAX {
 <a href=#20 id=20 data-nosnippet>20</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IpiError::InvalidTarget);
 <a href=#21 id=21 data-nosnippet>21</a>    }

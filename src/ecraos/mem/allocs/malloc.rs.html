@@ -91,7 +91,7 @@
 <a href=#91 id=91 data-nosnippet>91</a><span class="doccomment">/// Initializes the current CPU's heap allocator state.
 <a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub fn </span>init_malloc_current_cpu() {
 <a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span>cpu_id = mp::current_cpu_id();
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span>slab_cpu_id = u16::try_from(cpu_id).expect(<span class="string">"CPU id exceeds slab owner range"</span>);
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span>slab_cpu_id = u16::try_from(cpu_id.into_repr()).expect(<span class="string">"CPU id exceeds slab owner range"</span>);
 <a href=#95 id=95 data-nosnippet>95</a>
 <a href=#96 id=96 data-nosnippet>96</a>    CURRENT_SLAB.with_current(|slot| {
 <a href=#97 id=97 data-nosnippet>97</a>        slot.init_once(PerCpuSlab::new(slab_cpu_id, mem::vmm::page_size()));
