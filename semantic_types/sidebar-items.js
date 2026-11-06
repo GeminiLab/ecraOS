@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["semantic_type"],"fn":["generate_display_impl","is_primitive_numeric_type","semantic_type_impl"],"struct":["SemanticTypeArguments"]};

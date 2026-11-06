@@ -1,9 +1,9 @@
 (function() {
-    var type_impls = Object.fromEntries([["ecraos",[]],["exarch",[]]]);
+    var type_impls = Object.fromEntries([["ecraos",[]]]);
     if (window.register_type_impls) {
         window.register_type_impls(type_impls);
     } else {
         window.pending_type_impls = type_impls;
     }
 })()
-//{"start":55,"fragment_lengths":[13,14]}
+//{"start":55,"fragment_lengths":[13]}

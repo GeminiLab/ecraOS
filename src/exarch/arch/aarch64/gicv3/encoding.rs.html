@@ -92,7 +92,7 @@
 <a href=#92 id=92 data-nosnippet>92</a>///
 <a href=#93 id=93 data-nosnippet>93</a>/// Aff0 values above fifteen require Range Selector support and are rejected in this backend.
 <a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>sgi1r(target: PhysicalCpuId, intid: u8) -&gt; <span class="prelude-ty">Result</span>&lt;u64, IpiError&gt; {
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">let </span>target = target <span class="kw">as </span>u64;
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">let </span>target = target.inner() <span class="kw">as </span>u64;
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">let </span>aff0 = target &amp; <span class="number">0xff</span>;
 <a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">if </span>aff0 &gt;= <span class="number">16 </span>|| intid &gt;= <span class="number">16 </span>{
 <a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(IpiError::InvalidTarget);
@@ -225,10 +225,10 @@
 <a href=#225 id=225 data-nosnippet>225</a>    /// Unsupported Aff0 values cannot turn into Range Selector or broadcast delivery.
 <a href=#226 id=226 data-nosnippet>226</a>    </span><span class="attr">#[test]
 <a href=#227 id=227 data-nosnippet>227</a>    </span><span class="kw">fn </span>encodes_physical_sgi_destination() {
-<a href=#228 id=228 data-nosnippet>228</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">0x12_0034_560f</span>, <span class="number">1</span>), <span class="prelude-val">Ok</span>(<span class="number">0x0012_0034_0156_8000</span>));
-<a href=#229 id=229 data-nosnippet>229</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">3</span>, <span class="number">1</span>), <span class="prelude-val">Ok</span>(<span class="number">0x0100_0008</span>));
-<a href=#230 id=230 data-nosnippet>230</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">16</span>, <span class="number">1</span>), <span class="prelude-val">Err</span>(IpiError::InvalidTarget));
-<a href=#231 id=231 data-nosnippet>231</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">0</span>, <span class="number">16</span>), <span class="prelude-val">Err</span>(IpiError::InvalidTarget));
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">0x12_0034_560f</span>.into(), <span class="number">1</span>), <span class="prelude-val">Ok</span>(<span class="number">0x0012_0034_0156_8000</span>));
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">3</span>.into(), <span class="number">1</span>), <span class="prelude-val">Ok</span>(<span class="number">0x0100_0008</span>));
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">16</span>.into(), <span class="number">1</span>), <span class="prelude-val">Err</span>(IpiError::InvalidTarget));
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="macro">assert_eq!</span>(sgi1r(<span class="number">0</span>.into(), <span class="number">16</span>), <span class="prelude-val">Err</span>(IpiError::InvalidTarget));
 <a href=#232 id=232 data-nosnippet>232</a>    }
 <a href=#233 id=233 data-nosnippet>233</a>
 <a href=#234 id=234 data-nosnippet>234</a>    <span class="doccomment">/// Separates the reserved SGI, virtual timer PPI, SPI and special INTID classes.

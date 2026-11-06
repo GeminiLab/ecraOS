@@ -273,69 +273,71 @@
 <a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>processors = processors.expect(<span class="string">"ACPI did not report processor information"</span>);
 <a href=#274 id=274 data-nosnippet>274</a>
 <a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span><span class="kw-2">mut </span>cpu_ids = Vec::with_capacity(<span class="number">1 </span>+ processors.application_processors.len());
-<a href=#276 id=276 data-nosnippet>276</a>    cpu_ids.push(processors.boot_processor.local_apic_id <span class="kw">as </span>PhysicalCpuId);
-<a href=#277 id=277 data-nosnippet>277</a>    cpu_ids.extend(
-<a href=#278 id=278 data-nosnippet>278</a>        processors
-<a href=#279 id=279 data-nosnippet>279</a>            .application_processors
-<a href=#280 id=280 data-nosnippet>280</a>            .iter()
-<a href=#281 id=281 data-nosnippet>281</a>            .map(|processor| processor.local_apic_id <span class="kw">as </span>PhysicalCpuId),
-<a href=#282 id=282 data-nosnippet>282</a>    );
-<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span>cpu_topology = CpuTopology::new(
-<a href=#284 id=284 data-nosnippet>284</a>        cpu_ids.into_boxed_slice(),
-<a href=#285 id=285 data-nosnippet>285</a>        processors.boot_processor.local_apic_id <span class="kw">as </span>PhysicalCpuId,
-<a href=#286 id=286 data-nosnippet>286</a>    );
-<a href=#287 id=287 data-nosnippet>287</a>
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">let </span>acpi::platform::interrupt::InterruptModel::Apic(apic) = interrupt_model <span class="kw">else </span>{
-<a href=#289 id=289 data-nosnippet>289</a>        <span class="macro">panic!</span>(<span class="string">"ACPI did not report an APIC interrupt model"</span>)
-<a href=#290 id=290 data-nosnippet>290</a>    };
-<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">let </span>io_apics = apic
-<a href=#292 id=292 data-nosnippet>292</a>        .io_apics
-<a href=#293 id=293 data-nosnippet>293</a>        .iter()
-<a href=#294 id=294 data-nosnippet>294</a>        .map(|ioapic| IoApicConfig {
-<a href=#295 id=295 data-nosnippet>295</a>            id: ioapic.id,
-<a href=#296 id=296 data-nosnippet>296</a>            physical_base: PhysAddr::from_usize(ioapic.address <span class="kw">as </span>usize),
-<a href=#297 id=297 data-nosnippet>297</a>            gsi_base: ioapic.global_system_interrupt_base,
-<a href=#298 id=298 data-nosnippet>298</a>            pin_count: <span class="number">0</span>,
-<a href=#299 id=299 data-nosnippet>299</a>        })
-<a href=#300 id=300 data-nosnippet>300</a>        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
-<a href=#301 id=301 data-nosnippet>301</a>        .into_boxed_slice();
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">let </span>mmio_regions: Vec&lt;MemoryRegion&gt; = io_apics
-<a href=#303 id=303 data-nosnippet>303</a>        .iter()
-<a href=#304 id=304 data-nosnippet>304</a>        .map(|ioapic| MemoryRegion {
-<a href=#305 id=305 data-nosnippet>305</a>            range: PhysAddrRange::from_start_size(ioapic.physical_base, <span class="number">4096</span>),
-<a href=#306 id=306 data-nosnippet>306</a>            flags: DEFAULT_MMIO_FLAGS,
-<a href=#307 id=307 data-nosnippet>307</a>            desc: <span class="string">"IOAPIC registers"</span>,
-<a href=#308 id=308 data-nosnippet>308</a>        })
-<a href=#309 id=309 data-nosnippet>309</a>        .collect();
-<a href=#310 id=310 data-nosnippet>310</a>    <span class="kw">let </span>overrides = apic
-<a href=#311 id=311 data-nosnippet>311</a>        .interrupt_source_overrides
-<a href=#312 id=312 data-nosnippet>312</a>        .iter()
-<a href=#313 id=313 data-nosnippet>313</a>        .map(|entry| X86IrqOverride {
-<a href=#314 id=314 data-nosnippet>314</a>            isa_source: entry.isa_source,
-<a href=#315 id=315 data-nosnippet>315</a>            gsi: entry.global_system_interrupt,
-<a href=#316 id=316 data-nosnippet>316</a>            polarity: <span class="kw">match </span>entry.polarity {
-<a href=#317 id=317 data-nosnippet>317</a>                acpi::platform::interrupt::Polarity::SameAsBus
-<a href=#318 id=318 data-nosnippet>318</a>                | acpi::platform::interrupt::Polarity::ActiveHigh =&gt; Polarity::ActiveHigh,
-<a href=#319 id=319 data-nosnippet>319</a>                acpi::platform::interrupt::Polarity::ActiveLow =&gt; Polarity::ActiveLow,
-<a href=#320 id=320 data-nosnippet>320</a>            },
-<a href=#321 id=321 data-nosnippet>321</a>            trigger: <span class="kw">match </span>entry.trigger_mode {
-<a href=#322 id=322 data-nosnippet>322</a>                acpi::platform::interrupt::TriggerMode::SameAsBus
-<a href=#323 id=323 data-nosnippet>323</a>                | acpi::platform::interrupt::TriggerMode::Edge =&gt; TriggerMode::Edge,
-<a href=#324 id=324 data-nosnippet>324</a>                acpi::platform::interrupt::TriggerMode::Level =&gt; TriggerMode::Level,
-<a href=#325 id=325 data-nosnippet>325</a>            },
-<a href=#326 id=326 data-nosnippet>326</a>        })
-<a href=#327 id=327 data-nosnippet>327</a>        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
-<a href=#328 id=328 data-nosnippet>328</a>        .into_boxed_slice();
-<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">let </span>controller = X86ExternalIrqConfig {
-<a href=#330 id=330 data-nosnippet>330</a>        io_apics,
-<a href=#331 id=331 data-nosnippet>331</a>        overrides,
-<a href=#332 id=332 data-nosnippet>332</a>        bsp_apic_id: processors.boot_processor.local_apic_id,
-<a href=#333 id=333 data-nosnippet>333</a>    };
-<a href=#334 id=334 data-nosnippet>334</a>
-<a href=#335 id=335 data-nosnippet>335</a>    PlatformDescription::new(
-<a href=#336 id=336 data-nosnippet>336</a>        cpu_topology,
-<a href=#337 id=337 data-nosnippet>337</a>        PlatformInterruptController(controller),
-<a href=#338 id=338 data-nosnippet>338</a>        mmio_regions,
-<a href=#339 id=339 data-nosnippet>339</a>    )
-<a href=#340 id=340 data-nosnippet>340</a>}
+<a href=#276 id=276 data-nosnippet>276</a>    cpu_ids.push(PhysicalCpuId::new(
+<a href=#277 id=277 data-nosnippet>277</a>        processors.boot_processor.local_apic_id <span class="kw">as _</span>,
+<a href=#278 id=278 data-nosnippet>278</a>    ));
+<a href=#279 id=279 data-nosnippet>279</a>    cpu_ids.extend(
+<a href=#280 id=280 data-nosnippet>280</a>        processors
+<a href=#281 id=281 data-nosnippet>281</a>            .application_processors
+<a href=#282 id=282 data-nosnippet>282</a>            .iter()
+<a href=#283 id=283 data-nosnippet>283</a>            .map(|processor| PhysicalCpuId::new(processor.local_apic_id <span class="kw">as _</span>)),
+<a href=#284 id=284 data-nosnippet>284</a>    );
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>cpu_topology = CpuTopology::new(
+<a href=#286 id=286 data-nosnippet>286</a>        cpu_ids.into_boxed_slice(),
+<a href=#287 id=287 data-nosnippet>287</a>        PhysicalCpuId::new(processors.boot_processor.local_apic_id <span class="kw">as _</span>),
+<a href=#288 id=288 data-nosnippet>288</a>    );
+<a href=#289 id=289 data-nosnippet>289</a>
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="kw">let </span>acpi::platform::interrupt::InterruptModel::Apic(apic) = interrupt_model <span class="kw">else </span>{
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="macro">panic!</span>(<span class="string">"ACPI did not report an APIC interrupt model"</span>)
+<a href=#292 id=292 data-nosnippet>292</a>    };
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="kw">let </span>io_apics = apic
+<a href=#294 id=294 data-nosnippet>294</a>        .io_apics
+<a href=#295 id=295 data-nosnippet>295</a>        .iter()
+<a href=#296 id=296 data-nosnippet>296</a>        .map(|ioapic| IoApicConfig {
+<a href=#297 id=297 data-nosnippet>297</a>            id: ioapic.id,
+<a href=#298 id=298 data-nosnippet>298</a>            physical_base: PhysAddr::from_usize(ioapic.address <span class="kw">as </span>usize),
+<a href=#299 id=299 data-nosnippet>299</a>            gsi_base: ioapic.global_system_interrupt_base,
+<a href=#300 id=300 data-nosnippet>300</a>            pin_count: <span class="number">0</span>,
+<a href=#301 id=301 data-nosnippet>301</a>        })
+<a href=#302 id=302 data-nosnippet>302</a>        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+<a href=#303 id=303 data-nosnippet>303</a>        .into_boxed_slice();
+<a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">let </span>mmio_regions: Vec&lt;MemoryRegion&gt; = io_apics
+<a href=#305 id=305 data-nosnippet>305</a>        .iter()
+<a href=#306 id=306 data-nosnippet>306</a>        .map(|ioapic| MemoryRegion {
+<a href=#307 id=307 data-nosnippet>307</a>            range: PhysAddrRange::from_start_size(ioapic.physical_base, <span class="number">4096</span>),
+<a href=#308 id=308 data-nosnippet>308</a>            flags: DEFAULT_MMIO_FLAGS,
+<a href=#309 id=309 data-nosnippet>309</a>            desc: <span class="string">"IOAPIC registers"</span>,
+<a href=#310 id=310 data-nosnippet>310</a>        })
+<a href=#311 id=311 data-nosnippet>311</a>        .collect();
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">let </span>overrides = apic
+<a href=#313 id=313 data-nosnippet>313</a>        .interrupt_source_overrides
+<a href=#314 id=314 data-nosnippet>314</a>        .iter()
+<a href=#315 id=315 data-nosnippet>315</a>        .map(|entry| X86IrqOverride {
+<a href=#316 id=316 data-nosnippet>316</a>            isa_source: entry.isa_source,
+<a href=#317 id=317 data-nosnippet>317</a>            gsi: entry.global_system_interrupt,
+<a href=#318 id=318 data-nosnippet>318</a>            polarity: <span class="kw">match </span>entry.polarity {
+<a href=#319 id=319 data-nosnippet>319</a>                acpi::platform::interrupt::Polarity::SameAsBus
+<a href=#320 id=320 data-nosnippet>320</a>                | acpi::platform::interrupt::Polarity::ActiveHigh =&gt; Polarity::ActiveHigh,
+<a href=#321 id=321 data-nosnippet>321</a>                acpi::platform::interrupt::Polarity::ActiveLow =&gt; Polarity::ActiveLow,
+<a href=#322 id=322 data-nosnippet>322</a>            },
+<a href=#323 id=323 data-nosnippet>323</a>            trigger: <span class="kw">match </span>entry.trigger_mode {
+<a href=#324 id=324 data-nosnippet>324</a>                acpi::platform::interrupt::TriggerMode::SameAsBus
+<a href=#325 id=325 data-nosnippet>325</a>                | acpi::platform::interrupt::TriggerMode::Edge =&gt; TriggerMode::Edge,
+<a href=#326 id=326 data-nosnippet>326</a>                acpi::platform::interrupt::TriggerMode::Level =&gt; TriggerMode::Level,
+<a href=#327 id=327 data-nosnippet>327</a>            },
+<a href=#328 id=328 data-nosnippet>328</a>        })
+<a href=#329 id=329 data-nosnippet>329</a>        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+<a href=#330 id=330 data-nosnippet>330</a>        .into_boxed_slice();
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>controller = X86ExternalIrqConfig {
+<a href=#332 id=332 data-nosnippet>332</a>        io_apics,
+<a href=#333 id=333 data-nosnippet>333</a>        overrides,
+<a href=#334 id=334 data-nosnippet>334</a>        bsp_apic_id: processors.boot_processor.local_apic_id,
+<a href=#335 id=335 data-nosnippet>335</a>    };
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a>    PlatformDescription::new(
+<a href=#338 id=338 data-nosnippet>338</a>        cpu_topology,
+<a href=#339 id=339 data-nosnippet>339</a>        PlatformInterruptController(controller),
+<a href=#340 id=340 data-nosnippet>340</a>        mmio_regions,
+<a href=#341 id=341 data-nosnippet>341</a>    )
+<a href=#342 id=342 data-nosnippet>342</a>}
 </code></pre></div></section></main></body></html>

@@ -154,21 +154,45 @@
 <a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">use </span>alloc::vec;
 <a href=#155 id=155 data-nosnippet>155</a>
 <a href=#156 id=156 data-nosnippet>156</a>    <span class="kw">use </span><span class="kw">super</span>::CpuTopology;
-<a href=#157 id=157 data-nosnippet>157</a>
-<a href=#158 id=158 data-nosnippet>158</a>    <span class="doccomment">/// Preserves the discovered CPU identifiers and bootstrap identifier.
-<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="attr">#[test]
-<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">fn </span>cpu_topology_preserves_discovery_result() {
-<a href=#161 id=161 data-nosnippet>161</a>        <span class="kw">let </span>topology = CpuTopology::new(<span class="macro">vec!</span>[<span class="number">4</span>, <span class="number">7</span>, <span class="number">9</span>].into_boxed_slice(), <span class="number">7</span>);
-<a href=#162 id=162 data-nosnippet>162</a>
-<a href=#163 id=163 data-nosnippet>163</a>        <span class="macro">assert_eq!</span>(topology.cpu_ids(), <span class="kw-2">&amp;</span>[<span class="number">4</span>, <span class="number">7</span>, <span class="number">9</span>]);
-<a href=#164 id=164 data-nosnippet>164</a>        <span class="macro">assert_eq!</span>(topology.bsp_id(), <span class="number">7</span>);
-<a href=#165 id=165 data-nosnippet>165</a>    }
-<a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="doccomment">/// Rejects duplicate physical CPU identifiers.
-<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="attr">#[test]
-<a href=#169 id=169 data-nosnippet>169</a>    #[should_panic(expected = <span class="string">"duplicate CPU identifier"</span>)]
-<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">fn </span>cpu_topology_rejects_duplicate_identifiers() {
-<a href=#171 id=171 data-nosnippet>171</a>        <span class="kw">let _ </span>= CpuTopology::new(<span class="macro">vec!</span>[<span class="number">4</span>, <span class="number">7</span>, <span class="number">7</span>].into_boxed_slice(), <span class="number">4</span>);
-<a href=#172 id=172 data-nosnippet>172</a>    }
-<a href=#173 id=173 data-nosnippet>173</a>}
+<a href=#157 id=157 data-nosnippet>157</a>    <span class="kw">use </span><span class="kw">crate</span>::power::PhysicalCpuId;
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a>    <span class="doccomment">/// Preserves the discovered CPU identifiers and bootstrap identifier.
+<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="attr">#[test]
+<a href=#161 id=161 data-nosnippet>161</a>    </span><span class="kw">fn </span>cpu_topology_preserves_discovery_result() {
+<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">let </span>topology = CpuTopology::new(
+<a href=#163 id=163 data-nosnippet>163</a>            <span class="macro">vec!</span>[
+<a href=#164 id=164 data-nosnippet>164</a>                PhysicalCpuId::new(<span class="number">4</span>),
+<a href=#165 id=165 data-nosnippet>165</a>                PhysicalCpuId::new(<span class="number">7</span>),
+<a href=#166 id=166 data-nosnippet>166</a>                PhysicalCpuId::new(<span class="number">9</span>),
+<a href=#167 id=167 data-nosnippet>167</a>            ]
+<a href=#168 id=168 data-nosnippet>168</a>            .into_boxed_slice(),
+<a href=#169 id=169 data-nosnippet>169</a>            PhysicalCpuId::new(<span class="number">7</span>),
+<a href=#170 id=170 data-nosnippet>170</a>        );
+<a href=#171 id=171 data-nosnippet>171</a>
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="macro">assert_eq!</span>(
+<a href=#173 id=173 data-nosnippet>173</a>            topology.cpu_ids(),
+<a href=#174 id=174 data-nosnippet>174</a>            <span class="kw-2">&amp;</span>[
+<a href=#175 id=175 data-nosnippet>175</a>                PhysicalCpuId::new(<span class="number">4</span>),
+<a href=#176 id=176 data-nosnippet>176</a>                PhysicalCpuId::new(<span class="number">7</span>),
+<a href=#177 id=177 data-nosnippet>177</a>                PhysicalCpuId::new(<span class="number">9</span>)
+<a href=#178 id=178 data-nosnippet>178</a>            ]
+<a href=#179 id=179 data-nosnippet>179</a>        );
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="macro">assert_eq!</span>(topology.bsp_id(), PhysicalCpuId::new(<span class="number">7</span>));
+<a href=#181 id=181 data-nosnippet>181</a>    }
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a>    <span class="doccomment">/// Rejects duplicate physical CPU identifiers.
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="attr">#[test]
+<a href=#185 id=185 data-nosnippet>185</a>    #[should_panic(expected = <span class="string">"duplicate CPU identifier"</span>)]
+<a href=#186 id=186 data-nosnippet>186</a>    </span><span class="kw">fn </span>cpu_topology_rejects_duplicate_identifiers() {
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">let _ </span>= CpuTopology::new(
+<a href=#188 id=188 data-nosnippet>188</a>            <span class="macro">vec!</span>[
+<a href=#189 id=189 data-nosnippet>189</a>                PhysicalCpuId::new(<span class="number">4</span>),
+<a href=#190 id=190 data-nosnippet>190</a>                PhysicalCpuId::new(<span class="number">7</span>),
+<a href=#191 id=191 data-nosnippet>191</a>                PhysicalCpuId::new(<span class="number">7</span>),
+<a href=#192 id=192 data-nosnippet>192</a>            ]
+<a href=#193 id=193 data-nosnippet>193</a>            .into_boxed_slice(),
+<a href=#194 id=194 data-nosnippet>194</a>            PhysicalCpuId::new(<span class="number">4</span>),
+<a href=#195 id=195 data-nosnippet>195</a>        );
+<a href=#196 id=196 data-nosnippet>196</a>    }
+<a href=#197 id=197 data-nosnippet>197</a>}
 </code></pre></div></section></main></body></html>

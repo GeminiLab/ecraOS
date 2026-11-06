@@ -121,9 +121,9 @@
 <a href=#121 id=121 data-nosnippet>121</a>    <span class="comment">// Start the AP by PSCI.
 <a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">let </span>result = invoke_psci(
 <a href=#123 id=123 data-nosnippet>123</a>        PSCI_CPU_ON,
-<a href=#124 id=124 data-nosnippet>124</a>        phys_id <span class="kw">as </span>u64,
-<a href=#125 id=125 data-nosnippet>125</a>        trampoline_pa.as_usize() <span class="kw">as </span>u64,
-<a href=#126 id=126 data-nosnippet>126</a>        args_pa.as_usize() <span class="kw">as </span>u64,
+<a href=#124 id=124 data-nosnippet>124</a>        phys_id.inner() <span class="kw">as _</span>,
+<a href=#125 id=125 data-nosnippet>125</a>        trampoline_pa.as_usize() <span class="kw">as _</span>,
+<a href=#126 id=126 data-nosnippet>126</a>        args_pa.as_usize() <span class="kw">as _</span>,
 <a href=#127 id=127 data-nosnippet>127</a>    );
 <a href=#128 id=128 data-nosnippet>128</a>
 <a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">match </span>result {
