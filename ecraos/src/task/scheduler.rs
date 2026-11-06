@@ -13,6 +13,8 @@ use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::VirtAddrRange;
 
+use crate::mp::LogicalCpuId;
+
 use super::{
     DomainError, DomainPolicy, DomainRef, JoinHandle, PhysicalQueue, QueueState, Task, TaskId,
     TaskRef, TaskState, create_domain,
@@ -160,16 +162,16 @@ fn init_run_queues(cpu_count: usize) {
 }
 
 /// Returns one synchronized queue for a logical CPU.
-fn run_queue(cpu_id: usize) -> &'static SpinNoIrq<PhysicalQueue<TaskRef>> {
+fn run_queue(cpu_id: LogicalCpuId) -> &'static SpinNoIrq<PhysicalQueue<TaskRef>> {
     RUN_QUEUES
         .get()
         .expect("run queues must be initialized")
-        .get(cpu_id)
+        .get(cpu_id.inner())
         .expect("invalid run queue CPU")
 }
 
 /// Returns the queue CPU selected by one task's placement policy.
-fn placement_cpu(task: &Task, preferred_cpu: usize) -> usize {
+fn placement_cpu(task: &Task, preferred_cpu: LogicalCpuId) -> LogicalCpuId {
     if let Some(domain) = task.domain() {
         let members = domain.cpu_snapshot();
         if members.contains(preferred_cpu) {
@@ -188,7 +190,7 @@ fn placement_cpu(task: &Task, preferred_cpu: usize) -> usize {
 /// Enqueues one task on its placement-selected queue.
 ///
 /// Notification follows complete queue publication and release of the local lock scope.
-fn enqueue_task(task: Arc<Task>, preferred_cpu: usize) {
+fn enqueue_task(task: Arc<Task>, preferred_cpu: LogicalCpuId) {
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
     // lifecycle. All queue/domain locks and IRQ-saving guards are released before IPI delivery.
     // A future lock-free queue/membership implementation may replace these structures after a
@@ -237,9 +239,11 @@ type Next = Arc<Task>;
 ///
 /// Exhaustion is treated as a fatal kernel invariant because identifiers must never repeat.
 fn allocate_task_id() -> TaskId {
-    NEXT_TASK_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .expect("kernel task identifier space exhausted")
+    TaskId::new(
+        NEXT_TASK_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("kernel task identifier space exhausted"),
+    )
 }
 
 /// Clones an owned `Arc` token stored as a raw per-CPU pointer.
@@ -309,7 +313,7 @@ pub(super) fn current_task_id() -> Option<TaskId> {
 }
 
 /// Returns the logical CPU executing the current task.
-pub(super) fn current_cpu_id() -> usize {
+pub(super) fn current_cpu_id() -> LogicalCpuId {
     crate::mp::current_cpu_id()
 }
 
@@ -333,7 +337,7 @@ unsafe fn idle_task() -> Arc<Task> {
 /// Selects the idle task and validates its lifecycle transition.
 ///
 /// The local run-queue lock is held by the caller and local interrupts remain disabled.
-unsafe fn select_idle(cpu_id: usize) -> Next {
+unsafe fn select_idle(cpu_id: LogicalCpuId) -> Next {
     let idle = unsafe { idle_task() };
     idle.start_running(cpu_id)
         .expect("idle task could not become Running");
@@ -344,7 +348,7 @@ unsafe fn select_idle(cpu_id: usize) -> Next {
 ///
 /// The snapshot is intentionally released before any Queue lock. Each source is revalidated
 /// while locked because a concurrent local domain switch may have made the snapshot stale.
-fn idle_pull(domain: &DomainRef, cpu_id: usize) -> Option<TaskRef> {
+fn idle_pull(domain: &DomainRef, cpu_id: LogicalCpuId) -> Option<TaskRef> {
     let sources = domain
         .cpu_snapshot()
         .snapshot()
@@ -389,7 +393,7 @@ fn idle_pull(domain: &DomainRef, cpu_id: usize) -> Option<TaskRef> {
 ///
 /// The outgoing task has already left `Running`. Local FIFO selection precedes one bounded idle
 /// pull, and all Queue locks are released before the caller can switch architecture contexts.
-unsafe fn select_next(domain: &DomainRef, cpu_id: usize) -> Next {
+unsafe fn select_next(domain: &DomainRef, cpu_id: LogicalCpuId) -> Next {
     let local = {
         // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
         // lifecycle. The domain reference is stable and no metadata lock is retained here. A
@@ -462,7 +466,7 @@ pub enum TargetError {
 ///
 /// Idle is a per-CPU task outside the normal queue. Every other target must be removed exactly once
 /// from the current CPU's queue before its state changes to Running.
-fn claim_target(target: Arc<Task>, cpu_id: usize) -> Result<Arc<Task>, TargetError> {
+fn claim_target(target: Arc<Task>, cpu_id: LogicalCpuId) -> Result<Arc<Task>, TargetError> {
     let current_id = unsafe { current_task() }.id();
     if target.id() == current_id {
         return Err(TargetError::SelfTarget);
@@ -836,7 +840,7 @@ pub(super) fn spawn_in_domain(
 }
 
 /// Publishes suspended domain tasks to a newly active CPU.
-pub(super) fn drain_suspended(domain: &super::SchedulingDomain, cpu_id: usize) {
+pub(super) fn drain_suspended(domain: &super::SchedulingDomain, cpu_id: LogicalCpuId) {
     if !domain.cpu_snapshot().contains(cpu_id) {
         return;
     }
@@ -882,15 +886,15 @@ pub(super) fn register_timed_wait(
     task: TaskRef,
     generation: u64,
     deadline: exarch::time::TimeValue,
-    cpu_id: usize,
+    cpu_id: LogicalCpuId,
 ) -> Result<(), super::TaskError> {
-    if cpu_id >= crate::mp::cpu_count() {
+    if cpu_id.inner() >= crate::mp::cpu_count() {
         return Err(super::TaskError::InvalidTarget);
     }
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task lifecycle
     // -> timer ownership. The timer lock is released before any wake publication or switch. A
     // future lock-free timer structure may replace this lock after a memory-ordering proof.
-    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id) }.lock();
+    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.inner()) }.lock();
     state
         .tasks
         .try_reserve(1)
@@ -904,14 +908,14 @@ pub(super) fn register_timed_wait(
 }
 
 /// Cancels one timer-owned wait entry and releases its scheduler ownership.
-pub(super) fn cancel_timed_wait(task: &Task, generation: u64, cpu_id: usize) {
-    if cpu_id >= crate::mp::cpu_count() {
+pub(super) fn cancel_timed_wait(task: &Task, generation: u64, cpu_id: LogicalCpuId) {
+    if cpu_id.inner() >= crate::mp::cpu_count() {
         return;
     }
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task lifecycle
     // -> timer ownership. The timer lock is released before any scheduler wake or switch. A
     // future lock-free timer structure may replace this lock after its memory-ordering proof.
-    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id) }.lock();
+    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.inner()) }.lock();
     state.timers.cancel(task.id(), generation);
     if let Some(index) = state
         .tasks
@@ -1051,7 +1055,7 @@ pub(super) fn block_current_registered() -> Result<(), super::TaskError> {
 fn interrupt_exit_permitted(
     policy: DomainPolicy,
     state: TaskState,
-    cpu: usize,
+    cpu: LogicalCpuId,
     allowed: bool,
 ) -> bool {
     allowed
@@ -1436,7 +1440,7 @@ fn idle_body() {
 mod interrupt_exit_tests {
     use core::time::Duration;
 
-    use crate::task::TaskState;
+    use crate::{mp::LogicalCpuId, task::TaskState};
 
     use super::{DomainPolicy, initial_entry_irq_enabled, interrupt_exit_permitted};
 
@@ -1455,18 +1459,30 @@ mod interrupt_exit_tests {
     /// A software interrupt must preserve the same domain policy as a timer interrupt.
     #[test]
     fn respects_domain_policy_and_guard() {
-        let running = TaskState::Running { cpu_id: 1 };
+        let running = TaskState::Running {
+            cpu_id: LogicalCpuId::new(1),
+        };
         let preemptive = DomainPolicy::Preemptive {
             time_slice: Duration::from_millis(10),
         };
         assert!(!interrupt_exit_permitted(
             DomainPolicy::Cooperative,
             running,
-            1,
+            LogicalCpuId::new(1),
             true
         ));
-        assert!(!interrupt_exit_permitted(preemptive, running, 1, false));
-        assert!(interrupt_exit_permitted(preemptive, running, 1, true));
+        assert!(!interrupt_exit_permitted(
+            preemptive,
+            running,
+            LogicalCpuId::new(1),
+            false
+        ));
+        assert!(interrupt_exit_permitted(
+            preemptive,
+            running,
+            LogicalCpuId::new(1),
+            true
+        ));
     }
 
     /// Defers requests during the completed-task exit window.
@@ -1481,9 +1497,16 @@ mod interrupt_exit_tests {
             TaskState::Exited,
             TaskState::Blocked,
             TaskState::Runnable,
-            TaskState::Running { cpu_id: 2 },
+            TaskState::Running {
+                cpu_id: LogicalCpuId::new(2),
+            },
         ] {
-            assert!(!interrupt_exit_permitted(policy, state, 1, true));
+            assert!(!interrupt_exit_permitted(
+                policy,
+                state,
+                LogicalCpuId::new(1),
+                true
+            ));
         }
     }
 }

@@ -662,7 +662,7 @@ impl Backend for KernelBackend {
     ///
     /// Discovery bounds and pre-initialization calls are checked without panicking.
     fn mailbox(&self, target: LogicalCpuId) -> Option<&Mailbox> {
-        MAILBOXES.get()?.get(target)
+        MAILBOXES.get()?.get(target.inner())
     }
     /// Returns the caller's stable logical identifier.
     ///
@@ -717,7 +717,7 @@ impl Backend for KernelBackend {
     ///
     /// No hardware IPI is submitted and no subsystem lock is acquired by reason dispatch.
     fn execute(&self, target: LogicalCpuId) {
-        drain_mailbox(&MAILBOXES[target]);
+        drain_mailbox(&MAILBOXES[target.inner()]);
     }
 }
 
@@ -764,7 +764,7 @@ fn drain_mailbox(mailbox: &Mailbox) {
 pub(crate) fn handle_ipi() {
     if let Some(mailbox) = MAILBOXES
         .get()
-        .and_then(|all| all.get(mp::current_cpu_id()))
+        .and_then(|all| all.get(mp::current_cpu_id().inner()))
     {
         drain_mailbox(mailbox);
     }
@@ -819,7 +819,7 @@ pub(crate) fn test_roundtrip(
     call_many(&[target], IpiReason::Test, timeout, |value| {
         generation = value;
         if combined {
-            MAILBOXES[target].publish(IpiReason::Reschedule);
+            MAILBOXES[target.inner()].publish(IpiReason::Reschedule);
         }
     })?;
     Ok(generation)
@@ -830,7 +830,7 @@ pub(crate) fn test_roundtrip(
 /// Foundation applications get counters rather than private mailbox references.
 #[cfg(feature = "foundation-test")]
 pub(crate) fn test_counters(target: LogicalCpuId) -> (u64, u64, u64) {
-    let mailbox = &MAILBOXES[target];
+    let mailbox = &MAILBOXES[target.inner()];
     (
         mailbox.test_count.load(Ordering::Acquire),
         mailbox.reschedule_count.load(Ordering::Acquire),
@@ -843,7 +843,10 @@ pub(crate) fn test_counters(target: LogicalCpuId) -> (u64, u64, u64) {
 /// Foundation tests inspect production acknowledgement storage rather than maintaining counters.
 #[cfg(feature = "foundation-test")]
 pub(crate) fn tlb_generation(target: LogicalCpuId) -> u64 {
-    MAILBOXES[target].tlb.acknowledged.load(Ordering::Acquire)
+    MAILBOXES[target.inner()]
+        .tlb
+        .acknowledged
+        .load(Ordering::Acquire)
 }
 
 /// Suppresses or clears one synchronous acknowledgement for deterministic fault injection.
@@ -852,7 +855,7 @@ pub(crate) fn tlb_generation(target: LogicalCpuId) -> u64 {
 #[cfg(feature = "foundation-test")]
 pub(crate) fn suppress_next_ack(target: LogicalCpuId, reason: IpiReason, suppress: bool) {
     assert!(reason != IpiReason::Reschedule);
-    let mailbox = &MAILBOXES[target];
+    let mailbox = &MAILBOXES[target.inner()];
     if suppress {
         mailbox
             .suppress_ack
@@ -876,9 +879,14 @@ mod tests {
         time::Duration,
     };
 
-    use crate::mp::PhysicalCpuId;
+    use crate::mp::{LogicalCpuId, PhysicalCpuId};
 
     use super::{Backend, Failure, IpiError, IpiReason, Mailbox, call_many_inner, notify_inner};
+
+    /// Creates a logical identifier for protocol test cases.
+    fn cpu(id: usize) -> LogicalCpuId {
+        LogicalCpuId::new(id)
+    }
 
     /// A deterministic clock and physical-delivery test boundary.
     ///
@@ -945,27 +953,28 @@ mod tests {
         /// Returns the real mailbox for a valid logical target.
         ///
         /// Out-of-range identifiers remain invalid.
-        fn mailbox(&self, target: usize) -> Option<&Mailbox> {
-            self.mailboxes.get(target)
+        fn mailbox(&self, target: LogicalCpuId) -> Option<&Mailbox> {
+            self.mailboxes.get(target.inner())
         }
         /// Returns the executing logical CPU.
         ///
         /// Self-target tests must avoid the send boundary entirely.
-        fn current_cpu(&self) -> usize {
-            0
+        fn current_cpu(&self) -> LogicalCpuId {
+            cpu(0)
         }
         /// Validates a logical target and resolves its physical destination.
         ///
         /// Physical IDs deliberately differ from logical indices.
-        fn validate(&self, target: usize) -> Result<PhysicalCpuId, Failure> {
+        fn validate(&self, target: LogicalCpuId) -> Result<PhysicalCpuId, Failure> {
+            let target_index = target.inner();
             if let Some((id, failure)) = self.invalid.get()
-                && id == target
+                && id == target_index
             {
                 return Err(failure);
             }
             self.mailboxes
-                .get(target)
-                .map(|_| PhysicalCpuId::new(target + 10))
+                .get(target_index)
+                .map(|_| PhysicalCpuId::new(target_index + 10))
                 .ok_or(Failure::InvalidCpu)
         }
         /// Allocates one globally unique generation.
@@ -977,12 +986,13 @@ mod tests {
         /// Submits a physical notification or rejects it before submission.
         ///
         /// Dispatch is delayed until the waiting phase to expose publication ordering bugs.
-        fn send(&self, target: usize, physical: PhysicalCpuId) -> Result<(), Failure> {
-            assert_eq!(physical.inner(), target + 10);
-            self.sent.borrow_mut().push(target);
-            if self.failed_send.get() == Some(target) {
+        fn send(&self, target: LogicalCpuId, physical: PhysicalCpuId) -> Result<(), Failure> {
+            let target_index = target.inner();
+            assert_eq!(physical.inner(), target_index + 10);
+            self.sent.borrow_mut().push(target_index);
+            if self.failed_send.get() == Some(target_index) {
                 if self.replace_failed.replace(false) {
-                    self.mailboxes[target].drain(|_, _| true);
+                    self.mailboxes[target_index].drain(|_, _| true);
                     self.failed_send.set(None);
                     notify_inner(self, target, IpiReason::Reschedule).unwrap();
                 }
@@ -1010,8 +1020,8 @@ mod tests {
         /// Executes self-target reasons without hardware submission.
         ///
         /// This uses the same drain path as remote interrupt dispatch.
-        fn execute(&self, target: usize) {
-            self.mailboxes[target].drain(|_, _| true);
+        fn execute(&self, target: LogicalCpuId) {
+            self.mailboxes[target.inner()].drain(|_, _| true);
         }
     }
 
@@ -1086,7 +1096,7 @@ mod tests {
         let publications = Cell::new(0);
         call_many_inner(
             &fake,
-            &[0, 1, 2],
+            &[cpu(0), cpu(1), cpu(2)],
             IpiReason::Test,
             Duration::from_millis(10),
             |generation| {
@@ -1113,7 +1123,7 @@ mod tests {
             assert!(
                 call_many_inner(
                     &fake,
-                    &[1, 2],
+                    &[cpu(1), cpu(2)],
                     IpiReason::Test,
                     Duration::from_millis(10),
                     |_| panic!("published invalid set")
@@ -1128,7 +1138,7 @@ mod tests {
         assert!(matches!(
             call_many_inner(
                 &fake,
-                &[1, 2],
+                &[cpu(1), cpu(2)],
                 IpiReason::Test,
                 Duration::from_millis(10),
                 |_| panic!("published busy set")
@@ -1148,7 +1158,7 @@ mod tests {
         fake.missing.set(Some(2));
         let error = call_many_inner(
             &fake,
-            &[1, 2],
+            &[cpu(1), cpu(2)],
             IpiReason::Test,
             Duration::from_millis(3),
             |_| {},
@@ -1157,7 +1167,7 @@ mod tests {
         let IpiError::Timeout(details) = error else {
             panic!("wrong failure: {error:?}")
         };
-        assert_eq!(details.logical_cpu, 2);
+        assert_eq!(details.logical_cpu, cpu(2));
         assert_eq!(details.physical_cpu, Some(PhysicalCpuId::new(12)));
         assert_eq!(details.generation, Some(1));
         assert!(details.observed_at >= details.deadline);
@@ -1168,7 +1178,7 @@ mod tests {
         fake.expected_sends.set(1);
         call_many_inner(
             &fake,
-            &[2],
+            &[cpu(2)],
             IpiReason::Test,
             Duration::from_millis(30),
             |generation| assert_eq!(generation, 2),
@@ -1187,7 +1197,7 @@ mod tests {
         let publication = Cell::new(0);
         call_many_inner(
             &fake,
-            &[1, 2],
+            &[cpu(1), cpu(2)],
             IpiReason::TlbShootdown,
             Duration::from_millis(10),
             |generation| publication.set(generation),
@@ -1200,7 +1210,7 @@ mod tests {
         fake.missing.set(Some(2));
         let error = call_many_inner(
             &fake,
-            &[1, 2],
+            &[cpu(1), cpu(2)],
             IpiReason::TlbShootdown,
             Duration::from_millis(12),
             |generation| assert_eq!(generation, 2),
@@ -1210,7 +1220,7 @@ mod tests {
             panic!("wrong failure: {error:?}")
         };
         assert_eq!(details.operation, IpiReason::TlbShootdown);
-        assert_eq!(details.logical_cpu, 2);
+        assert_eq!(details.logical_cpu, cpu(2));
         assert_eq!(details.physical_cpu, Some(PhysicalCpuId::new(12)));
         assert_eq!(details.generation, Some(2));
         assert_eq!(details.acknowledged, 1);
@@ -1221,7 +1231,7 @@ mod tests {
         fake.missing.set(None);
         call_many_inner(
             &fake,
-            &[1, 2],
+            &[cpu(1), cpu(2)],
             IpiReason::TlbShootdown,
             Duration::from_millis(100),
             |generation| assert_eq!(generation, 3),
@@ -1239,11 +1249,11 @@ mod tests {
         let fake = Fake::new();
         fake.failed_send.set(Some(1));
         assert!(matches!(
-            notify_inner(&fake, 1, IpiReason::Reschedule),
+            notify_inner(&fake, cpu(1), IpiReason::Reschedule),
             Err(IpiError::Transport(_))
         ));
         fake.failed_send.set(None);
-        notify_inner(&fake, 1, IpiReason::Reschedule).unwrap();
+        notify_inner(&fake, cpu(1), IpiReason::Reschedule).unwrap();
         assert_eq!(*fake.sent.borrow(), vec![1, 1]);
         fake.sent.borrow_mut().clear();
         fake.expected_sends.set(1);
@@ -1251,7 +1261,7 @@ mod tests {
         assert!(
             call_many_inner(
                 &fake,
-                &[1],
+                &[cpu(1)],
                 IpiReason::Test,
                 Duration::from_millis(10),
                 |_| {}
@@ -1264,7 +1274,7 @@ mod tests {
         fake.failed_send.set(None);
         call_many_inner(
             &fake,
-            &[1],
+            &[cpu(1)],
             IpiReason::Test,
             Duration::from_millis(20),
             |_| {},
@@ -1311,7 +1321,7 @@ mod tests {
         fake.failed_send.set(Some(1));
         fake.replace_failed.set(true);
         assert!(matches!(
-            notify_inner(&fake, 1, IpiReason::Reschedule),
+            notify_inner(&fake, cpu(1), IpiReason::Reschedule),
             Err(IpiError::Transport(_))
         ));
         fake.mailboxes[1].drain(|_, _| true);

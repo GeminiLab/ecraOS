@@ -10,6 +10,7 @@ use core::{
 };
 
 use exspin::SpinNoIrq;
+use semantic_types::semantic_type;
 
 use super::TaskError;
 use super::wait_queue::{TaskWaitQueue, TaskWaitQueueGuard, validate_join};
@@ -17,11 +18,14 @@ use super::{
     domain::{DomainId, DomainRef, SchedulingDomain},
     stack::KernelStack,
 };
+use crate::mp::LogicalCpuId;
 
 /// A stable kernel task identifier.
 ///
 /// Identifiers remain associated with a task for its entire lifetime.
-pub type TaskId = u64;
+#[semantic_type(display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskId(u64);
 
 /// A shared reference to one task.
 pub type TaskRef = Arc<Task>;
@@ -42,7 +46,7 @@ pub enum TaskState {
     /// A task executing on exactly one CPU.
     Running {
         /// The logical identifier of the CPU executing the task.
-        cpu_id: usize,
+        cpu_id: LogicalCpuId,
     },
     /// A task waiting for its current wait generation to be woken.
     Blocked,
@@ -96,7 +100,7 @@ pub(super) enum TaskPlacement {
     /// Allows publication on the scheduler-selected CPU.
     AnyCpu,
     /// Restricts publication and execution to one logical CPU.
-    Pinned(usize),
+    Pinned(LogicalCpuId),
 }
 
 impl TaskState {
@@ -120,7 +124,7 @@ impl TaskState {
     /// Starts a runnable task on one CPU.
     ///
     /// A running task rejects all additional starts so it cannot execute on two CPUs.
-    pub fn start_running(&mut self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub fn start_running(&mut self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         match self {
             Self::Runnable => {
                 *self = Self::Running { cpu_id };
@@ -137,7 +141,7 @@ impl TaskState {
     /// Blocks a task on its owning CPU.
     ///
     /// Only the CPU recorded by the running state may relinquish execution ownership.
-    pub fn block(&mut self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub fn block(&mut self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         match self {
             Self::Running { cpu_id: owner } if *owner == cpu_id => {
                 *self = Self::Blocked;
@@ -156,7 +160,7 @@ impl TaskState {
     /// Exits a task on its owning CPU.
     ///
     /// Exited is terminal and only the CPU currently executing the task may enter it.
-    pub fn exit(&mut self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub fn exit(&mut self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         match self {
             Self::Running { cpu_id: owner } if *owner == cpu_id => {
                 *self = Self::Exited;
@@ -399,7 +403,7 @@ impl Task {
     ///
     /// The supplied stack is already active and its context storage is populated by the first
     /// scheduler switch. No trampoline body or fresh context frame is installed.
-    pub(super) fn adopt_current(id: TaskId, stack: KernelStack, cpu_id: usize) -> Arc<Self> {
+    pub(super) fn adopt_current(id: TaskId, stack: KernelStack, cpu_id: LogicalCpuId) -> Arc<Self> {
         Arc::new(Self {
             id,
             state: SpinNoIrq::new(TaskState::Running { cpu_id }),
@@ -437,14 +441,14 @@ impl Task {
 
     /// Returns the stable scheduling-domain identifier.
     pub fn domain_id(&self) -> DomainId {
-        self.domain_id.load(Ordering::Acquire)
+        DomainId::new(self.domain_id.load(Ordering::Acquire))
     }
 
     /// Associates a newly created task with one scheduling domain.
     pub(super) fn set_domain(&self, domain: &DomainRef) {
         let _guard = kernel_guard::NoPreempt::new();
         *self.domain.lock() = Arc::downgrade(domain);
-        self.domain_id.store(domain.id(), Ordering::Release);
+        self.domain_id.store(domain.id().inner(), Ordering::Release);
         let ticks = domain
             .policy()
             .slice_ticks(core::time::Duration::from_millis(10))
@@ -537,7 +541,7 @@ impl Task {
     ///
     /// The prepared-context assertion, state transition, and current-stack marker are published
     /// before switching to the task.
-    pub fn start_running(self: &Arc<Self>, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub fn start_running(self: &Arc<Self>, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         assert!(
             self.context_initialized.load(Ordering::Acquire),
             "task context was not prepared before starting"
@@ -552,7 +556,7 @@ impl Task {
     /// Returns a running task to the runnable state on its owning CPU.
     ///
     /// The current-stack marker remains set until a different stack runs the post-switch hook.
-    pub(crate) fn yield_runnable(&self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub(crate) fn yield_runnable(&self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         let mut state = self.state.lock();
         match *state {
             TaskState::Running { cpu_id: owner } if owner == cpu_id => {
@@ -603,7 +607,7 @@ impl Task {
     ///
     /// The returned waiters must be routed to runnable queues after this task's completion lock is
     /// no longer held.
-    pub(super) fn complete(&self, cpu_id: usize) -> alloc::vec::Vec<Arc<Task>> {
+    pub(super) fn complete(&self, cpu_id: LogicalCpuId) -> alloc::vec::Vec<Arc<Task>> {
         self.state
             .lock()
             .exit(cpu_id)
@@ -665,7 +669,7 @@ impl Task {
     }
 
     /// Rolls back a timed wait that could not acquire timer ownership.
-    pub(crate) fn cancel_timed_wait(&self, generation: u64, cpu_id: usize) -> bool {
+    pub(crate) fn cancel_timed_wait(&self, generation: u64, cpu_id: LogicalCpuId) -> bool {
         if self.sleep_generation.load(Ordering::Acquire) != generation {
             return false;
         }
@@ -683,19 +687,19 @@ impl Task {
     /// Blocks this task on its owning CPU.
     ///
     /// The scheduler calls this only while the task is Running and the completion queue is locked.
-    pub(crate) fn block(&self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub(crate) fn block(&self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         let _guard = kernel_guard::NoPreempt::new();
         self.state.lock().block(cpu_id)
     }
 
     /// Moves a running task into timer-owned sleeping state.
-    pub(crate) fn sleep(&self, cpu_id: usize) -> Result<(), TaskStateError> {
+    pub(crate) fn sleep(&self, cpu_id: LogicalCpuId) -> Result<(), TaskStateError> {
         let _guard = kernel_guard::NoPreempt::new();
         let mut state = self.state.lock();
         match *state {
             TaskState::Running { cpu_id: owner } if owner == cpu_id => {
                 *state = TaskState::Sleeping;
-                self.timer_cpu.store(cpu_id, Ordering::Release);
+                self.timer_cpu.store(cpu_id.inner(), Ordering::Release);
                 Ok(())
             }
             TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
@@ -791,7 +795,7 @@ impl Task {
     }
 
     /// Begins one timed wait and returns its generation token.
-    pub(crate) fn begin_timed_wait(&self, cpu_id: usize) -> Result<u64, TaskStateError> {
+    pub(crate) fn begin_timed_wait(&self, cpu_id: LogicalCpuId) -> Result<u64, TaskStateError> {
         let generation = self.begin_sleep();
         let _guard = kernel_guard::NoPreempt::new();
         let mut state = self.state.lock();
@@ -799,7 +803,7 @@ impl Task {
             TaskState::Running { cpu_id: owner } if owner == cpu_id => {
                 *state = TaskState::TimedWaiting;
                 self.wait_result.store(0, Ordering::Release);
-                self.timer_cpu.store(cpu_id, Ordering::Release);
+                self.timer_cpu.store(cpu_id.inner(), Ordering::Release);
                 Ok(generation)
             }
             TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
@@ -808,9 +812,9 @@ impl Task {
     }
 
     /// Returns the timer CPU for the current timed wait, if one is registered.
-    pub(crate) fn timer_cpu(&self) -> Option<usize> {
+    pub(crate) fn timer_cpu(&self) -> Option<LogicalCpuId> {
         let cpu = self.timer_cpu.load(Ordering::Acquire);
-        (cpu != usize::MAX).then_some(cpu)
+        (cpu != usize::MAX).then_some(LogicalCpuId::new(cpu))
     }
 
     /// Returns and clears the result of the most recent timed wait.
@@ -906,6 +910,8 @@ impl JoinHandle {
 /// The pure transitions run under the same lifecycle lock in the production Task methods.
 #[cfg(test)]
 mod handoff_wakeup_tests {
+    use crate::mp::LogicalCpuId;
+
     use super::{TaskState, finish_handoff_wakeup, route_handoff_wakeup};
 
     /// Retains exactly one publication when a wake wins before the stack handoff.
@@ -929,13 +935,23 @@ mod handoff_wakeup_tests {
     #[test]
     fn resumed_task_does_not_publish_again() {
         assert_eq!(
-            route_handoff_wakeup(TaskState::Running { cpu_id: 1 }, true),
+            route_handoff_wakeup(
+                TaskState::Running {
+                    cpu_id: LogicalCpuId::new(1),
+                },
+                true
+            ),
             (false, false)
         );
         let (_, pending) = route_handoff_wakeup(TaskState::Runnable, true);
         assert!(pending);
         // Resuming current clears its old token under the same lock before another block.
-        let (_, pending) = route_handoff_wakeup(TaskState::Running { cpu_id: 1 }, true);
+        let (_, pending) = route_handoff_wakeup(
+            TaskState::Running {
+                cpu_id: LogicalCpuId::new(1),
+            },
+            true,
+        );
         assert!(!finish_handoff_wakeup(TaskState::Runnable, pending));
         // The new wake occurs after handoff, so it owns exactly one direct publication.
         let (publish, pending) = route_handoff_wakeup(TaskState::Runnable, false);

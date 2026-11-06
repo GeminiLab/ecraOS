@@ -9,6 +9,7 @@ use x86_64::instructions::interrupts;
 
 use crate::{
     arch::x86_64::imp::ioapic::{IoApicConfig, IoApicSet, Polarity, TriggerMode},
+    power::PhysicalCpuId,
     trap::irq::IrqError,
 };
 
@@ -62,7 +63,7 @@ pub struct X86ExternalIrqConfig {
     /// Stores all ISA source overrides.
     pub overrides: Box<[X86IrqOverride]>,
     /// Stores the BSP local APIC destination ID.
-    pub bsp_apic_id: u32,
+    pub bsp_apic_id: PhysicalCpuId,
 }
 
 pub use X86ExternalIrqConfig as ArchIrqConfig;
@@ -73,6 +74,7 @@ static VECTOR_TO_GSI: [AtomicUsize; 256] = [const { AtomicUsize::new(0) }; 256];
 struct ExternalController {
     ioapics: IoApicSet,
     overrides: Box<[X86IrqOverride]>,
+    /// The checked eight-bit destination encoding used by IOAPIC redirection entries.
     bsp_apic_id: u8,
     routes: Box<[bool]>,
     next_vector: u16,
@@ -80,8 +82,7 @@ struct ExternalController {
 
 impl ExternalController {
     unsafe fn new(config: X86ExternalIrqConfig) -> Self {
-        let bsp_apic_id = u8::try_from(config.bsp_apic_id)
-            .expect("x86 IOAPIC BSP destination must fit in an APIC RTE");
+        let bsp_apic_id = ioapic_destination_id(config.bsp_apic_id);
         let ioapics = unsafe { IoApicSet::new(config.io_apics.into_vec()) }
             .expect("invalid ACPI IOAPIC topology");
         let max_gsi = ioapics.gsi_limit();
@@ -130,6 +131,11 @@ impl ExternalController {
             VECTOR_TO_GSI[candidate as usize].load(Ordering::Acquire) != 0
         })
     }
+}
+
+/// Narrows a physical CPU ID to the destination width stored in an IOAPIC redirection entry.
+fn ioapic_destination_id(cpu_id: PhysicalCpuId) -> u8 {
+    u8::try_from(cpu_id.inner()).expect("x86 IOAPIC BSP destination must fit in an APIC RTE")
 }
 
 /// Selects an unused external vector while skipping every reserved LAPIC vector.
@@ -221,7 +227,23 @@ pub fn set_irq_enabled(irq: ArchIrq, enabled: bool) -> Result<(), IrqError> {
 /// Controller routes must never consume LAPIC-local vectors even when the external range fills.
 #[cfg(test)]
 mod tests {
-    use super::allocate_external_vector;
+    use crate::power::PhysicalCpuId;
+
+    use super::{allocate_external_vector, ioapic_destination_id};
+
+    /// Rejects a BSP destination that the IOAPIC redirection entry cannot represent.
+    #[test]
+    #[should_panic(expected = "x86 IOAPIC BSP destination must fit in an APIC RTE")]
+    fn rejects_unrepresentable_bsp_destination() {
+        ioapic_destination_id(PhysicalCpuId::new(256));
+    }
+
+    /// Preserves the complete eight-bit APIC destination range.
+    #[test]
+    fn accepts_representable_bsp_destinations() {
+        assert_eq!(ioapic_destination_id(PhysicalCpuId::new(0)), 0);
+        assert_eq!(ioapic_destination_id(PhysicalCpuId::new(255)), 255);
+    }
 
     /// Skips every reserved LAPIC vector while retaining nearby usable vectors.
     ///

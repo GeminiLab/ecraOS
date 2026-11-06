@@ -42,9 +42,9 @@ static OBSERVED: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
 /// A missing observation fails explicitly and reports every incomplete logical/physical target.
 fn wait_until(
     operation: &str,
-    targets: &[usize],
+    targets: &[mp::LogicalCpuId],
     generation: Option<u64>,
-    mut complete: impl FnMut(usize) -> bool,
+    mut complete: impl FnMut(mp::LogicalCpuId) -> bool,
 ) {
     let deadline = exarch::time::monotonic_time().saturating_add(Duration::from_secs(2));
     while !targets.iter().all(|&cpu| complete(cpu)) {
@@ -58,7 +58,7 @@ fn wait_until(
                     (
                         cpu,
                         mp::logical_to_physical(cpu),
-                        OBSERVED[cpu].load(Ordering::Acquire),
+                        OBSERVED[cpu.inner()].load(Ordering::Acquire),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -82,7 +82,7 @@ fn remote_main() {
     })
     .unwrap();
     task::switch_current_to(&domain).unwrap();
-    DOMAINS[cpu].store(domain.id(), Ordering::Release);
+    DOMAINS[cpu.inner()].store(domain.id().inner(), Ordering::Release);
     loop {
         core::hint::spin_loop();
     }
@@ -91,13 +91,13 @@ fn remote_main() {
 /// Publishes one observation command and awaits every explicit reader barrier.
 ///
 /// Readers are parked by command five before any shared range is unmapped permanently.
-fn command(targets: &[usize], generation: usize, tlb_generation: Option<u64>) {
+fn command(targets: &[mp::LogicalCpuId], generation: usize, tlb_generation: Option<u64>) {
     COMMAND.store(generation, Ordering::Release);
     wait_until(
         "remote observation barrier",
         targets,
         tlb_generation,
-        |cpu| OBSERVED[cpu].load(Ordering::Acquire) == generation,
+        |cpu| OBSERVED[cpu.inner()].load(Ordering::Acquire) == generation,
     );
 }
 
@@ -117,9 +117,12 @@ fn main() {
     let mut readers = Vec::new();
     for &cpu in &targets {
         wait_until("remote domain ready", &[cpu], None, |cpu| {
-            DOMAINS[cpu].load(Ordering::Acquire) != 0
+            DOMAINS[cpu.inner()].load(Ordering::Acquire) != 0
         });
-        let domain = task::lookup_domain(DOMAINS[cpu].load(Ordering::Acquire)).unwrap();
+        let domain = task::lookup_domain(task::DomainId::new(
+            DOMAINS[cpu.inner()].load(Ordering::Acquire),
+        ))
+        .unwrap();
         let reader = domain
             .spawn(move || {
                 assert_eq!(mp::current_cpu_id(), cpu);
@@ -167,7 +170,7 @@ fn main() {
                         }
                     }
                     seen = stage;
-                    OBSERVED[cpu].store(stage, Ordering::Release);
+                    OBSERVED[cpu.inner()].store(stage, Ordering::Release);
                 }
             })
             .unwrap();

@@ -6,7 +6,6 @@ use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
-use super::trap::{RiscvExternalIrqConfig, RiscvPlicContext};
 use crate::{
     mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{
@@ -18,6 +17,8 @@ use crate::{
     },
     power::PhysicalCpuId,
 };
+
+use super::trap::{RiscvExternalIrqConfig, RiscvPlicContext};
 
 /// Discovers the RISC-V CPU topology and PLIC from Device Tree.
 #[cfg_or_dummy(target_arch = "riscv64")]
@@ -102,7 +103,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
                 && let Some(&hart_id) = interrupt_controllers.get(&phandle)
             {
                 contexts.push(RiscvPlicContext {
-                    hart_id: hart_id.inner(),
+                    hart_id,
                     context: entry,
                 });
             }

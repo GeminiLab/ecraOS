@@ -22,8 +22,8 @@ pub enum JoinValidationError {
 ///
 /// A caller without a scheduler identity may join any target.
 pub fn validate_join(
-    current_task_id: Option<u64>,
-    target_task_id: u64,
+    current_task_id: Option<TaskId>,
+    target_task_id: TaskId,
 ) -> Result<(), JoinValidationError> {
     if current_task_id == Some(target_task_id) {
         Err(JoinValidationError::SelfJoin)

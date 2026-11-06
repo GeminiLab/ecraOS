@@ -13,7 +13,10 @@ use riscv::{
     register::sstatus,
 };
 
-use crate::trap::{Interrupt, Trap, TrapDisposition, TrapFrame, irq::IrqError};
+use crate::{
+    power::PhysicalCpuId,
+    trap::{Interrupt, Trap, TrapDisposition, TrapFrame, irq::IrqError},
+};
 
 /// A RISC-V PLIC source identifier.
 ///
@@ -63,7 +66,7 @@ pub use RiscvExternalIrqConfig as ArchIrqConfig;
 #[derive(Debug, Clone, Copy)]
 pub struct RiscvPlicContext {
     /// Stores the hart identifier.
-    pub hart_id: usize,
+    pub hart_id: PhysicalCpuId,
     /// Stores the PLIC context index.
     pub context: usize,
 }

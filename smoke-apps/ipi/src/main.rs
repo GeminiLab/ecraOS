@@ -36,7 +36,7 @@ static PROGRESS: AtomicBool = AtomicBool::new(false);
 /// No sleep or yield is used to infer remote progress.
 fn wait_until(
     operation: &str,
-    target: usize,
+    target: mp::LogicalCpuId,
     generation: Option<u64>,
     mut complete: impl FnMut() -> bool,
 ) {
@@ -63,7 +63,7 @@ fn remote_main() {
     })
     .expect("remote domain creation failed");
     task::switch_current_to(&domain).expect("remote domain installation failed");
-    DOMAINS[cpu].store(domain.id(), Ordering::Release);
+    DOMAINS[cpu.inner()].store(domain.id().inner(), Ordering::Release);
     loop {
         core::hint::spin_loop();
     }
@@ -111,9 +111,12 @@ fn main() {
     kprintln!("IPI combined Test+Reschedule logical={target} generation={generation}");
 
     wait_until("remote domain ready", target, None, || {
-        DOMAINS[target].load(Ordering::Acquire) != 0
+        DOMAINS[target.inner()].load(Ordering::Acquire) != 0
     });
-    let domain = task::lookup_domain(DOMAINS[target].load(Ordering::Acquire)).unwrap();
+    let domain = task::lookup_domain(task::DomainId::new(
+        DOMAINS[target.inner()].load(Ordering::Acquire),
+    ))
+    .unwrap();
     let before = test::counters(target).1;
     let worker = domain
         .spawn(move || {

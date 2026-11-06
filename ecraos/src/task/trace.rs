@@ -3,6 +3,8 @@
 //! The ring is allocation-free and intended for debug or test builds. Writers overwrite the
 //! oldest record after capacity is reached and account every overwrite.
 
+use super::{DomainId, TaskId};
+
 /// A scheduler trace event category.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TraceEventKind {
@@ -26,9 +28,9 @@ pub struct TraceEvent {
     /// Event category.
     pub kind: TraceEventKind,
     /// Task identity associated with the event.
-    pub task_id: u64,
+    pub task_id: TaskId,
     /// Domain identity associated with the event.
-    pub domain_id: u64,
+    pub domain_id: DomainId,
 }
 
 /// A fixed-capacity overwrite ring for scheduler trace records.
@@ -51,7 +53,7 @@ impl<const CAPACITY: usize> TraceRing<CAPACITY> {
     }
 
     /// Appends one event and returns its assigned sequence number.
-    pub fn push(&mut self, kind: TraceEventKind, task_id: u64, domain_id: u64) -> u64 {
+    pub fn push(&mut self, kind: TraceEventKind, task_id: TaskId, domain_id: DomainId) -> u64 {
         assert!(CAPACITY != 0, "trace ring capacity must be positive");
         let sequence = self.sequence;
         self.sequence = self.sequence.wrapping_add(1);
@@ -103,18 +105,18 @@ impl<const CAPACITY: usize> Default for TraceRing<CAPACITY> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TraceEventKind, TraceRing};
+    use super::{DomainId, TaskId, TraceEventKind, TraceRing};
 
     #[test]
     fn overwrite_and_snapshot_are_chronological() {
         let mut ring = TraceRing::<2>::new();
-        ring.push(TraceEventKind::Enqueue, 1, 2);
-        ring.push(TraceEventKind::Switch, 3, 4);
-        ring.push(TraceEventKind::Exit, 5, 6);
+        ring.push(TraceEventKind::Enqueue, TaskId::new(1), DomainId::new(2));
+        ring.push(TraceEventKind::Switch, TaskId::new(3), DomainId::new(4));
+        ring.push(TraceEventKind::Exit, TaskId::new(5), DomainId::new(6));
         let (events, count) = ring.snapshot::<2>();
         assert_eq!(count, 2);
-        assert_eq!(events[0].unwrap().task_id, 3);
-        assert_eq!(events[1].unwrap().task_id, 5);
+        assert_eq!(events[0].unwrap().task_id, TaskId::new(3));
+        assert_eq!(events[1].unwrap().task_id, TaskId::new(5));
         assert_eq!(ring.dropped(), 1);
     }
 }

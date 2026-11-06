@@ -227,6 +227,7 @@ pub(crate) fn shootdown(
 /// Privileged instructions are replaced by pure request observations on the host.
 #[cfg(test)]
 mod tests {
+    use crate::mp::LogicalCpuId;
     use memory_addr::{VirtAddrRange, va};
 
     use super::{Payload, TlbInvalidation, remote_targets, validate};
@@ -284,7 +285,17 @@ mod tests {
     /// Offline and not-ready membership remains the MP owner's tested responsibility.
     #[test]
     fn excludes_current_cpu() {
-        assert_eq!(remote_targets(vec![0, 2, 3], 2), vec![0, 3]);
+        assert_eq!(
+            remote_targets(
+                vec![
+                    LogicalCpuId::new(0),
+                    LogicalCpuId::new(2),
+                    LogicalCpuId::new(3)
+                ],
+                LogicalCpuId::new(2),
+            ),
+            vec![LogicalCpuId::new(0), LogicalCpuId::new(3)]
+        );
     }
 
     /// Round-trips all request forms only for the matching generation.

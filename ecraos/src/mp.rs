@@ -18,6 +18,7 @@ use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{debug, info, warn};
 use memory_addr::VirtAddrRange;
+use semantic_types::semantic_type;
 
 use crate::{kernel_entry_ap, percpu};
 
@@ -31,12 +32,14 @@ pub use state::CpuState;
 /// An index in the kernel-owned logical CPU inventory.
 ///
 /// Logical identifiers are stable after firmware discovery.
-pub type LogicalCpuId = usize;
+#[semantic_type(display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LogicalCpuId(usize);
 
 /// The logical bootstrap CPU identifier.
 ///
 /// The physical bootstrap identifier is sorted into this slot during discovery.
-pub const BSP_CPU_ID: LogicalCpuId = 0;
+pub const BSP_CPU_ID: LogicalCpuId = LogicalCpuId::new(0);
 
 /// The firmware-discovered physical CPU identifiers.
 ///
@@ -63,9 +66,10 @@ static BOOT_MAPPING_COMPLETE: AtomicBool = AtomicBool::new(false);
 ///
 /// The BSP calls this only after acknowledged low identity removal on all discovered CPUs.
 pub(crate) fn publish_boot_mapping_completion() {
-    assert!(
-        (0..cpu_count()).all(|cpu| cpu_state(cpu) == Some(CpuState::Online) && is_ipi_ready(cpu))
-    );
+    assert!((0..cpu_count()).all(|cpu| {
+        let cpu = LogicalCpuId::new(cpu);
+        cpu_state(cpu) == Some(CpuState::Online) && is_ipi_ready(cpu)
+    }));
     BOOT_MAPPING_COMPLETE.store(true, Ordering::Release);
 }
 
@@ -151,7 +155,7 @@ impl fmt::Display for SecondaryCpuError {
 ///
 /// Callers prevent migration when using the value across a critical operation.
 pub fn current_cpu_id() -> LogicalCpuId {
-    CPU_ID.read_current() as _
+    CPU_ID.read_current().into()
 }
 
 /// Returns the executing CPU's firmware physical identifier.
@@ -190,7 +194,10 @@ fn logical_to_physical_from_map(
 /// Acquire ordering observes initialization preceding an Online transition.
 pub fn cpu_state(logical_id: LogicalCpuId) -> Option<CpuState> {
     Some(CpuState::from_u8(
-        CPU_STATE.get()?.get(logical_id)?.load(Ordering::Acquire),
+        CPU_STATE
+            .get()?
+            .get(logical_id.inner())?
+            .load(Ordering::Acquire),
     ))
 }
 
@@ -200,7 +207,7 @@ pub fn cpu_state(logical_id: LogicalCpuId) -> Option<CpuState> {
 pub fn is_ipi_ready(logical_id: LogicalCpuId) -> bool {
     CPU_IPI_READY
         .get()
-        .and_then(|ready| ready.get(logical_id))
+        .and_then(|ready| ready.get(logical_id.inner()))
         .is_some_and(|ready| ready.load(Ordering::Acquire))
 }
 
@@ -212,7 +219,9 @@ fn ready_snapshot(states: &[CpuState], readiness: &[bool]) -> Vec<LogicalCpuId> 
         .iter()
         .zip(readiness)
         .enumerate()
-        .filter_map(|(id, (&state, &ready))| (state == CpuState::Online && ready).then_some(id))
+        .filter_map(|(id, (&state, &ready))| {
+            (state == CpuState::Online && ready).then_some(LogicalCpuId::new(id))
+        })
         .collect()
 }
 
@@ -227,7 +236,9 @@ pub fn ipi_ready_cpu_ids() -> Vec<LogicalCpuId> {
         .iter()
         .map(|state| CpuState::from_u8(state.load(Ordering::Acquire)))
         .collect::<Vec<_>>();
-    let readiness = (0..states.len()).map(is_ipi_ready).collect::<Vec<_>>();
+    let readiness = (0..states.len())
+        .map(|id| is_ipi_ready(LogicalCpuId::new(id)))
+        .collect::<Vec<_>>();
     ready_snapshot(&states, &readiness)
 }
 
@@ -235,7 +246,7 @@ pub fn ipi_ready_cpu_ids() -> Vec<LogicalCpuId> {
 ///
 /// Boot calls this only after common mailboxes, traps, the local source and scheduler are usable.
 pub(crate) fn mark_current_cpu_ipi_ready() {
-    CPU_IPI_READY[current_cpu_id()].store(true, Ordering::Release);
+    CPU_IPI_READY[current_cpu_id().inner()].store(true, Ordering::Release);
 }
 
 /// Returns the boot stack range for the current CPU.
@@ -273,7 +284,7 @@ pub fn phys_to_logi_id(phys_id: PhysicalCpuId) -> LogicalCpuId {
 /// Discovery may subsequently correct the firmware physical identifier.
 pub fn init_cpu_id_bsp(phys_id: PhysicalCpuId) {
     CPU_PHYS_ID.write_current(phys_id.inner());
-    CPU_ID.write_current(BSP_CPU_ID);
+    CPU_ID.write_current(BSP_CPU_ID.inner());
 }
 
 /// Initializes the CPU ID for the AP.
@@ -281,7 +292,7 @@ pub fn init_cpu_id_bsp(phys_id: PhysicalCpuId) {
 /// The logical slot is resolved through the common immutable map.
 pub fn init_cpu_id_ap(phys_id: PhysicalCpuId) {
     CPU_PHYS_ID.write_current(phys_id.inner());
-    CPU_ID.write_current(phys_to_logi_id(phys_id));
+    CPU_ID.write_current(phys_to_logi_id(phys_id).inner());
 }
 
 /// Installs the immutable CPU inventory and initial lifecycle state.
@@ -322,7 +333,8 @@ pub fn init_cpu_list(topology: CpuTopology) {
     let mut logi_to_phys_id_map = BTreeMap::new();
     let mut phys_to_logi_id_map = BTreeMap::new();
 
-    for (logi_id, &phys_id) in cpu_list_clone.iter().enumerate() {
+    for (logical_index, &phys_id) in cpu_list_clone.iter().enumerate() {
+        let logi_id = LogicalCpuId::new(logical_index);
         logi_to_phys_id_map.insert(logi_id, phys_id);
         phys_to_logi_id_map.insert(phys_id, logi_id);
     }
@@ -363,7 +375,8 @@ pub fn start_secondary_cpus() -> Result<(), SecondaryCpuError> {
 
     let pt_root = crate::mem::vmm::page_table_root();
 
-    for logi_id in 1..CPU_LIST.len() {
+    for logical_index in 1..CPU_LIST.len() {
+        let logi_id = LogicalCpuId::new(logical_index);
         let phys_id = *LOGI_TO_PHYS_ID_MAP.deref().get(&logi_id).unwrap();
         info!("Starting up CPU {}: Physical ID {:#x}", logi_id, phys_id);
 
@@ -449,7 +462,7 @@ fn load_cpu_state(logi_id: LogicalCpuId) -> CpuState {
     CpuState::from_u8(
         CPU_STATE
             .deref()
-            .get(logi_id)
+            .get(logi_id.inner())
             .expect("cpu state must be initialized")
             .load(Ordering::Acquire),
     )
@@ -465,7 +478,7 @@ fn transition_cpu_state(logi_id: LogicalCpuId, from: CpuState, to: CpuState) -> 
 
     let state = CPU_STATE
         .deref()
-        .get(logi_id)
+        .get(logi_id.inner())
         .expect("cpu state must be initialized");
     state
         .compare_exchange(
@@ -486,7 +499,16 @@ mod tests {
 
     use exarch::power::PhysicalCpuId;
 
-    use super::{CpuState, logical_to_physical_from_map, ready_snapshot};
+    use super::{CpuState, LogicalCpuId, logical_to_physical_from_map, ready_snapshot};
+    use crate::task::{DomainId, TaskId};
+
+    /// Verifies the distinct identifier wrappers expose their numeric values explicitly.
+    #[test]
+    fn semantic_identifiers_wrap_their_numeric_values() {
+        assert_eq!(LogicalCpuId::new(3).inner(), 3);
+        assert_eq!(TaskId::new(5).inner(), 5);
+        assert_eq!(DomainId::new(7).inner(), 7);
+    }
 
     /// Rejects online CPUs that have not initialized their IPI consumer.
     ///
@@ -495,7 +517,7 @@ mod tests {
     fn snapshot_requires_separate_readiness() {
         assert_eq!(
             ready_snapshot(&[CpuState::Online, CpuState::Online], &[true, false]),
-            vec![0]
+            vec![LogicalCpuId::new(0)]
         );
     }
 
@@ -514,7 +536,7 @@ mod tests {
                 ],
                 &[true, true, true, true]
             ),
-            vec![0]
+            vec![LogicalCpuId::new(0)]
         );
     }
 
@@ -523,11 +545,17 @@ mod tests {
     /// Invalid targets must fail before slot reservation or hardware submission.
     #[test]
     fn logical_lookup_is_fallible() {
-        let map = BTreeMap::from([(0, PhysicalCpuId::new(7)), (1, PhysicalCpuId::new(42))]);
+        let map = BTreeMap::from([
+            (LogicalCpuId::new(0), PhysicalCpuId::new(7)),
+            (LogicalCpuId::new(1), PhysicalCpuId::new(42)),
+        ]);
         assert_eq!(
-            logical_to_physical_from_map(&map, 1),
+            logical_to_physical_from_map(&map, LogicalCpuId::new(1)),
             Some(PhysicalCpuId::new(42))
         );
-        assert_eq!(logical_to_physical_from_map(&map, 99), None);
+        assert_eq!(
+            logical_to_physical_from_map(&map, LogicalCpuId::new(99)),
+            None
+        );
     }
 }

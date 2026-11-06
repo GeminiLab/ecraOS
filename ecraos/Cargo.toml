@@ -28,6 +28,7 @@ lazyinit.workspace = true
 log.workspace = true
 memory_addr.workspace = true
 memory_range_set = { path = "../utils/memory_range_set" }
+semantic_types = { path = "../utils/semantic_types" }
 size_disp = { path = "../utils/size_disp" }
 target-triple = "1.0.1"
 thiserror.workspace = true

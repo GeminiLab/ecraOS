@@ -168,6 +168,7 @@ dependencies = [
  "log",
  "memory_addr",
  "memory_range_set",
+ "semantic_types",
  "size_disp",
  "target-triple",
  "thiserror",
@@ -700,6 +701,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tlb-shootdown"
+version = "0.1.0"
+dependencies = [
+ "ecraos",
 ]
 
 [[package]]

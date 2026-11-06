@@ -91,7 +91,7 @@ fn with_current_slab<R>(f: impl FnOnce(&PerCpuSlab) -> R) -> R {
 /// Initializes the current CPU's heap allocator state.
 pub fn init_malloc_current_cpu() {
     let cpu_id = mp::current_cpu_id();
-    let slab_cpu_id = u16::try_from(cpu_id).expect("CPU id exceeds slab owner range");
+    let slab_cpu_id = u16::try_from(cpu_id.inner()).expect("CPU id exceeds slab owner range");
 
     CURRENT_SLAB.with_current(|slot| {
         slot.init_once(PerCpuSlab::new(slab_cpu_id, mem::vmm::page_size()));

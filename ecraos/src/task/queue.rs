@@ -207,54 +207,60 @@ pub enum QueueStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PhysicalQueue, QueueState, QueueStateError};
+    use super::{DomainId, PhysicalQueue, QueueState, QueueStateError};
 
     #[test]
     fn drains_in_original_fifo_order() {
         let mut queue = PhysicalQueue::new();
-        queue.activate(7).unwrap();
-        queue.push(7, 1).unwrap();
-        queue.push(7, 2).unwrap();
-        queue.begin_drain(7).unwrap();
+        let domain = DomainId::new(7);
+        queue.activate(domain).unwrap();
+        queue.push(domain, 1).unwrap();
+        queue.push(domain, 2).unwrap();
+        queue.begin_drain(domain).unwrap();
         assert_eq!(
             queue
-                .drain_fifo(7)
+                .drain_fifo(domain)
                 .unwrap()
                 .into_iter()
                 .collect::<alloc::vec::Vec<_>>(),
             [1, 2]
         );
-        queue.finish_drain(7).unwrap();
+        queue.finish_drain(domain).unwrap();
         assert_eq!(queue.state(), QueueState::Inactive);
-        assert_eq!(queue.push(7, 3), Err(QueueStateError::WrongDomain));
+        assert_eq!(queue.push(domain, 3), Err(QueueStateError::WrongDomain));
     }
 
     #[test]
     fn rejects_cross_domain_tail_pull() {
         let mut queue = PhysicalQueue::new();
-        queue.activate(7).unwrap();
-        queue.push(7, 1).unwrap();
-        assert_eq!(queue.steal_tail(8), Err(QueueStateError::WrongDomain));
-        assert_eq!(queue.steal_tail(7), Ok(Some(1)));
+        let domain = DomainId::new(7);
+        queue.activate(domain).unwrap();
+        queue.push(domain, 1).unwrap();
+        assert_eq!(
+            queue.steal_tail(DomainId::new(8)),
+            Err(QueueStateError::WrongDomain)
+        );
+        assert_eq!(queue.steal_tail(domain), Ok(Some(1)));
     }
 
     #[test]
     fn draining_queue_accepts_fifo_transfer_before_deactivation() {
         let mut source = PhysicalQueue::new();
         let mut destination = PhysicalQueue::new();
-        source.activate(7).unwrap();
-        destination.activate(7).unwrap();
-        source.push(7, 1).unwrap();
-        source.push(7, 2).unwrap();
-        source.begin_drain(7).unwrap();
+        let domain = DomainId::new(7);
+        source.activate(domain).unwrap();
+        destination.activate(domain).unwrap();
+        source.push(domain, 1).unwrap();
+        source.push(domain, 2).unwrap();
+        source.begin_drain(domain).unwrap();
 
         destination
-            .append_fifo(7, source.drain_fifo(7).unwrap())
+            .append_fifo(domain, source.drain_fifo(domain).unwrap())
             .unwrap();
-        source.finish_drain(7).unwrap();
+        source.finish_drain(domain).unwrap();
 
-        assert_eq!(destination.pop(7), Ok(Some(1)));
-        assert_eq!(destination.pop(7), Ok(Some(2)));
+        assert_eq!(destination.pop(domain), Ok(Some(1)));
+        assert_eq!(destination.pop(domain), Ok(Some(2)));
         assert_eq!(source.state(), QueueState::Inactive);
     }
 
@@ -264,12 +270,13 @@ mod tests {
     #[test]
     fn remote_pull_rejects_current_handoff_tail() {
         let mut queue = PhysicalQueue::new();
-        queue.activate(7).unwrap();
-        queue.push(7, 1).unwrap();
-        queue.push(7, 2).unwrap();
-        assert_eq!(queue.steal_tail_if(7, |_| false), Ok(None));
+        let domain = DomainId::new(7);
+        queue.activate(domain).unwrap();
+        queue.push(domain, 1).unwrap();
+        queue.push(domain, 2).unwrap();
+        assert_eq!(queue.steal_tail_if(domain, |_| false), Ok(None));
         assert_eq!(queue.len(), 2);
-        assert_eq!(queue.steal_tail_if(7, |&task| task == 2), Ok(Some(2)));
-        assert_eq!(queue.pop(7), Ok(Some(1)));
+        assert_eq!(queue.steal_tail_if(domain, |&task| task == 2), Ok(Some(2)));
+        assert_eq!(queue.pop(domain), Ok(Some(1)));
     }
 }

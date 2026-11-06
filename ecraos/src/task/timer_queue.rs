@@ -5,6 +5,8 @@
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use super::TaskId;
+
 /// One scheduled cooperative wakeup.
 ///
 /// The generation distinguishes a current sleep from stale entries left by cancellation or task
@@ -14,7 +16,7 @@ pub struct TimerEntry {
     /// The absolute monotonic wakeup deadline.
     pub deadline: Duration,
     /// The task identity associated with this wakeup.
-    pub task_id: u64,
+    pub task_id: TaskId,
     /// The task's unique sleep generation.
     pub generation: u64,
     /// Stable insertion order used to preserve equal-deadline FIFO ordering.
@@ -55,7 +57,7 @@ impl TimerQueue {
     ///
     /// Callers use the return value to decide whether hardware one-shot programming needs an
     /// update.
-    pub fn push(&mut self, deadline: Duration, task_id: u64, generation: u64) -> bool {
+    pub fn push(&mut self, deadline: Duration, task_id: TaskId, generation: u64) -> bool {
         self.try_push(deadline, task_id, generation)
             .expect("timer queue allocation failed")
     }
@@ -64,7 +66,7 @@ impl TimerQueue {
     pub fn try_push(
         &mut self,
         deadline: Duration,
-        task_id: u64,
+        task_id: TaskId,
         generation: u64,
     ) -> Result<bool, ()> {
         let previous = self.next_deadline();
@@ -86,7 +88,7 @@ impl TimerQueue {
     /// Cancels one exact task-generation entry.
     ///
     /// Returns whether an entry was removed. A stale cancellation is harmless.
-    pub fn cancel(&mut self, task_id: u64, generation: u64) -> bool {
+    pub fn cancel(&mut self, task_id: TaskId, generation: u64) -> bool {
         let Some(index) = self
             .entries
             .iter()
@@ -105,7 +107,7 @@ impl TimerQueue {
     pub fn pop_expired(
         &mut self,
         now: Duration,
-        mut current_generation: impl FnMut(u64, u64) -> bool,
+        mut current_generation: impl FnMut(TaskId, u64) -> bool,
     ) -> Vec<TimerEntry> {
         let due_count = self.entries.partition_point(|entry| entry.deadline <= now);
         let due = self.entries.drain(..due_count);
@@ -130,15 +132,16 @@ pub const fn saturating_deadline(deadline: Duration, duration: Duration) -> Dura
 mod tests {
     use core::time::Duration;
 
-    use super::TimerQueue;
+    use super::{TaskId, TimerQueue};
 
     #[test]
     fn exact_cancellation_releases_one_generation() {
         let mut queue = TimerQueue::new();
-        queue.push(Duration::from_nanos(10), 4, 1);
-        queue.push(Duration::from_nanos(20), 4, 2);
-        assert!(queue.cancel(4, 1));
+        let task_id = TaskId::new(4);
+        queue.push(Duration::from_nanos(10), task_id, 1);
+        queue.push(Duration::from_nanos(20), task_id, 2);
+        assert!(queue.cancel(task_id, 1));
         assert_eq!(queue.next_deadline(), Some(Duration::from_nanos(20)));
-        assert!(!queue.cancel(4, 1));
+        assert!(!queue.cancel(task_id, 1));
     }
 }

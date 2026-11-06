@@ -8,16 +8,17 @@ use cfg_or_dummy::cfg_or_dummy;
 use ecraldr_base::{PhysAddr, PlatformBootArg};
 use memory_addr::PhysAddrRange;
 
-use super::{
-    imp::ioapic::{IoApicConfig, Polarity, TriggerMode},
-    trap::{X86ExternalIrqConfig, X86IrqOverride},
-};
 use crate::{
     kernel_if::phys_to_virt,
     mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
     platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
     power::PhysicalCpuId,
     time,
+};
+
+use super::{
+    imp::ioapic::{IoApicConfig, Polarity, TriggerMode},
+    trap::{X86ExternalIrqConfig, X86IrqOverride},
 };
 
 /// Reads one byte from an x86 I/O port.
@@ -331,7 +332,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
     let controller = X86ExternalIrqConfig {
         io_apics,
         overrides,
-        bsp_apic_id: processors.boot_processor.local_apic_id,
+        bsp_apic_id: PhysicalCpuId::new(processors.boot_processor.local_apic_id as _),
     };
 
     PlatformDescription::new(

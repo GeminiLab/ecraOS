@@ -16,6 +16,9 @@ use core::{
 
 use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
+use semantic_types::semantic_type;
+
+use crate::mp::LogicalCpuId;
 
 use super::{JoinHandle, Task};
 
@@ -23,7 +26,9 @@ use super::{JoinHandle, Task};
 pub const MAX_CPU_NUM: usize = 256;
 
 /// A monotonic scheduling-domain identifier.
-pub type DomainId = u64;
+#[semantic_type(display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DomainId(u64);
 
 /// An immutable domain scheduling policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,36 +104,39 @@ impl CpuSet {
     }
 
     /// Adds one logical CPU and rejects values outside the Stage 2B bound.
-    pub fn insert(&mut self, cpu: usize) -> Result<(), DomainError> {
+    pub fn insert(&mut self, cpu: LogicalCpuId) -> Result<(), DomainError> {
         let (word, bit) = Self::position(cpu)?;
         self.0[word] |= 1u64 << bit;
         Ok(())
     }
 
     /// Removes one logical CPU and rejects values outside the Stage 2B bound.
-    pub fn remove(&mut self, cpu: usize) -> Result<(), DomainError> {
+    pub fn remove(&mut self, cpu: LogicalCpuId) -> Result<(), DomainError> {
         let (word, bit) = Self::position(cpu)?;
         self.0[word] &= !(1u64 << bit);
         Ok(())
     }
 
     /// Returns whether one logical CPU is a member.
-    pub fn contains(&self, cpu: usize) -> bool {
+    pub fn contains(&self, cpu: LogicalCpuId) -> bool {
         Self::position(cpu)
             .map(|(word, bit)| self.0[word] & (1u64 << bit) != 0)
             .unwrap_or(false)
     }
 
     /// Returns a sorted bounded snapshot of all members.
-    pub fn snapshot(&self) -> Vec<usize> {
-        (0..MAX_CPU_NUM).filter(|&cpu| self.contains(cpu)).collect()
+    pub fn snapshot(&self) -> Vec<LogicalCpuId> {
+        (0..MAX_CPU_NUM)
+            .map(LogicalCpuId::new)
+            .filter(|&cpu| self.contains(cpu))
+            .collect()
     }
 
-    fn position(cpu: usize) -> Result<(usize, usize), DomainError> {
-        if cpu >= MAX_CPU_NUM {
+    fn position(cpu: LogicalCpuId) -> Result<(usize, usize), DomainError> {
+        if cpu.inner() >= MAX_CPU_NUM {
             return Err(DomainError::CpuOutOfRange);
         }
-        Ok((cpu / 64, cpu % 64))
+        Ok((cpu.inner() / 64, cpu.inner() % 64))
     }
 }
 
@@ -230,7 +238,7 @@ impl SchedulingDomain {
     }
 
     /// Adds one CPU to this domain.
-    pub fn add_cpu(&self, cpu: usize) -> Result<(), DomainError> {
+    pub fn add_cpu(&self, cpu: LogicalCpuId) -> Result<(), DomainError> {
         // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
         // A future lock-free ownership and CPU-membership structure may replace these locks after
         // its memory-ordering proof.
@@ -254,7 +262,7 @@ impl SchedulingDomain {
     /// Domain-switch transactions use this two-phase form so membership can be rolled back
     /// before suspended ownership is published. The caller must invoke `drain_suspended` only
     /// after every related queue and membership update has committed.
-    pub(super) fn add_cpu_deferred(&self, cpu: usize) -> Result<(), DomainError> {
+    pub(super) fn add_cpu_deferred(&self, cpu: LogicalCpuId) -> Result<(), DomainError> {
         // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
         // A future lock-free ownership and CPU-membership structure may replace these locks after
         // its memory-ordering proof.
@@ -268,7 +276,7 @@ impl SchedulingDomain {
     }
 
     /// Removes one CPU from this domain when it has no queued ownership.
-    pub fn remove_cpu(&self, cpu: usize) -> Result<(), DomainError> {
+    pub fn remove_cpu(&self, cpu: LogicalCpuId) -> Result<(), DomainError> {
         // Lock order is NoPreemptIrqSave -> ownership -> domain metadata -> CPU membership.
         // A future lock-free ownership and CPU-membership structure may replace these locks after
         // its memory-ordering proof.
@@ -284,7 +292,7 @@ impl SchedulingDomain {
     }
 
     /// Selects the next active CPU using a round-robin cursor.
-    pub fn select_cpu(&self) -> Option<usize> {
+    pub fn select_cpu(&self) -> Option<LogicalCpuId> {
         let cpus = self.cpu_snapshot().snapshot();
         if cpus.is_empty() {
             return None;
@@ -388,6 +396,7 @@ pub fn create_domain(policy: DomainPolicy) -> Result<DomainRef, DomainError> {
     let id = NEXT_DOMAIN_ID
         .fetch_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
         .map_err(|_| DomainError::IdentifierExhausted)?;
+    let id = DomainId::new(id);
     let domain = Arc::new(SchedulingDomain {
         id,
         policy,
@@ -435,19 +444,26 @@ pub(super) fn downgrade(domain: &DomainRef) -> Weak<SchedulingDomain> {
 #[cfg(test)]
 mod tests {
     use super::{CpuSet, DomainError, DomainLifecycle, DomainPolicy, MAX_CPU_NUM, create_domain};
+    use crate::mp::LogicalCpuId;
 
     #[test]
     fn cpu_set_rejects_the_stage_2b_upper_bound() {
         let mut cpus = CpuSet::empty();
-        assert_eq!(cpus.insert(MAX_CPU_NUM), Err(DomainError::CpuOutOfRange));
-        cpus.insert(MAX_CPU_NUM - 1).unwrap();
-        assert_eq!(cpus.snapshot(), alloc::vec![MAX_CPU_NUM - 1]);
+        assert_eq!(
+            cpus.insert(LogicalCpuId::new(MAX_CPU_NUM)),
+            Err(DomainError::CpuOutOfRange)
+        );
+        cpus.insert(LogicalCpuId::new(MAX_CPU_NUM - 1)).unwrap();
+        assert_eq!(
+            cpus.snapshot(),
+            alloc::vec![LogicalCpuId::new(MAX_CPU_NUM - 1)]
+        );
     }
 
     #[test]
     fn busy_destroy_remains_draining() {
         let domain = create_domain(DomainPolicy::Cooperative).unwrap();
-        domain.add_cpu(0).unwrap();
+        domain.add_cpu(LogicalCpuId::new(0)).unwrap();
         assert_eq!(domain.destroy(), Err(DomainError::Busy));
         assert_eq!(domain.lifecycle(), DomainLifecycle::Draining);
     }

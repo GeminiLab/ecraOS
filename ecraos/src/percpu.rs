@@ -68,7 +68,7 @@ pub fn init_ap(cpu_id: LogicalCpuId) {
     let percpu_area_base = PERCPU_AREAS
         .get()
         .expect("percpu areas must be initialized")
-        .get(cpu_id)
+        .get(cpu_id.inner())
         .copied()
         .expect("invalid cpu id");
 

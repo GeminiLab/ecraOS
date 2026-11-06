@@ -10,7 +10,8 @@ use core::{
 
 use exspin::SpinNoIrq;
 
-use super::{TaskError, TaskRef, WaitResult};
+use super::{TaskError, TaskId, TaskRef, WaitResult};
+use crate::mp::LogicalCpuId;
 
 /// A predicate-free FIFO task wait queue.
 pub struct WaitQueue {
@@ -41,7 +42,11 @@ impl WaitQueue {
     ///
     /// Scheduler code calls this helper with local interrupts disabled. The queue lock covers the
     /// lifecycle transition, so a concurrent wake cannot observe a published-but-running task.
-    pub(crate) fn prepare_block(&self, task: TaskRef, cpu_id: usize) -> Result<(), TaskError> {
+    pub(crate) fn prepare_block(
+        &self,
+        task: TaskRef,
+        cpu_id: LogicalCpuId,
+    ) -> Result<(), TaskError> {
         // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
         // lifecycle -> completion or wait-queue locks. A future lock-free wait queue may replace
         // these locks after a complete memory-ordering proof.
@@ -60,7 +65,7 @@ impl WaitQueue {
     pub(crate) fn prepare_timed_block(
         &self,
         task: TaskRef,
-        cpu_id: usize,
+        cpu_id: LogicalCpuId,
     ) -> Result<u64, TaskError> {
         let _guard = exspin::NoPreemptIrqSave::new();
         let mut queue = self.queue.lock();
@@ -158,7 +163,7 @@ impl WaitQueue {
     }
 
     /// Removes one exact waiter during timeout processing.
-    pub(crate) fn remove_task(&self, task_id: u64) -> Option<TaskRef> {
+    pub(crate) fn remove_task(&self, task_id: TaskId) -> Option<TaskRef> {
         let _guard = exspin::NoPreemptIrqSave::new();
         let mut queue = self.queue.lock();
         let index = queue.iter().position(|task| task.id() == task_id)?;
@@ -208,7 +213,7 @@ impl<T> Mutex<T> {
 
     /// Attempts to acquire the mutex without blocking.
     pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, TaskError> {
-        let caller = super::scheduler::current_task_id().unwrap_or(0) as usize;
+        let caller = super::scheduler::current_task_id().map_or(0, |id| id.inner() as usize);
         if self.owner.load(Ordering::Acquire) == caller && caller != 0 {
             return Err(TaskError::WouldDeadlock);
         }
@@ -261,7 +266,8 @@ impl<T> Mutex<T> {
         self.owner.store(0, Ordering::Release);
         let waiter = self.waiters.take_one();
         if let Some(task) = &waiter {
-            self.reserved.store(task.id() as usize, Ordering::Release);
+            self.reserved
+                .store(task.id().inner() as usize, Ordering::Release);
             task.release_waiting();
         }
         drop(_guard);
@@ -433,7 +439,7 @@ impl Semaphore {
         loop {
             let current = self.permits.load(Ordering::Acquire);
             let reserved = self.reserved.load(Ordering::Acquire);
-            if reserved == caller as usize {
+            if reserved == caller.inner() as usize {
                 self.reserved.store(0, Ordering::Release);
                 return Ok(());
             }
@@ -454,7 +460,8 @@ impl Semaphore {
     /// Releases one permit and rejects over-release.
     pub fn release(&self) -> Result<(), TaskError> {
         if let Some(task) = self.waiters.take_one() {
-            self.reserved.store(task.id() as usize, Ordering::Release);
+            self.reserved
+                .store(task.id().inner() as usize, Ordering::Release);
             task.release_waiting();
             super::scheduler::wake_waiter(task);
             return Ok(());

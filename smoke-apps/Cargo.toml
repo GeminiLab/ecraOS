@@ -4,6 +4,7 @@ members = [
     "ipi",
     "sleep-join",
     "sync-preemption",
+    "tlb-shootdown",
 ]
 resolver = "3"
 
