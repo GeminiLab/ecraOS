@@ -3,11 +3,14 @@
 use expt::opaque::OpaquePageTableRoot;
 use look_at::look_at;
 use memory_addr::VirtAddr;
+use semantic_types::semantic_type;
 
 /// The physical identifier assigned to a CPU by firmware.
 ///
 /// Architecture startup mechanisms use this identifier when addressing a hardware CPU.
-pub type PhysicalCpuId = usize;
+#[semantic_type(lower_hex, upper_hex, display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PhysicalCpuId(usize);
 
 /// The common entry point used to initialize an application CPU.
 ///

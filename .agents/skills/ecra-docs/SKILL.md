@@ -56,6 +56,7 @@ description: Use when adding, changing, or reviewing ecraOS doc comments, standa
   subheadings. However, for crate doc-comments in `README.md`, use level 1
   headings for title and start at level 2 (`## Heading`).
 - Avoid semicolons in doc comments. Wrap comments at 100 characters.
+- Use triple backticks ("```") instead of triple tildes ("~~~") for code blocks.
 
 For example:
 

@@ -273,16 +273,18 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
     let processors = processors.expect("ACPI did not report processor information");
 
     let mut cpu_ids = Vec::with_capacity(1 + processors.application_processors.len());
-    cpu_ids.push(processors.boot_processor.local_apic_id as PhysicalCpuId);
+    cpu_ids.push(PhysicalCpuId::new(
+        processors.boot_processor.local_apic_id as _,
+    ));
     cpu_ids.extend(
         processors
             .application_processors
             .iter()
-            .map(|processor| processor.local_apic_id as PhysicalCpuId),
+            .map(|processor| PhysicalCpuId::new(processor.local_apic_id as _)),
     );
     let cpu_topology = CpuTopology::new(
         cpu_ids.into_boxed_slice(),
-        processors.boot_processor.local_apic_id as PhysicalCpuId,
+        PhysicalCpuId::new(processors.boot_processor.local_apic_id as _),
     );
 
     let acpi::platform::interrupt::InterruptModel::Apic(apic) = interrupt_model else {

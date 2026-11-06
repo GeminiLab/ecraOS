@@ -154,20 +154,44 @@ mod tests {
     use alloc::vec;
 
     use super::CpuTopology;
+    use crate::power::PhysicalCpuId;
 
     /// Preserves the discovered CPU identifiers and bootstrap identifier.
     #[test]
     fn cpu_topology_preserves_discovery_result() {
-        let topology = CpuTopology::new(vec![4, 7, 9].into_boxed_slice(), 7);
+        let topology = CpuTopology::new(
+            vec![
+                PhysicalCpuId::new(4),
+                PhysicalCpuId::new(7),
+                PhysicalCpuId::new(9),
+            ]
+            .into_boxed_slice(),
+            PhysicalCpuId::new(7),
+        );
 
-        assert_eq!(topology.cpu_ids(), &[4, 7, 9]);
-        assert_eq!(topology.bsp_id(), 7);
+        assert_eq!(
+            topology.cpu_ids(),
+            &[
+                PhysicalCpuId::new(4),
+                PhysicalCpuId::new(7),
+                PhysicalCpuId::new(9)
+            ]
+        );
+        assert_eq!(topology.bsp_id(), PhysicalCpuId::new(7));
     }
 
     /// Rejects duplicate physical CPU identifiers.
     #[test]
     #[should_panic(expected = "duplicate CPU identifier")]
     fn cpu_topology_rejects_duplicate_identifiers() {
-        let _ = CpuTopology::new(vec![4, 7, 7].into_boxed_slice(), 4);
+        let _ = CpuTopology::new(
+            vec![
+                PhysicalCpuId::new(4),
+                PhysicalCpuId::new(7),
+                PhysicalCpuId::new(7),
+            ]
+            .into_boxed_slice(),
+            PhysicalCpuId::new(4),
+        );
     }
 }

@@ -92,7 +92,7 @@ pub(crate) fn select_redistributor(
 ///
 /// Aff0 values above fifteen require Range Selector support and are rejected in this backend.
 pub(crate) fn sgi1r(target: PhysicalCpuId, intid: u8) -> Result<u64, IpiError> {
-    let target = target as u64;
+    let target = target.inner() as u64;
     let aff0 = target & 0xff;
     if aff0 >= 16 || intid >= 16 {
         return Err(IpiError::InvalidTarget);
@@ -225,10 +225,10 @@ mod tests {
     /// Unsupported Aff0 values cannot turn into Range Selector or broadcast delivery.
     #[test]
     fn encodes_physical_sgi_destination() {
-        assert_eq!(sgi1r(0x12_0034_560f, 1), Ok(0x0012_0034_0156_8000));
-        assert_eq!(sgi1r(3, 1), Ok(0x0100_0008));
-        assert_eq!(sgi1r(16, 1), Err(IpiError::InvalidTarget));
-        assert_eq!(sgi1r(0, 16), Err(IpiError::InvalidTarget));
+        assert_eq!(sgi1r(0x12_0034_560f.into(), 1), Ok(0x0012_0034_0156_8000));
+        assert_eq!(sgi1r(3.into(), 1), Ok(0x0100_0008));
+        assert_eq!(sgi1r(16.into(), 1), Err(IpiError::InvalidTarget));
+        assert_eq!(sgi1r(0.into(), 16), Err(IpiError::InvalidTarget));
     }
 
     /// Separates the reserved SGI, virtual timer PPI, SPI and special INTID classes.

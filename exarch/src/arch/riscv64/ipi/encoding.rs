@@ -11,7 +11,7 @@ pub(super) fn hart_mask_parts(target: PhysicalCpuId) -> Result<(usize, usize), I
     if target == usize::MAX {
         return Err(IpiError::InvalidTarget);
     }
-    Ok((1, target))
+    Ok((1, target.inner()))
 }
 
 /// Maps a firmware return code to the pre-submission mechanism contract.
@@ -32,6 +32,7 @@ pub(super) fn map_sbi_error(error: usize) -> Result<(), IpiError> {
 #[cfg(test)]
 mod tests {
     use crate::ipi::IpiError;
+    use crate::power::PhysicalCpuId;
 
     use super::{hart_mask_parts, map_sbi_error};
 
@@ -40,10 +41,13 @@ mod tests {
     /// A single-target request must never turn into an implicit broadcast.
     #[test]
     fn encodes_one_hart_at_physical_base() {
-        assert_eq!(hart_mask_parts(0), Ok((1, 0)));
-        assert_eq!(hart_mask_parts(65), Ok((1, 65)));
-        assert_eq!(hart_mask_parts(4096), Ok((1, 4096)));
-        assert_eq!(hart_mask_parts(usize::MAX), Err(IpiError::InvalidTarget));
+        assert_eq!(hart_mask_parts(PhysicalCpuId::new(0)), Ok((1, 0)));
+        assert_eq!(hart_mask_parts(PhysicalCpuId::new(65)), Ok((1, 65)));
+        assert_eq!(hart_mask_parts(PhysicalCpuId::new(4096)), Ok((1, 4096)));
+        assert_eq!(
+            hart_mask_parts(PhysicalCpuId::new(usize::MAX)),
+            Err(IpiError::InvalidTarget)
+        );
     }
 
     /// Distinguishes firmware success, unsupported delivery and rejected physical targets.

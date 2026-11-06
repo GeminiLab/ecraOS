@@ -158,7 +158,7 @@ pub fn current_cpu_id() -> LogicalCpuId {
 ///
 /// Architecture mechanisms use this namespace for controller targeting.
 pub fn current_cpu_phys_id() -> PhysicalCpuId {
-    CPU_PHYS_ID.read_current() as _
+    CPU_PHYS_ID.read_current().into()
 }
 
 /// Returns the number of CPUs discovered by the platform.
@@ -272,7 +272,7 @@ pub fn phys_to_logi_id(phys_id: PhysicalCpuId) -> LogicalCpuId {
 ///
 /// Discovery may subsequently correct the firmware physical identifier.
 pub fn init_cpu_id_bsp(phys_id: PhysicalCpuId) {
-    CPU_PHYS_ID.write_current(phys_id);
+    CPU_PHYS_ID.write_current(phys_id.inner());
     CPU_ID.write_current(BSP_CPU_ID);
 }
 
@@ -280,7 +280,7 @@ pub fn init_cpu_id_bsp(phys_id: PhysicalCpuId) {
 ///
 /// The logical slot is resolved through the common immutable map.
 pub fn init_cpu_id_ap(phys_id: PhysicalCpuId) {
-    CPU_PHYS_ID.write_current(phys_id);
+    CPU_PHYS_ID.write_current(phys_id.inner());
     CPU_ID.write_current(phys_to_logi_id(phys_id));
 }
 
@@ -295,12 +295,12 @@ pub fn init_cpu_list(topology: CpuTopology) {
 
     if current_cpu_phys_id() != bsp_phys_id {
         warn!(
-            "BSP Physical ID mismatch: from loader {:#x}, from ACPI {:#x}",
+            "BSP Physical ID mismatch: from loader {:#x}, from device probe {:#x}",
             current_cpu_phys_id(),
             bsp_phys_id
         );
         warn!("Updating BSP Physical ID to {:#x}", bsp_phys_id);
-        CPU_PHYS_ID.write_current(bsp_phys_id);
+        CPU_PHYS_ID.write_current(bsp_phys_id.inner());
     }
 
     info!(
@@ -484,6 +484,8 @@ fn transition_cpu_state(logi_id: LogicalCpuId, from: CpuState, to: CpuState) -> 
 mod tests {
     use alloc::{collections::BTreeMap, vec};
 
+    use exarch::power::PhysicalCpuId;
+
     use super::{CpuState, logical_to_physical_from_map, ready_snapshot};
 
     /// Rejects online CPUs that have not initialized their IPI consumer.
@@ -521,8 +523,11 @@ mod tests {
     /// Invalid targets must fail before slot reservation or hardware submission.
     #[test]
     fn logical_lookup_is_fallible() {
-        let map = BTreeMap::from([(0, 7), (1, 42)]);
-        assert_eq!(logical_to_physical_from_map(&map, 1), Some(42));
+        let map = BTreeMap::from([(0, PhysicalCpuId::new(7)), (1, PhysicalCpuId::new(42))]);
+        assert_eq!(
+            logical_to_physical_from_map(&map, 1),
+            Some(PhysicalCpuId::new(42))
+        );
         assert_eq!(logical_to_physical_from_map(&map, 99), None);
     }
 }

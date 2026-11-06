@@ -876,6 +876,8 @@ mod tests {
         time::Duration,
     };
 
+    use crate::mp::PhysicalCpuId;
+
     use super::{Backend, Failure, IpiError, IpiReason, Mailbox, call_many_inner, notify_inner};
 
     /// A deterministic clock and physical-delivery test boundary.
@@ -955,7 +957,7 @@ mod tests {
         /// Validates a logical target and resolves its physical destination.
         ///
         /// Physical IDs deliberately differ from logical indices.
-        fn validate(&self, target: usize) -> Result<usize, Failure> {
+        fn validate(&self, target: usize) -> Result<PhysicalCpuId, Failure> {
             if let Some((id, failure)) = self.invalid.get()
                 && id == target
             {
@@ -963,7 +965,7 @@ mod tests {
             }
             self.mailboxes
                 .get(target)
-                .map(|_| target + 10)
+                .map(|_| PhysicalCpuId::new(target + 10))
                 .ok_or(Failure::InvalidCpu)
         }
         /// Allocates one globally unique generation.
@@ -975,8 +977,8 @@ mod tests {
         /// Submits a physical notification or rejects it before submission.
         ///
         /// Dispatch is delayed until the waiting phase to expose publication ordering bugs.
-        fn send(&self, target: usize, physical: usize) -> Result<(), Failure> {
-            assert_eq!(physical, target + 10);
+        fn send(&self, target: usize, physical: PhysicalCpuId) -> Result<(), Failure> {
+            assert_eq!(physical.inner(), target + 10);
             self.sent.borrow_mut().push(target);
             if self.failed_send.get() == Some(target) {
                 if self.replace_failed.replace(false) {
@@ -1156,7 +1158,7 @@ mod tests {
             panic!("wrong failure: {error:?}")
         };
         assert_eq!(details.logical_cpu, 2);
-        assert_eq!(details.physical_cpu, Some(12));
+        assert_eq!(details.physical_cpu, Some(PhysicalCpuId::new(12)));
         assert_eq!(details.generation, Some(1));
         assert!(details.observed_at >= details.deadline);
         assert!(!fake.mailboxes[2].test.is_acknowledged(1));
@@ -1209,7 +1211,7 @@ mod tests {
         };
         assert_eq!(details.operation, IpiReason::TlbShootdown);
         assert_eq!(details.logical_cpu, 2);
-        assert_eq!(details.physical_cpu, Some(12));
+        assert_eq!(details.physical_cpu, Some(PhysicalCpuId::new(12)));
         assert_eq!(details.generation, Some(2));
         assert_eq!(details.acknowledged, 1);
         assert!(details.observed_at >= details.deadline);

@@ -16,6 +16,7 @@ use crate::{
             index::{DeviceTreeIndexExt, with_index},
         },
     },
+    power::PhysicalCpuId,
 };
 
 /// Discovers the AArch64 CPU topology, PSCI conduit, and GICv3 configuration.
@@ -58,7 +59,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
                     }
                     _ => unreachable!("CPU address-cell count validated above"),
                 };
-                cpu_ids.push(usize::try_from(affinity).expect("CPU affinity exceeds usize"));
+                cpu_ids.push(PhysicalCpuId::new(affinity as _));
             }
         }
         let bsp_id = crate::kernel_if::current_cpu_phys_id();

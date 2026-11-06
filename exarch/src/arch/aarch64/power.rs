@@ -121,9 +121,9 @@ pub fn cpu_up(
     // Start the AP by PSCI.
     let result = invoke_psci(
         PSCI_CPU_ON,
-        phys_id as u64,
-        trampoline_pa.as_usize() as u64,
-        args_pa.as_usize() as u64,
+        phys_id.inner() as _,
+        trampoline_pa.as_usize() as _,
+        args_pa.as_usize() as _,
     );
 
     match result {

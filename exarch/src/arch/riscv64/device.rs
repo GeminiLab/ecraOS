@@ -31,7 +31,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             .expect("failed to load device tree")
     };
     with_index(dtb, |index| {
-        let dtb_boot_cpu = index.fdt().boot_cpuid_phys() as PhysicalCpuId;
+        let dtb_boot_cpu = PhysicalCpuId::new(index.fdt().boot_cpuid_phys() as _);
         let boot_cpu = crate::kernel_if::current_cpu_phys_id();
         if dtb_boot_cpu != boot_cpu {
             log::warn!(
@@ -48,8 +48,8 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             }
             let cpu_id = node
                 .u32_property("reg", 0)?
-                .expect("CPU node has no reg property") as PhysicalCpuId;
-            cpu_ids.push(cpu_id);
+                .expect("CPU node has no reg property");
+            cpu_ids.push(PhysicalCpuId::new(cpu_id as _));
         }
         let cpu_topology = CpuTopology::new(cpu_ids.into_boxed_slice(), boot_cpu);
 
@@ -87,7 +87,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             let Some(hart_id) = cpu_node.u32_property("reg", 0)? else {
                 continue;
             };
-            interrupt_controllers.insert(phandle, hart_id as PhysicalCpuId);
+            interrupt_controllers.insert(phandle, PhysicalCpuId::new(hart_id as _));
         }
 
         let mut contexts = Vec::new();
@@ -102,7 +102,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
                 && let Some(&hart_id) = interrupt_controllers.get(&phandle)
             {
                 contexts.push(RiscvPlicContext {
-                    hart_id,
+                    hart_id: hart_id.inner(),
                     context: entry,
                 });
             }

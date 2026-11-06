@@ -15,7 +15,7 @@ pub fn init_percpu() {}
 ///
 /// Wider identifiers and the all-ones broadcast destination are rejected before submission.
 fn destination(target: PhysicalCpuId) -> Result<u32, IpiError> {
-    let target = u32::try_from(target).map_err(|_| IpiError::InvalidTarget)?;
+    let target = u32::try_from(target.inner()).map_err(|_| IpiError::InvalidTarget)?;
     if target == u32::MAX {
         return Err(IpiError::InvalidTarget);
     }
@@ -47,6 +47,7 @@ pub fn send(target: PhysicalCpuId) -> Result<(), IpiError> {
 #[cfg(test)]
 mod tests {
     use crate::ipi::IpiError;
+    use crate::power::PhysicalCpuId;
 
     use super::destination;
 
@@ -55,11 +56,17 @@ mod tests {
     /// Valid extended x2APIC IDs retain all thirty-two destination bits.
     #[test]
     fn rejects_unrepresentable_destination() {
-        assert_eq!(destination(0x1234), Ok(0x1234));
-        assert_eq!(destination(u32::MAX as usize - 1), Ok(u32::MAX - 1));
-        assert_eq!(destination(u32::MAX as usize), Err(IpiError::InvalidTarget));
+        assert_eq!(destination(PhysicalCpuId::new(0x1234)), Ok(0x1234));
         assert_eq!(
-            destination(u32::MAX as usize + 1),
+            destination(PhysicalCpuId::new(u32::MAX as usize - 1)),
+            Ok(u32::MAX - 1)
+        );
+        assert_eq!(
+            destination(PhysicalCpuId::new(u32::MAX as usize)),
+            Err(IpiError::InvalidTarget)
+        );
+        assert_eq!(
+            destination(PhysicalCpuId::new(u32::MAX as usize + 1)),
             Err(IpiError::InvalidTarget)
         );
     }

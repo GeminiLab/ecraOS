@@ -142,7 +142,7 @@ unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     percpu::init_bsp_early();
 
     // Initialize the CPU ID for the BSP.
-    mp::init_cpu_id_bsp(hart_id);
+    mp::init_cpu_id_bsp(hart_id.into());
 
     // SAFETY: The bootloader guarantees that the argument is valid.
     let arg_ref = unsafe { arg.as_ref_unchecked() };
@@ -242,13 +242,13 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
 ///
 /// This function should never be called directly.
 pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
-    let cpu_id = mp::phys_to_logi_id(phys_id);
+    let cpu_id = mp::phys_to_logi_id(phys_id.into());
 
     // Initialize the per-CPU data area for the AP.
     percpu::init_ap(cpu_id);
 
     // Initialize the CPU ID for the AP.
-    mp::init_cpu_id_ap(phys_id);
+    mp::init_cpu_id_ap(phys_id.into());
 
     // Perform early platform initialization for the AP.
     exarch::init::init_early_ap();
