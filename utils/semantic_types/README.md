@@ -1,8 +1,8 @@
 # `semantic_types`
 
-`semantic_types` provides the [`semantic_type`] attribute macro for numeric newtypes. It
-adds construction and inner-value access, conversions, comparisons with the inner value, and
-optional formatting implementations to a single-field tuple struct.
+`semantic_types` provides the [`semantic_type`] attribute macro for semantic types represented by
+primitive integer types. It adds configurable construction and conversion APIs, optional comparison,
+hashing, and formatting trait implementations to a single-field tuple struct.
 
 ## Usage
 
@@ -19,66 +19,102 @@ Annotate a tuple struct whose field is a primitive integer type:
 use semantic_types::semantic_type;
 
 /// A power value.
-#[semantic_type(lower_hex, upper_hex, display)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[semantic_type(eq_repr, ord, hash, lower_hex, upper_hex, display)]
 struct Power(
-    /// The wrapped power value.
+    /// The underlying primitive representation.
     u64,
 );
 
 let power = Power::new(42);
-assert_eq!(power.inner(), 42);
+assert_eq!(power.into_repr(), 42);
+assert_eq!(u64::from(power), 42);
+assert_eq!(Power::from(42), power);
+assert_eq!(power, 42_u64);
+assert_eq!(42_u64, power);
 assert_eq!(format!("{power}"), "42");
 assert_eq!(format!("{power:x}"), "2a");
 assert_eq!(format!("{power:X}"), "2A");
-assert_eq!(Power::from(42), power);
-assert_eq!(u64::from(power), 42);
-assert_eq!(power, 42_u64);
-assert_eq!(42_u64, power);
 ```
 
-The supported field types are `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`,
-`i64`, `i128`, and `isize`. The struct must have exactly one unnamed field. The macro preserves
-attributes on the struct and adds `#[repr(transparent)]` if the struct has no `repr` attribute.
+Supported underlying primitive types are `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`,
+`i64`, `i128`, and `isize`. The struct must have exactly one unnamed field, whose visibility does
+not matter. The macro preserves struct attributes and adds `#[repr(transparent)]` if the struct has
+no explicit `repr` attribute.
 
-The macro generates public `const fn new(inner)` and `const fn inner(self)` methods. The `inner`
-method consumes the wrapper and returns its primitive value. It also implements
-`From<Inner> for Wrapper`, `From<Wrapper> for Inner`, `PartialEq<Inner> for Wrapper`,
-and `PartialEq<Wrapper> for Inner`. It does not derive traits or implement `PartialEq` between two
-wrappers. Add the desired derives to the struct itself.
+Every annotated struct derives `Debug`, `Copy`, and `Clone` automatically. The macro always provides
+a `const fn into_repr(self) -> Repr` method and `impl From<Target> for Repr` to retrieve the underlying
+primitive representation. Here, `Repr` means the underlying primitive type, and `Target` means the
+struct. By default, the generated code also provides `const fn new(Repr) -> Target` and `impl From<Repr>
+for Target` to construct the struct from the underlying primitive representation.
 
-## Formatting
+## Options
 
-Formatting is opt-in. The bare options use the standard numeric format strings shown below:
+The following bare options control construction, comparisons, hashing, and formatting:
 
-| Argument | Trait | Default format string |
-| --- | --- | --- |
-| `lower_hex` | `core::fmt::LowerHex` | `{:x}` |
-| `upper_hex` | `core::fmt::UpperHex` | `{:X}` |
-| `display` | `core::fmt::Display` | `{:}` |
+| Option | Generated API |
+| --- | --- |
+| `no_from_repr` | Omits `fn new(Repr) -> Target` and `impl From<Repr> for Target`. |
+| `eq` | Derives `PartialEq` and `Eq` between two `Target` values. |
+| `eq_repr` | Implements bidirectional `PartialEq` between `Target` and `Repr` |
+| `ord` | Derives `PartialOrd` and `Ord` between two `Target` values, and implies `eq`. |
+| `ord_repr` | Implements bidirectional `PartialOrd` between `Target` and `Repr`, and implies `eq_repr`. |
+| `hash` | Derives `Hash` for `Target`. |
+| `lower_hex` | Implements `core::fmt::LowerHex`, using `{:x}` by default. |
+| `upper_hex` | Implements `core::fmt::UpperHex`, using `{:X}` by default. |
+| `display` | Implements `core::fmt::Display`, using `{:}` by default. |
 
-An option can take a custom format string. The wrapped value is passed as the first positional
-argument to that string:
+Note that `ord` implies `eq`, and `ord_repr` implies `eq_repr`. But `eq` and `eq_repr` do not imply
+each other, and `ord` and `ord_repr` do not imply each other.
+
+```rust,compile_fail
+use semantic_types::semantic_type;
+
+/// A power value.
+#[semantic_type(ord)]
+struct Power(u64);
+
+// error: Power is not PartialEq<u64>
+assert_eq!(Power::new(42), 42u64);
+```
+
+Use `no_from_repr` when construction must validate a representation. Define a constructor on the
+struct to enforce that validation:
+
+```rust
+use semantic_types::semantic_type;
+
+/// A validated nonzero identifier.
+#[semantic_type(no_from_repr)]
+struct NonZeroId(u32);
+
+impl NonZeroId {
+    /// Constructs an identifier if its value is nonzero.
+    pub const fn new(value: u32) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+}
+
+assert!(NonZeroId::new(0).is_none());
+assert_eq!(NonZeroId::new(7).unwrap().into_repr(), 7);
+```
+
+Formatting options can take a string literal in parentheses to customize their format string. The
+represented value is passed as the first positional argument:
 
 ```rust
 use semantic_types::semantic_type;
 
 /// A formatted power value.
 #[semantic_type(lower_hex("0x{:x}"), display("power={}"))]
-#[derive(Clone, Copy)]
 struct FormattedPower(
-    /// The wrapped power value.
+    /// The represented power value.
     u64,
 );
 
-assert_eq!(format!("{:x}", FormattedPower(42)), "0x2a");
-assert_eq!(format!("{}", FormattedPower(42)), "power=42");
+assert_eq!(format!("{:x}", FormattedPower::new(42)), "0x2a");
+assert_eq!(format!("{}", FormattedPower::new(42)), "power=42");
 ```
 
-The formatting flags on the outer formatting call are not forwarded to the configured format
-string. Put the desired formatting flags in the macro argument instead. A type that enables any
-formatting option must implement `Copy` because the generated formatter calls
-`inner(self)`, which consumes the wrapper.
-
-Unknown arguments, structs without exactly one unnamed field, and fields that are not primitive
-integer types produce compile-time errors.
+Do not derive `Debug`, `Copy`, or `Clone` on the annotated type, or derive any trait that an option
+generates. Other derives remain available. Unknown options, structs without exactly one unnamed
+field, and fields that are not primitive integer types produce compile-time errors.

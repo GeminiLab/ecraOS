@@ -32,8 +32,7 @@ pub use state::CpuState;
 /// An index in the kernel-owned logical CPU inventory.
 ///
 /// Logical identifiers are stable after firmware discovery.
-#[semantic_type(display)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[semantic_type(display, ord_repr, ord, hash)]
 pub struct LogicalCpuId(usize);
 
 /// The logical bootstrap CPU identifier.
@@ -196,7 +195,7 @@ pub fn cpu_state(logical_id: LogicalCpuId) -> Option<CpuState> {
     Some(CpuState::from_u8(
         CPU_STATE
             .get()?
-            .get(logical_id.inner())?
+            .get(logical_id.into_repr())?
             .load(Ordering::Acquire),
     ))
 }
@@ -207,7 +206,7 @@ pub fn cpu_state(logical_id: LogicalCpuId) -> Option<CpuState> {
 pub fn is_ipi_ready(logical_id: LogicalCpuId) -> bool {
     CPU_IPI_READY
         .get()
-        .and_then(|ready| ready.get(logical_id.inner()))
+        .and_then(|ready| ready.get(logical_id.into_repr()))
         .is_some_and(|ready| ready.load(Ordering::Acquire))
 }
 
@@ -246,7 +245,7 @@ pub fn ipi_ready_cpu_ids() -> Vec<LogicalCpuId> {
 ///
 /// Boot calls this only after common mailboxes, traps, the local source and scheduler are usable.
 pub(crate) fn mark_current_cpu_ipi_ready() {
-    CPU_IPI_READY[current_cpu_id().inner()].store(true, Ordering::Release);
+    CPU_IPI_READY[current_cpu_id().into_repr()].store(true, Ordering::Release);
 }
 
 /// Returns the boot stack range for the current CPU.
@@ -283,16 +282,16 @@ pub fn phys_to_logi_id(phys_id: PhysicalCpuId) -> LogicalCpuId {
 ///
 /// Discovery may subsequently correct the firmware physical identifier.
 pub fn init_cpu_id_bsp(phys_id: PhysicalCpuId) {
-    CPU_PHYS_ID.write_current(phys_id.inner());
-    CPU_ID.write_current(BSP_CPU_ID.inner());
+    CPU_PHYS_ID.write_current(phys_id.into_repr());
+    CPU_ID.write_current(BSP_CPU_ID.into_repr());
 }
 
 /// Initializes the CPU ID for the AP.
 ///
 /// The logical slot is resolved through the common immutable map.
 pub fn init_cpu_id_ap(phys_id: PhysicalCpuId) {
-    CPU_PHYS_ID.write_current(phys_id.inner());
-    CPU_ID.write_current(phys_to_logi_id(phys_id).inner());
+    CPU_PHYS_ID.write_current(phys_id.into_repr());
+    CPU_ID.write_current(phys_to_logi_id(phys_id).into_repr());
 }
 
 /// Installs the immutable CPU inventory and initial lifecycle state.
@@ -311,7 +310,7 @@ pub fn init_cpu_list(topology: CpuTopology) {
             bsp_phys_id
         );
         warn!("Updating BSP Physical ID to {:#x}", bsp_phys_id);
-        CPU_PHYS_ID.write_current(bsp_phys_id.inner());
+        CPU_PHYS_ID.write_current(bsp_phys_id.into_repr());
     }
 
     info!(
@@ -462,7 +461,7 @@ fn load_cpu_state(logi_id: LogicalCpuId) -> CpuState {
     CpuState::from_u8(
         CPU_STATE
             .deref()
-            .get(logi_id.inner())
+            .get(logi_id.into_repr())
             .expect("cpu state must be initialized")
             .load(Ordering::Acquire),
     )
@@ -478,7 +477,7 @@ fn transition_cpu_state(logi_id: LogicalCpuId, from: CpuState, to: CpuState) -> 
 
     let state = CPU_STATE
         .deref()
-        .get(logi_id.inner())
+        .get(logi_id.into_repr())
         .expect("cpu state must be initialized");
     state
         .compare_exchange(
@@ -505,9 +504,9 @@ mod tests {
     /// Verifies the distinct identifier wrappers expose their numeric values explicitly.
     #[test]
     fn semantic_identifiers_wrap_their_numeric_values() {
-        assert_eq!(LogicalCpuId::new(3).inner(), 3);
-        assert_eq!(TaskId::new(5).inner(), 5);
-        assert_eq!(DomainId::new(7).inner(), 7);
+        assert_eq!(LogicalCpuId::new(3).into_repr(), 3);
+        assert_eq!(TaskId::new(5).into_repr(), 5);
+        assert_eq!(DomainId::new(7).into_repr(), 7);
     }
 
     /// Rejects online CPUs that have not initialized their IPI consumer.

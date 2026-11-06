@@ -63,7 +63,7 @@ fn remote_main() {
     })
     .expect("remote domain creation failed");
     task::switch_current_to(&domain).expect("remote domain installation failed");
-    DOMAINS[cpu.inner()].store(domain.id().inner(), Ordering::Release);
+    DOMAINS[cpu.into_repr()].store(domain.id().into_repr(), Ordering::Release);
     loop {
         core::hint::spin_loop();
     }
@@ -111,10 +111,10 @@ fn main() {
     kprintln!("IPI combined Test+Reschedule logical={target} generation={generation}");
 
     wait_until("remote domain ready", target, None, || {
-        DOMAINS[target.inner()].load(Ordering::Acquire) != 0
+        DOMAINS[target.into_repr()].load(Ordering::Acquire) != 0
     });
     let domain = task::lookup_domain(task::DomainId::new(
-        DOMAINS[target.inner()].load(Ordering::Acquire),
+        DOMAINS[target.into_repr()].load(Ordering::Acquire),
     ))
     .unwrap();
     let before = test::counters(target).1;

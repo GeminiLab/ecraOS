@@ -166,7 +166,7 @@ fn run_queue(cpu_id: LogicalCpuId) -> &'static SpinNoIrq<PhysicalQueue<TaskRef>>
     RUN_QUEUES
         .get()
         .expect("run queues must be initialized")
-        .get(cpu_id.inner())
+        .get(cpu_id.into_repr())
         .expect("invalid run queue CPU")
 }
 
@@ -888,13 +888,13 @@ pub(super) fn register_timed_wait(
     deadline: exarch::time::TimeValue,
     cpu_id: LogicalCpuId,
 ) -> Result<(), super::TaskError> {
-    if cpu_id.inner() >= crate::mp::cpu_count() {
+    if cpu_id.into_repr() >= crate::mp::cpu_count() {
         return Err(super::TaskError::InvalidTarget);
     }
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task lifecycle
     // -> timer ownership. The timer lock is released before any wake publication or switch. A
     // future lock-free timer structure may replace this lock after a memory-ordering proof.
-    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.inner()) }.lock();
+    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.into_repr()) }.lock();
     state
         .tasks
         .try_reserve(1)
@@ -909,13 +909,13 @@ pub(super) fn register_timed_wait(
 
 /// Cancels one timer-owned wait entry and releases its scheduler ownership.
 pub(super) fn cancel_timed_wait(task: &Task, generation: u64, cpu_id: LogicalCpuId) {
-    if cpu_id.inner() >= crate::mp::cpu_count() {
+    if cpu_id.into_repr() >= crate::mp::cpu_count() {
         return;
     }
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task lifecycle
     // -> timer ownership. The timer lock is released before any scheduler wake or switch. A
     // future lock-free timer structure may replace this lock after its memory-ordering proof.
-    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.inner()) }.lock();
+    let mut state = unsafe { SLEEP_STATE.remote_ref_mut_raw(cpu_id.into_repr()) }.lock();
     state.timers.cancel(task.id(), generation);
     if let Some(index) = state
         .tasks

@@ -213,7 +213,7 @@ impl<T> Mutex<T> {
 
     /// Attempts to acquire the mutex without blocking.
     pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, TaskError> {
-        let caller = super::scheduler::current_task_id().map_or(0, |id| id.inner() as usize);
+        let caller = super::scheduler::current_task_id().map_or(0, |id| id.into_repr() as usize);
         if self.owner.load(Ordering::Acquire) == caller && caller != 0 {
             return Err(TaskError::WouldDeadlock);
         }
@@ -267,7 +267,7 @@ impl<T> Mutex<T> {
         let waiter = self.waiters.take_one();
         if let Some(task) = &waiter {
             self.reserved
-                .store(task.id().inner() as usize, Ordering::Release);
+                .store(task.id().into_repr() as usize, Ordering::Release);
             task.release_waiting();
         }
         drop(_guard);
@@ -439,7 +439,7 @@ impl Semaphore {
         loop {
             let current = self.permits.load(Ordering::Acquire);
             let reserved = self.reserved.load(Ordering::Acquire);
-            if reserved == caller.inner() as usize {
+            if reserved == caller.into_repr() as usize {
                 self.reserved.store(0, Ordering::Release);
                 return Ok(());
             }
@@ -461,7 +461,7 @@ impl Semaphore {
     pub fn release(&self) -> Result<(), TaskError> {
         if let Some(task) = self.waiters.take_one() {
             self.reserved
-                .store(task.id().inner() as usize, Ordering::Release);
+                .store(task.id().into_repr() as usize, Ordering::Release);
             task.release_waiting();
             super::scheduler::wake_waiter(task);
             return Ok(());

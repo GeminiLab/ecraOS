@@ -15,7 +15,7 @@ pub fn init_percpu() {}
 ///
 /// Wider identifiers and the all-ones broadcast destination are rejected before submission.
 fn destination(target: PhysicalCpuId) -> Result<u32, IpiError> {
-    let target = u32::try_from(target.inner()).map_err(|_| IpiError::InvalidTarget)?;
+    let target = u32::try_from(target.into_repr()).map_err(|_| IpiError::InvalidTarget)?;
     if target == u32::MAX {
         return Err(IpiError::InvalidTarget);
     }

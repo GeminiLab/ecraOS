@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ecraos.workspace = true
+ecraos = { workspace = true, features = ["foundation-test"] }

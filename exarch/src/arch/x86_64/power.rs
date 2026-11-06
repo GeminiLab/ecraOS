@@ -15,7 +15,7 @@ pub fn cpu_up(
     entry: APEntry,
 ) -> Result<(), CpuStartError> {
     let OpaquePageTableRoot::Single(page_table_root) = page_table_root;
-    let apic_id = u32::try_from(cpu_id.inner()).map_err(|_| CpuStartError::InvalidCpu)?;
+    let apic_id = u32::try_from(cpu_id.into_repr()).map_err(|_| CpuStartError::InvalidCpu)?;
     super::imp::ap::setup_ap_start_page(
         cpu_id,
         page_table_root,

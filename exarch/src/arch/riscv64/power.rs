@@ -53,7 +53,7 @@ pub fn cpu_up(
     }
 
     let result = sbi_rt::hart_start(
-        phys_id.inner(),
+        phys_id.into_repr(),
         start_ap_pa.as_usize(),
         boot_stack_top_pa.as_usize(),
     );

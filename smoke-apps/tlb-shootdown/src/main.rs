@@ -58,7 +58,7 @@ fn wait_until(
                     (
                         cpu,
                         mp::logical_to_physical(cpu),
-                        OBSERVED[cpu.inner()].load(Ordering::Acquire),
+                        OBSERVED[cpu.into_repr()].load(Ordering::Acquire),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -82,7 +82,7 @@ fn remote_main() {
     })
     .unwrap();
     task::switch_current_to(&domain).unwrap();
-    DOMAINS[cpu.inner()].store(domain.id().inner(), Ordering::Release);
+    DOMAINS[cpu.into_repr()].store(domain.id().into_repr(), Ordering::Release);
     loop {
         core::hint::spin_loop();
     }
@@ -97,7 +97,7 @@ fn command(targets: &[mp::LogicalCpuId], generation: usize, tlb_generation: Opti
         "remote observation barrier",
         targets,
         tlb_generation,
-        |cpu| OBSERVED[cpu.inner()].load(Ordering::Acquire) == generation,
+        |cpu| OBSERVED[cpu.into_repr()].load(Ordering::Acquire) == generation,
     );
 }
 
@@ -117,10 +117,10 @@ fn main() {
     let mut readers = Vec::new();
     for &cpu in &targets {
         wait_until("remote domain ready", &[cpu], None, |cpu| {
-            DOMAINS[cpu.inner()].load(Ordering::Acquire) != 0
+            DOMAINS[cpu.into_repr()].load(Ordering::Acquire) != 0
         });
         let domain = task::lookup_domain(task::DomainId::new(
-            DOMAINS[cpu.inner()].load(Ordering::Acquire),
+            DOMAINS[cpu.into_repr()].load(Ordering::Acquire),
         ))
         .unwrap();
         let reader = domain
@@ -170,7 +170,7 @@ fn main() {
                         }
                     }
                     seen = stage;
-                    OBSERVED[cpu.inner()].store(stage, Ordering::Release);
+                    OBSERVED[cpu.into_repr()].store(stage, Ordering::Release);
                 }
             })
             .unwrap();

@@ -662,7 +662,7 @@ impl Backend for KernelBackend {
     ///
     /// Discovery bounds and pre-initialization calls are checked without panicking.
     fn mailbox(&self, target: LogicalCpuId) -> Option<&Mailbox> {
-        MAILBOXES.get()?.get(target.inner())
+        MAILBOXES.get()?.get(target.into_repr())
     }
     /// Returns the caller's stable logical identifier.
     ///
@@ -717,7 +717,7 @@ impl Backend for KernelBackend {
     ///
     /// No hardware IPI is submitted and no subsystem lock is acquired by reason dispatch.
     fn execute(&self, target: LogicalCpuId) {
-        drain_mailbox(&MAILBOXES[target.inner()]);
+        drain_mailbox(&MAILBOXES[target.into_repr()]);
     }
 }
 
@@ -764,7 +764,7 @@ fn drain_mailbox(mailbox: &Mailbox) {
 pub(crate) fn handle_ipi() {
     if let Some(mailbox) = MAILBOXES
         .get()
-        .and_then(|all| all.get(mp::current_cpu_id().inner()))
+        .and_then(|all| all.get(mp::current_cpu_id().into_repr()))
     {
         drain_mailbox(mailbox);
     }
@@ -819,7 +819,7 @@ pub(crate) fn test_roundtrip(
     call_many(&[target], IpiReason::Test, timeout, |value| {
         generation = value;
         if combined {
-            MAILBOXES[target.inner()].publish(IpiReason::Reschedule);
+            MAILBOXES[target.into_repr()].publish(IpiReason::Reschedule);
         }
     })?;
     Ok(generation)
@@ -830,7 +830,7 @@ pub(crate) fn test_roundtrip(
 /// Foundation applications get counters rather than private mailbox references.
 #[cfg(feature = "foundation-test")]
 pub(crate) fn test_counters(target: LogicalCpuId) -> (u64, u64, u64) {
-    let mailbox = &MAILBOXES[target.inner()];
+    let mailbox = &MAILBOXES[target.into_repr()];
     (
         mailbox.test_count.load(Ordering::Acquire),
         mailbox.reschedule_count.load(Ordering::Acquire),
@@ -843,7 +843,7 @@ pub(crate) fn test_counters(target: LogicalCpuId) -> (u64, u64, u64) {
 /// Foundation tests inspect production acknowledgement storage rather than maintaining counters.
 #[cfg(feature = "foundation-test")]
 pub(crate) fn tlb_generation(target: LogicalCpuId) -> u64 {
-    MAILBOXES[target.inner()]
+    MAILBOXES[target.into_repr()]
         .tlb
         .acknowledged
         .load(Ordering::Acquire)
@@ -855,7 +855,7 @@ pub(crate) fn tlb_generation(target: LogicalCpuId) -> u64 {
 #[cfg(feature = "foundation-test")]
 pub(crate) fn suppress_next_ack(target: LogicalCpuId, reason: IpiReason, suppress: bool) {
     assert!(reason != IpiReason::Reschedule);
-    let mailbox = &MAILBOXES[target.inner()];
+    let mailbox = &MAILBOXES[target.into_repr()];
     if suppress {
         mailbox
             .suppress_ack
@@ -954,7 +954,7 @@ mod tests {
         ///
         /// Out-of-range identifiers remain invalid.
         fn mailbox(&self, target: LogicalCpuId) -> Option<&Mailbox> {
-            self.mailboxes.get(target.inner())
+            self.mailboxes.get(target.into_repr())
         }
         /// Returns the executing logical CPU.
         ///
@@ -966,7 +966,7 @@ mod tests {
         ///
         /// Physical IDs deliberately differ from logical indices.
         fn validate(&self, target: LogicalCpuId) -> Result<PhysicalCpuId, Failure> {
-            let target_index = target.inner();
+            let target_index = target.into_repr();
             if let Some((id, failure)) = self.invalid.get()
                 && id == target_index
             {
@@ -987,8 +987,8 @@ mod tests {
         ///
         /// Dispatch is delayed until the waiting phase to expose publication ordering bugs.
         fn send(&self, target: LogicalCpuId, physical: PhysicalCpuId) -> Result<(), Failure> {
-            let target_index = target.inner();
-            assert_eq!(physical.inner(), target_index + 10);
+            let target_index = target.into_repr();
+            assert_eq!(physical.into_repr(), target_index + 10);
             self.sent.borrow_mut().push(target_index);
             if self.failed_send.get() == Some(target_index) {
                 if self.replace_failed.replace(false) {
@@ -1021,7 +1021,7 @@ mod tests {
         ///
         /// This uses the same drain path as remote interrupt dispatch.
         fn execute(&self, target: LogicalCpuId) {
-            self.mailboxes[target.inner()].drain(|_, _| true);
+            self.mailboxes[target.into_repr()].drain(|_, _| true);
         }
     }
 

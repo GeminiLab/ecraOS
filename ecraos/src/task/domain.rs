@@ -26,8 +26,7 @@ use super::{JoinHandle, Task};
 pub const MAX_CPU_NUM: usize = 256;
 
 /// A monotonic scheduling-domain identifier.
-#[semantic_type(display)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[semantic_type(display, eq_repr, ord, hash)]
 pub struct DomainId(u64);
 
 /// An immutable domain scheduling policy.
@@ -133,10 +132,10 @@ impl CpuSet {
     }
 
     fn position(cpu: LogicalCpuId) -> Result<(usize, usize), DomainError> {
-        if cpu.inner() >= MAX_CPU_NUM {
+        if cpu.into_repr() >= MAX_CPU_NUM {
             return Err(DomainError::CpuOutOfRange);
         }
-        Ok((cpu.inner() / 64, cpu.inner() % 64))
+        Ok((cpu.into_repr() / 64, cpu.into_repr() % 64))
     }
 }
 

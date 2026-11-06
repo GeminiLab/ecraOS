@@ -23,8 +23,7 @@ use crate::mp::LogicalCpuId;
 /// A stable kernel task identifier.
 ///
 /// Identifiers remain associated with a task for its entire lifetime.
-#[semantic_type(display)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[semantic_type(display, eq_repr, ord, hash)]
 pub struct TaskId(u64);
 
 /// A shared reference to one task.
@@ -448,7 +447,8 @@ impl Task {
     pub(super) fn set_domain(&self, domain: &DomainRef) {
         let _guard = kernel_guard::NoPreempt::new();
         *self.domain.lock() = Arc::downgrade(domain);
-        self.domain_id.store(domain.id().inner(), Ordering::Release);
+        self.domain_id
+            .store(domain.id().into_repr(), Ordering::Release);
         let ticks = domain
             .policy()
             .slice_ticks(core::time::Duration::from_millis(10))
@@ -699,7 +699,7 @@ impl Task {
         match *state {
             TaskState::Running { cpu_id: owner } if owner == cpu_id => {
                 *state = TaskState::Sleeping;
-                self.timer_cpu.store(cpu_id.inner(), Ordering::Release);
+                self.timer_cpu.store(cpu_id.into_repr(), Ordering::Release);
                 Ok(())
             }
             TaskState::Running { .. } => Err(TaskStateError::WrongCpu),
@@ -803,7 +803,7 @@ impl Task {
             TaskState::Running { cpu_id: owner } if owner == cpu_id => {
                 *state = TaskState::TimedWaiting;
                 self.wait_result.store(0, Ordering::Release);
-                self.timer_cpu.store(cpu_id.inner(), Ordering::Release);
+                self.timer_cpu.store(cpu_id.into_repr(), Ordering::Release);
                 Ok(generation)
             }
             TaskState::Running { .. } => Err(TaskStateError::WrongCpu),

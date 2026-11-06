@@ -135,7 +135,7 @@ impl ExternalController {
 
 /// Narrows a physical CPU ID to the destination width stored in an IOAPIC redirection entry.
 fn ioapic_destination_id(cpu_id: PhysicalCpuId) -> u8 {
-    u8::try_from(cpu_id.inner()).expect("x86 IOAPIC BSP destination must fit in an APIC RTE")
+    u8::try_from(cpu_id.into_repr()).expect("x86 IOAPIC BSP destination must fit in an APIC RTE")
 }
 
 /// Selects an unused external vector while skipping every reserved LAPIC vector.

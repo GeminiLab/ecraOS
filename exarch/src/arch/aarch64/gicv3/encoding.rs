@@ -92,7 +92,7 @@ pub(crate) fn select_redistributor(
 ///
 /// Aff0 values above fifteen require Range Selector support and are rejected in this backend.
 pub(crate) fn sgi1r(target: PhysicalCpuId, intid: u8) -> Result<u64, IpiError> {
-    let target = target.inner() as u64;
+    let target = target.into_repr() as u64;
     let aff0 = target & 0xff;
     if aff0 >= 16 || intid >= 16 {
         return Err(IpiError::InvalidTarget);

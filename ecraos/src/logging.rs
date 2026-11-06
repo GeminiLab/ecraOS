@@ -109,7 +109,7 @@ impl Log for Logger {
         let micros = mono_time.subsec_micros();
 
         let cpu_id = crate::mp::current_cpu_id();
-        let task_id = crate::task::current_task_id().map_or(0, |id| id.inner());
+        let task_id = crate::task::current_task_id().map_or(0, |id| id.into_repr());
 
         let level_str = fixed_width_level(level);
         let ColorForLevel {

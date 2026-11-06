@@ -11,7 +11,7 @@ pub(super) fn hart_mask_parts(target: PhysicalCpuId) -> Result<(usize, usize), I
     if target == usize::MAX {
         return Err(IpiError::InvalidTarget);
     }
-    Ok((1, target.inner()))
+    Ok((1, target.into_repr()))
 }
 
 /// Maps a firmware return code to the pre-submission mechanism contract.
