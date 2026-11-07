@@ -3,14 +3,13 @@
 use std::{sync::mpsc, thread, time::Duration};
 
 use super::{
-    DynamicMemoryRegions, EarlyMemoryRegions, MemoryRegions, RegionTable, read_region_table,
-    write_region_table,
+    EarlyRegions, FinalRegions, RegionTable, RuntimeRegions, read_region_table, write_region_table,
 };
 
 /// Allows a second reader to finish while the first reader still holds the table.
 #[test]
 fn region_table_allows_concurrent_readers() {
-    let table = RegionTable::new(MemoryRegions::Early(EarlyMemoryRegions::new()));
+    let table = RegionTable::new(RuntimeRegions::Early(EarlyRegions::new()));
     let concurrent = thread::scope(|scope| {
         let (held, holding) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -41,13 +40,13 @@ fn region_table_allows_concurrent_readers() {
 /// Keeps readers and other writers out during an update, then exposes the committed storage.
 #[test]
 fn region_table_updates_are_exclusive() {
-    let table = RegionTable::new(MemoryRegions::Early(EarlyMemoryRegions::new()));
+    let table = RegionTable::new(RuntimeRegions::Early(EarlyRegions::new()));
     write_region_table(&table, |regions| {
         assert!(table.try_read().is_none(), "a writer must exclude readers");
         assert!(table.try_write().is_none(), "a writer must exclude writers");
-        *regions = MemoryRegions::Dynamic(DynamicMemoryRegions::new());
+        *regions = RuntimeRegions::Final(FinalRegions::new());
     });
     read_region_table(&table, |regions| {
-        assert!(matches!(regions, MemoryRegions::Dynamic(_)));
+        assert!(matches!(regions, RuntimeRegions::Final(_)));
     });
 }

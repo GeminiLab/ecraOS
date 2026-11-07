@@ -3,7 +3,7 @@
 use core::cell::UnsafeCell;
 
 use bitmaps::Bitmap;
-use exarch::mem::{MemoryRegion, MemoryRegionFlags};
+use exarch::mem::{MemoryRegionFlags, PhysMemoryRegion};
 use expalloc_trait::PageAllocator;
 use lazyinit::LazyInit;
 use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange};
@@ -40,7 +40,7 @@ static EARLY_PAGE_ALLOCATOR: EarlyPageAllocator = EarlyPageAllocator::new_uninit
 
 /// Initializes the early page allocator at the given physical base address.
 pub fn init_early_page_allocator() {
-    let range = pmm::with_phys_mem_regions(find_early_page_allocator_range)
+    let range = pmm::lock_read_phys_mem_regions(find_early_page_allocator_range)
         .expect("Cannot find early page allocator range");
     let base_paddr = range.start;
 
@@ -61,7 +61,7 @@ pub fn init_early_page_allocator() {
 ///
 /// This function finds the last suitable range for the early page allocator, to
 /// avoid collisions with the metadata regions of the buddy page allocator.
-fn find_early_page_allocator_range(regions: &[MemoryRegion]) -> Option<PhysAddrRange> {
+fn find_early_page_allocator_range(regions: &[PhysMemoryRegion]) -> Option<PhysAddrRange> {
     let page_size_shift = vmm::page_size_shift();
     let page_size = 1usize << page_size_shift;
     let total_size = EARLY_PAGE_ALLOCATOR_PAGES << page_size_shift;

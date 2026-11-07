@@ -7,7 +7,7 @@ use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use look_at::look_at;
 
-use crate::{mem::MemoryRegion, power::PhysicalCpuId, trap::irq::ArchIrqConfig};
+use crate::{mem::PhysMemoryRegion, power::PhysicalCpuId, trap::irq::ArchIrqConfig};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64", ecraos_doc, test))]
 pub mod dt;
@@ -110,7 +110,7 @@ pub struct PlatformDescription {
     /// The platform interrupt-controller driver.
     interrupt_controller: PlatformInterruptController,
     /// The device MMIO ranges that need direct mappings before controller initialization.
-    mmio_regions: Vec<MemoryRegion>,
+    mmio_regions: Vec<PhysMemoryRegion>,
 }
 
 impl PlatformDescription {
@@ -118,7 +118,7 @@ impl PlatformDescription {
     pub(crate) fn new(
         cpu_topology: CpuTopology,
         interrupt_controller: PlatformInterruptController,
-        mmio_regions: Vec<MemoryRegion>,
+        mmio_regions: Vec<PhysMemoryRegion>,
     ) -> Self {
         Self {
             cpu_topology,
@@ -128,7 +128,13 @@ impl PlatformDescription {
     }
 
     /// Separates the CPU topology, interrupt-controller configuration, and MMIO ranges.
-    pub fn into_parts(self) -> (CpuTopology, PlatformInterruptController, Vec<MemoryRegion>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        CpuTopology,
+        PlatformInterruptController,
+        Vec<PhysMemoryRegion>,
+    ) {
         (
             self.cpu_topology,
             self.interrupt_controller,

@@ -6,7 +6,7 @@ use core::{fmt, ops::Index, slice};
 use heapless::Vec as HeaplessVec;
 use memory_addr::{PhysAddr, PhysAddrRange};
 
-use super::{MemoryRegion, MemoryRegionFlags};
+use super::{MemoryRegionFlags, PhysMemoryRegion};
 
 #[cfg(test)]
 mod tests;
@@ -32,11 +32,14 @@ pub enum PhysMemoryRegionsError {
 ///
 /// Default must create empty storage. Clone preserves entries and uses the storage type's normal
 /// allocation-failure behavior. Insertion preserves existing element order. A failed
-/// reservation or insertion must preserve the contents. Storage is never exposed mutably through
-/// the collection, so callers cannot bypass range and flag validation.
+/// reservation or insertion must preserve the contents. Mutable access through the
+/// collection's unsafe APIs requires callers to preserve its range and flag invariants.
 pub trait PhysMemoryRegionsStorage: Default + Clone {
-    /// Returns all stored regions in order.
-    fn as_slice(&self) -> &[MemoryRegion];
+    /// Returns all stored regions as an immutable slice in order.
+    fn as_slice(&self) -> &[PhysMemoryRegion];
+
+    /// Returns all stored regions as a mutable slice in order.
+    fn as_mut_slice(&mut self) -> &mut [PhysMemoryRegion];
 
     /// Reserves capacity for at least the given total number of elements.
     ///
@@ -51,15 +54,20 @@ pub trait PhysMemoryRegionsStorage: Default + Clone {
     fn insert_region(
         &mut self,
         index: usize,
-        region: MemoryRegion,
+        region: PhysMemoryRegion,
     ) -> Result<(), PhysMemoryRegionsError>;
 }
 
 /// Allocation-free storage operations on an inline-capacity vector.
-impl<const N: usize> PhysMemoryRegionsStorage for HeaplessVec<MemoryRegion, N> {
+impl<const N: usize> PhysMemoryRegionsStorage for HeaplessVec<PhysMemoryRegion, N> {
     /// Returns the live inline entries.
-    fn as_slice(&self) -> &[MemoryRegion] {
+    fn as_slice(&self) -> &[PhysMemoryRegion] {
         self.as_ref()
+    }
+
+    /// Returns the live inline entries.
+    fn as_mut_slice(&mut self) -> &mut [PhysMemoryRegion] {
+        self.as_mut()
     }
 
     /// Rejects a requested total greater than the inline capacity.
@@ -75,7 +83,7 @@ impl<const N: usize> PhysMemoryRegionsStorage for HeaplessVec<MemoryRegion, N> {
     fn insert_region(
         &mut self,
         index: usize,
-        region: MemoryRegion,
+        region: PhysMemoryRegion,
     ) -> Result<(), PhysMemoryRegionsError> {
         self.insert(index, region)
             .map_err(|_| PhysMemoryRegionsError::CapacityExceeded)
@@ -83,9 +91,14 @@ impl<const N: usize> PhysMemoryRegionsStorage for HeaplessVec<MemoryRegion, N> {
 }
 
 /// Fallible storage operations on a dynamically allocated vector.
-impl PhysMemoryRegionsStorage for Vec<MemoryRegion> {
+impl PhysMemoryRegionsStorage for Vec<PhysMemoryRegion> {
     /// Returns the allocated entries.
-    fn as_slice(&self) -> &[MemoryRegion] {
+    fn as_slice(&self) -> &[PhysMemoryRegion] {
+        self
+    }
+
+    /// Returns the allocated entries.
+    fn as_mut_slice(&mut self) -> &mut [PhysMemoryRegion] {
         self
     }
 
@@ -100,7 +113,7 @@ impl PhysMemoryRegionsStorage for Vec<MemoryRegion> {
     fn insert_region(
         &mut self,
         index: usize,
-        region: MemoryRegion,
+        region: PhysMemoryRegion,
     ) -> Result<(), PhysMemoryRegionsError> {
         self.reserve_regions(self.len() + 1)?;
         self.insert(index, region);
@@ -132,13 +145,36 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     }
 
     /// Returns the regions without permitting mutation of their ranges or attributes.
-    pub fn as_slice(&self) -> &[MemoryRegion] {
+    pub fn as_slice(&self) -> &[PhysMemoryRegion] {
         self.0.as_slice()
     }
 
+    /// Returns the regions as a mutable slice.
+    ///
+    /// # Safety
+    ///
+    /// The caller must preserve the region invariants: regions must remain sorted and
+    /// non-overlapping, every range must be nonempty, and all flags must remain valid.
+    /// Valid flags contain only defined bits and exactly one role.
+    pub unsafe fn as_mut_slice(&mut self) -> &mut [PhysMemoryRegion] {
+        self.0.as_mut_slice()
+    }
+
     /// Returns an iterator in ascending address order.
-    pub fn iter(&self) -> slice::Iter<'_, MemoryRegion> {
+    pub fn iter(&self) -> slice::Iter<'_, PhysMemoryRegion> {
         self.as_slice().iter()
+    }
+
+    /// Returns an iterator in ascending address order that permits mutation of the regions.
+    ///
+    /// # Safety
+    ///
+    /// The caller must preserve the region invariants: regions must remain sorted and
+    /// non-overlapping, every range must be nonempty, and all flags must remain valid.
+    /// Valid flags contain only defined bits and exactly one role.
+    pub unsafe fn iter_mut(&mut self) -> slice::IterMut<'_, PhysMemoryRegion> {
+        // SAFETY: The caller promises to maintain the invariant.
+        unsafe { self.as_mut_slice().iter_mut() }
     }
 
     /// Returns the number of stored regions.
@@ -157,7 +193,7 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     }
 
     /// Finds the region containing an address, or returns None for an uncovered address.
-    pub fn find(&self, address: PhysAddr) -> Option<&MemoryRegion> {
+    pub fn find(&self, address: PhysAddr) -> Option<&PhysMemoryRegion> {
         let index = self
             .as_slice()
             .partition_point(|region| region.range.end <= address);
@@ -167,7 +203,7 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     }
 
     /// Iterates over regions intersecting a range, preserving their full stored ranges.
-    pub fn overlaps(&self, range: PhysAddrRange) -> impl Iterator<Item = &MemoryRegion> {
+    pub fn overlaps(&self, range: PhysAddrRange) -> impl Iterator<Item = &PhysMemoryRegion> {
         let start = self
             .as_slice()
             .partition_point(|region| region.range.end <= range.start);
@@ -206,7 +242,10 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     ///
     /// Returns InvalidRange or InvalidFlags for invalid input, Overlap for an intersection, and
     /// a storage error if the insertion cannot fit. No error changes the collection contents.
-    pub fn insert_disjoint(&mut self, region: MemoryRegion) -> Result<(), PhysMemoryRegionsError> {
+    pub fn insert_disjoint(
+        &mut self,
+        region: PhysMemoryRegion,
+    ) -> Result<(), PhysMemoryRegionsError> {
         validate_region(region)?;
         let index = self
             .as_slice()
@@ -226,7 +265,10 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     ///
     /// Returns an error for invalid input or insufficient storage. No error changes the
     /// collection contents, including when the range splits into many uncovered pieces.
-    pub fn insert_uncovered(&mut self, region: MemoryRegion) -> Result<(), PhysMemoryRegionsError> {
+    pub fn insert_uncovered(
+        &mut self,
+        region: PhysMemoryRegion,
+    ) -> Result<(), PhysMemoryRegionsError> {
         validate_region(region)?;
         let mut staged = S::default();
         let mut cursor = region.range.start;
@@ -260,11 +302,11 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     /// error before committing the replacement.
     pub fn insert_overwrite_if<F>(
         &mut self,
-        region: MemoryRegion,
+        region: PhysMemoryRegion,
         mut allow: F,
     ) -> Result<(), PhysMemoryRegionsError>
     where
-        F: FnMut(MemoryRegion) -> bool,
+        F: FnMut(PhysMemoryRegion) -> bool,
     {
         validate_region(region)?;
         for old in self.overlaps(region.range).copied() {
@@ -318,7 +360,7 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
         transform: F,
     ) -> Result<(), PhysMemoryRegionsError>
     where
-        F: FnMut(MemoryRegion) -> MemoryRegion,
+        F: FnMut(PhysMemoryRegion) -> PhysMemoryRegion,
     {
         self.rewrite(range, None, transform)
     }
@@ -334,11 +376,11 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     /// Invalid input, invalid callback results, and storage failures leave the contents unchanged.
     pub fn overlay_with<F>(
         &mut self,
-        region: MemoryRegion,
+        region: PhysMemoryRegion,
         transform: F,
     ) -> Result<(), PhysMemoryRegionsError>
     where
-        F: FnMut(MemoryRegion) -> MemoryRegion,
+        F: FnMut(PhysMemoryRegion) -> PhysMemoryRegion,
     {
         validate_region(region)?;
         self.rewrite(region.range, Some(region), transform)
@@ -348,11 +390,11 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     fn rewrite<F>(
         &mut self,
         range: PhysAddrRange,
-        fill: Option<MemoryRegion>,
+        fill: Option<PhysMemoryRegion>,
         mut transform: F,
     ) -> Result<(), PhysMemoryRegionsError>
     where
-        F: FnMut(MemoryRegion) -> MemoryRegion,
+        F: FnMut(PhysMemoryRegion) -> PhysMemoryRegion,
     {
         validate_range(range)?;
         let mut staged = S::default();
@@ -406,11 +448,11 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
 }
 
 /// One-way handoff from inline boot storage to dynamically allocated storage.
-impl<const N: usize> From<PhysMemoryRegions<HeaplessVec<MemoryRegion, N>>>
-    for PhysMemoryRegions<Vec<MemoryRegion>>
+impl<const N: usize> From<PhysMemoryRegions<HeaplessVec<PhysMemoryRegion, N>>>
+    for PhysMemoryRegions<Vec<PhysMemoryRegion>>
 {
     /// Converts inline entries to dynamic storage after an allocator is available.
-    fn from(regions: PhysMemoryRegions<HeaplessVec<MemoryRegion, N>>) -> Self {
+    fn from(regions: PhysMemoryRegions<HeaplessVec<PhysMemoryRegion, N>>) -> Self {
         // Copy just the live entries instead of moving an inline-capacity owning iterator through
         // several collection helpers on the small boot stack.
         Self(regions.as_slice().to_vec())
@@ -418,9 +460,9 @@ impl<const N: usize> From<PhysMemoryRegions<HeaplessVec<MemoryRegion, N>>>
 }
 
 /// Immutable borrowing of the region entries.
-impl<S: PhysMemoryRegionsStorage> AsRef<[MemoryRegion]> for PhysMemoryRegions<S> {
+impl<S: PhysMemoryRegionsStorage> AsRef<[PhysMemoryRegion]> for PhysMemoryRegions<S> {
     /// Borrows the stored entries without allowing invariant-breaking mutations.
-    fn as_ref(&self) -> &[MemoryRegion] {
+    fn as_ref(&self) -> &[PhysMemoryRegion] {
         self.as_slice()
     }
 }
@@ -428,7 +470,7 @@ impl<S: PhysMemoryRegionsStorage> AsRef<[MemoryRegion]> for PhysMemoryRegions<S>
 /// Immutable indexing without exposing mutable region entries.
 impl<S: PhysMemoryRegionsStorage> Index<usize> for PhysMemoryRegions<S> {
     /// The immutable region selected by an index.
-    type Output = MemoryRegion;
+    type Output = PhysMemoryRegion;
 
     /// Returns an entry by its sorted index.
     ///
@@ -443,9 +485,9 @@ impl<S: PhysMemoryRegionsStorage> Index<usize> for PhysMemoryRegions<S> {
 /// Borrowed iteration over the physical-address ordering.
 impl<'a, S: PhysMemoryRegionsStorage> IntoIterator for &'a PhysMemoryRegions<S> {
     /// An immutable reference to an ownership region.
-    type Item = &'a MemoryRegion;
+    type Item = &'a PhysMemoryRegion;
     /// The region iterator in physical address order.
-    type IntoIter = slice::Iter<'a, MemoryRegion>;
+    type IntoIter = slice::Iter<'a, PhysMemoryRegion>;
 
     /// Borrows entries in their stored address order.
     fn into_iter(self) -> Self::IntoIter {
@@ -463,7 +505,7 @@ fn validate_range(range: PhysAddrRange) -> Result<(), PhysMemoryRegionsError> {
 }
 
 /// Checks byte-range validity and architecture-independent flag invariants.
-fn validate_region(region: MemoryRegion) -> Result<(), PhysMemoryRegionsError> {
+fn validate_region(region: PhysMemoryRegion) -> Result<(), PhysMemoryRegionsError> {
     validate_range(region.range)?;
     if !region.flags.role_sanity_check()
         || region.flags.bits() & !MemoryRegionFlags::all().bits() != 0
@@ -475,15 +517,15 @@ fn validate_region(region: MemoryRegion) -> Result<(), PhysMemoryRegionsError> {
 }
 
 /// Copies an existing region's attributes onto a contained byte range.
-fn clipped(region: MemoryRegion, start: PhysAddr, end: PhysAddr) -> MemoryRegion {
-    MemoryRegion {
+fn clipped(region: PhysMemoryRegion, start: PhysAddr, end: PhysAddr) -> PhysMemoryRegion {
+    PhysMemoryRegion {
         range: PhysAddrRange::new(start, end),
         ..region
     }
 }
 
 /// Clips a region to a known nonempty intersection.
-fn intersection(region: MemoryRegion, range: PhysAddrRange) -> MemoryRegion {
+fn intersection(region: PhysMemoryRegion, range: PhysAddrRange) -> PhysMemoryRegion {
     clipped(
         region,
         region.range.start.max(range.start),
@@ -494,7 +536,7 @@ fn intersection(region: MemoryRegion, range: PhysAddrRange) -> MemoryRegion {
 /// Appends a result segment while checking its order against the previous segment.
 fn append<S: PhysMemoryRegionsStorage>(
     storage: &mut S,
-    region: MemoryRegion,
+    region: PhysMemoryRegion,
 ) -> Result<(), PhysMemoryRegionsError> {
     if storage
         .as_slice()

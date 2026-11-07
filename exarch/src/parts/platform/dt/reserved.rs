@@ -8,7 +8,7 @@ use fdt_rs::{
 use heapless::Vec as HeaplessVec;
 use memory_addr::{PhysAddrRange, pa};
 
-use crate::mem::{MAX_RAW_MEM_REGIONS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
+use crate::mem::{MAX_RAW_MEM_REGIONS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions};
 
 /// The description attached to regions reserved by a device tree.
 const DEVICE_TREE_RESERVED_DESC: &str = "device-tree reserved memory";
@@ -354,7 +354,7 @@ fn apply_reserved_region(
     };
     regions
         .overlay_with(
-            MemoryRegion {
+            PhysMemoryRegion {
                 range: reservation.range,
                 // Gaps have no known access or device attributes. Record ownership only.
                 flags: role,
@@ -372,7 +372,7 @@ fn apply_reserved_region(
                     | MemoryRegionFlags::NO_MAP
                     | MemoryRegionFlags::BOOT_SERVICE
                     | MemoryRegionFlags::KERNEL;
-                MemoryRegion {
+                PhysMemoryRegion {
                     flags: (old.flags & !roles) | role,
                     desc: DEVICE_TREE_RESERVED_DESC,
                     ..old

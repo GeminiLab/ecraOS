@@ -10,7 +10,7 @@ use memory_addr::PhysAddrRange;
 
 use crate::{
     kernel_if::phys_to_virt,
-    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
+    mem::{DEFAULT_MMIO_FLAGS, PhysMemoryRegion},
     platform::{CpuTopology, PlatformDescription, PlatformInterruptController},
     power::PhysicalCpuId,
     time,
@@ -302,9 +302,9 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
         })
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let mmio_regions: Vec<MemoryRegion> = io_apics
+    let mmio_regions: Vec<PhysMemoryRegion> = io_apics
         .iter()
-        .map(|ioapic| MemoryRegion {
+        .map(|ioapic| PhysMemoryRegion {
             range: PhysAddrRange::from_start_size(ioapic.physical_base, 4096),
             flags: DEFAULT_MMIO_FLAGS,
             desc: "IOAPIC registers",

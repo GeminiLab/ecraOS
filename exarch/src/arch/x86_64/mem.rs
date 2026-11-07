@@ -20,8 +20,8 @@ use crate::{
     init::PlatformBootArg,
     mem::{
         DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS,
-        MemoryRegion, MemoryRegionFlags, RawMemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes,
-        VirtAddrSpaceProps,
+        MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions, VirtAddrSpaceMode,
+        VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
 };
 
@@ -76,14 +76,14 @@ fn get_multiboot_memory_regions(
 
     // Add the low memory region.
     memory_regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: PhysAddrRange::new(PhysAddr::from_usize(0), imp::ap::AP_START_PAGE_RANGE.start),
             flags: DEFAULT_RESERVED_FLAGS,
             desc: LOW_MEMORT_DESC,
         })
         .expect("invalid low memory region");
     memory_regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: imp::ap::AP_START_PAGE_RANGE,
             flags: MemoryRegionFlags::READ
                 | MemoryRegionFlags::WRITE
@@ -93,7 +93,7 @@ fn get_multiboot_memory_regions(
         })
         .expect("invalid AP start page region");
     memory_regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: PhysAddrRange::new(
                 imp::ap::AP_START_PAGE_RANGE.end,
                 PhysAddr::from_usize(LOW_MEMORY_END),
@@ -123,7 +123,7 @@ fn get_multiboot_memory_regions(
                 MemoryType::Defect => continue,
             };
 
-            let push_result = memory_regions.insert_disjoint(MemoryRegion {
+            let push_result = memory_regions.insert_disjoint(PhysMemoryRegion {
                 range: region,
                 flags,
                 desc,

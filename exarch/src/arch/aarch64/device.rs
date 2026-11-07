@@ -8,7 +8,7 @@ use fdt_rs::{base::DevTree, prelude::PropReader};
 
 use super::trap::Aarch64ExternalIrqConfig;
 use crate::{
-    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
+    mem::{DEFAULT_MMIO_FLAGS, PhysMemoryRegion},
     platform::{
         CpuTopology, PlatformDescription, PlatformInterruptController,
         dt::{
@@ -87,12 +87,12 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             spi_count: 988,
         };
         let mut mmio_regions = alloc::vec![
-            MemoryRegion {
+            PhysMemoryRegion {
                 range: memory_addr::PhysAddrRange::from_start_size(gic.gicd_base, gic.gicd_size),
                 flags: DEFAULT_MMIO_FLAGS,
                 desc: "GIC distributor registers",
             },
-            MemoryRegion {
+            PhysMemoryRegion {
                 range: memory_addr::PhysAddrRange::from_start_size(gic.gicr_base, gic.gicr_size),
                 flags: DEFAULT_MMIO_FLAGS,
                 desc: "GIC redistributor registers",

@@ -113,7 +113,7 @@ pub const DEFAULT_RESERVED_DESC: &str = "reserved";
 
 /// A physical memory region with associated flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemoryRegion {
+pub struct PhysMemoryRegion {
     /// The physical address range of the region.
     pub range: PhysAddrRange,
     /// The flags describing the properties of the region.
@@ -127,7 +127,7 @@ pub struct MemoryRegion {
 pub const MAX_RAW_MEM_REGIONS: usize = 32;
 
 /// The memory regions collected by [`raw_mem_regions`].
-pub type RawMemoryRegions = PhysMemoryRegions<HeaplessVec<MemoryRegion, MAX_RAW_MEM_REGIONS>>;
+pub type RawMemoryRegions = PhysMemoryRegions<HeaplessVec<PhysMemoryRegion, MAX_RAW_MEM_REGIONS>>;
 
 /// The properties of a virtual address space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -5,13 +5,18 @@ use alloc::vec::Vec;
 use heapless::Vec as HeaplessVec;
 use memory_addr::{PhysAddrRange, pa};
 
-use crate::mem::{MemoryRegion, MemoryRegionFlags};
+use crate::mem::{MemoryRegionFlags, PhysMemoryRegion};
 
 use super::{PhysMemoryRegions, PhysMemoryRegionsError, PhysMemoryRegionsStorage};
 
 /// Creates a byte-precise physical region for a collection scenario.
-fn region(start: usize, end: usize, flags: MemoryRegionFlags, desc: &'static str) -> MemoryRegion {
-    MemoryRegion {
+fn region(
+    start: usize,
+    end: usize,
+    flags: MemoryRegionFlags,
+    desc: &'static str,
+) -> PhysMemoryRegion {
+    PhysMemoryRegion {
         range: PhysAddrRange::new(pa!(start), pa!(end)),
         flags,
         desc,
@@ -22,7 +27,7 @@ fn region(start: usize, end: usize, flags: MemoryRegionFlags, desc: &'static str
 #[test]
 fn fixed_storage_reserves_total_region_count() {
     let entry = region(0x1000, 0x2000, MemoryRegionFlags::FREE, "ram");
-    let mut storage = HeaplessVec::<MemoryRegion, 4>::new();
+    let mut storage = HeaplessVec::<PhysMemoryRegion, 4>::new();
     storage.push(entry).unwrap();
     storage.push(entry).unwrap();
 
@@ -58,7 +63,7 @@ fn dynamic_storage_reserves_total_region_count() {
 /// Keeps disjoint regions sorted and rejects overlaps without partial insertion.
 #[test]
 fn disjoint_insertion_keeps_regions_sorted_and_rejects_overlap_atomically() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 4>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 4>>::new();
     let free = MemoryRegionFlags::READ | MemoryRegionFlags::WRITE | MemoryRegionFlags::FREE;
     regions
         .insert_disjoint(region(0x3000, 0x4000, free, "third"))
@@ -80,7 +85,7 @@ fn disjoint_insertion_keeps_regions_sorted_and_rejects_overlap_atomically() {
 /// Fills only free gaps and keeps occupied ranges unchanged.
 #[test]
 fn uncovered_insertion_fills_only_gaps_and_does_not_report_pieces() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 8>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 8>>::new();
     let reserved = MemoryRegionFlags::RESERVED;
     let free = MemoryRegionFlags::FREE;
     regions
@@ -114,7 +119,7 @@ fn uncovered_insertion_fills_only_gaps_and_does_not_report_pieces() {
 /// Preserves collection entries before and after an uncovered insertion.
 #[test]
 fn uncovered_insertion_preserves_regions_before_and_after_its_range() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 8>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 8>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x2000, MemoryRegionFlags::FREE, "before"))
         .unwrap();
@@ -135,7 +140,7 @@ fn uncovered_insertion_preserves_regions_before_and_after_its_range() {
 /// Supplies clipped overlaps to the predicate and fills holes in the new range.
 #[test]
 fn conditional_overwrite_checks_clipped_overlaps_and_fills_holes() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 8>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 8>>::new();
     let free = MemoryRegionFlags::FREE;
     let reserved = MemoryRegionFlags::RESERVED;
     regions
@@ -176,7 +181,7 @@ fn conditional_overwrite_checks_clipped_overlaps_and_fills_holes() {
 /// Leaves the original contents unchanged after rejection or invalid input.
 #[test]
 fn rejected_overwrite_and_invalid_regions_leave_collection_unchanged() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 2>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 2>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x2000, MemoryRegionFlags::FREE, "free"))
         .unwrap();
@@ -204,11 +209,11 @@ fn rejected_overwrite_and_invalid_regions_leave_collection_unchanged() {
 /// Converts fixed storage to dynamic storage without changing its entries.
 #[test]
 fn fixed_storage_converts_to_dynamic_storage_without_changing_regions() {
-    let mut fixed = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 2>>::new();
+    let mut fixed = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 2>>::new();
     fixed
         .insert_disjoint(region(0x1000, 0x2000, MemoryRegionFlags::FREE, "ram"))
         .unwrap();
-    let dynamic: PhysMemoryRegions<Vec<MemoryRegion>> = fixed.into();
+    let dynamic: PhysMemoryRegions<Vec<PhysMemoryRegion>> = fixed.into();
 
     assert_eq!(
         dynamic.as_slice(),
@@ -219,14 +224,14 @@ fn fixed_storage_converts_to_dynamic_storage_without_changing_regions() {
 /// Changes only existing intersections and leaves gaps absent.
 #[test]
 fn transform_changes_only_clipped_intersections_and_keeps_gaps_empty() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 8>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 8>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x4000, MemoryRegionFlags::FREE, "ram"))
         .unwrap();
 
     regions
         .transform_overlaps(PhysAddrRange::new(pa!(0x2000), pa!(0x3000)), |old| {
-            MemoryRegion {
+            PhysMemoryRegion {
                 flags: MemoryRegionFlags::RESERVED,
                 desc: "reserved",
                 ..old
@@ -253,7 +258,7 @@ fn transform_changes_only_clipped_intersections_and_keeps_gaps_empty() {
 /// Rejects a callback result that changes its assigned intersection.
 #[test]
 fn transform_rejects_a_changed_intersection_range_atomically() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 8>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 8>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x4000, MemoryRegionFlags::FREE, "ram"))
         .unwrap();
@@ -269,8 +274,8 @@ fn transform_rejects_a_changed_intersection_range_atomically() {
 }
 
 /// Changes a callback result's range to exercise range validation.
-fn clipped_for_test(region: MemoryRegion, start: usize, end: usize) -> MemoryRegion {
-    MemoryRegion {
+fn clipped_for_test(region: PhysMemoryRegion, start: usize, end: usize) -> PhysMemoryRegion {
+    PhysMemoryRegion {
         range: PhysAddrRange::new(pa!(start), pa!(end)),
         ..region
     }
@@ -279,7 +284,7 @@ fn clipped_for_test(region: MemoryRegion, start: usize, end: usize) -> MemoryReg
 /// Keeps the source contents unchanged when an insertion exceeds fixed capacity.
 #[test]
 fn fixed_capacity_failure_keeps_collection_unchanged() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 2>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 2>>::new();
     regions
         .insert_disjoint(region(0x2000, 0x3000, MemoryRegionFlags::FREE, "middle"))
         .unwrap();
@@ -298,7 +303,7 @@ fn fixed_capacity_failure_keeps_collection_unchanged() {
 /// Overwriting an interior range keeps both outside fragments in physical-address order.
 #[test]
 fn overwrite_keeps_both_sides_of_one_old_region() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 3>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 3>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x5000, MemoryRegionFlags::FREE, "old"))
         .unwrap();
@@ -331,16 +336,16 @@ fn overwrite_keeps_both_sides_of_one_old_region() {
 /// A fixed-capacity transformation or overlay never leaves only part of a split committed.
 #[test]
 fn transform_and_overlay_capacity_errors_preserve_input_and_do_not_repeat_callbacks() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 2>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 2>>::new();
     regions
         .insert_disjoint(region(0x1000, 0x5000, MemoryRegionFlags::FREE, "old"))
         .unwrap();
     let before = regions.as_slice().to_vec();
     for fill_gaps in [false, true] {
         let mut calls = 0;
-        let transform = |old: MemoryRegion| {
+        let transform = |old: PhysMemoryRegion| {
             calls += 1;
-            MemoryRegion {
+            PhysMemoryRegion {
                 flags: MemoryRegionFlags::RESERVED,
                 ..old
             }
@@ -360,7 +365,7 @@ fn transform_and_overlay_capacity_errors_preserve_input_and_do_not_repeat_callba
 /// Lookup treats ends as exclusive and adjacent equal-attribute regions remain separate.
 #[test]
 fn lookup_and_adjacent_regions_preserve_byte_boundaries() {
-    let mut regions = PhysMemoryRegions::<HeaplessVec<MemoryRegion, 3>>::new();
+    let mut regions = PhysMemoryRegions::<HeaplessVec<PhysMemoryRegion, 3>>::new();
     let flags = MemoryRegionFlags::FREE;
     regions
         .insert_disjoint(region(0x1000, 0x1800, flags, "ram"))

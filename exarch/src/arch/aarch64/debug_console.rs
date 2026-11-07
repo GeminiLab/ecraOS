@@ -7,7 +7,7 @@ use fdt_rs::{base::DevTree, prelude::FallibleIterator};
 use memory_addr::{PhysAddr, PhysAddrRange};
 
 use crate::{
-    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
+    mem::{DEFAULT_MMIO_FLAGS, PhysMemoryRegion},
     platform::dt::DeviceTreeNodeExt,
 };
 
@@ -115,9 +115,9 @@ pub fn init(arg: PlatformBootArg) -> bool {
 }
 
 /// Returns the discovered PL011 range for early and platform memory mapping.
-pub fn mmio_region() -> Option<MemoryRegion> {
+pub fn mmio_region() -> Option<PhysMemoryRegion> {
     let base = PL011_BASE.load(Ordering::Acquire);
-    (base != 0).then(|| MemoryRegion {
+    (base != 0).then(|| PhysMemoryRegion {
         range: PhysAddrRange::from_start_size(
             PhysAddr::from_usize(base),
             PL011_SIZE.load(Ordering::Relaxed),

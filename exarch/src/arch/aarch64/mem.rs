@@ -26,7 +26,7 @@ use tock_registers::LocalRegisterCopy;
 
 use crate::{
     mem::{
-        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions,
         VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
     platform::dt::{DeviceTreeNodeExt, reserved::apply_device_tree_reservations},
@@ -219,7 +219,7 @@ pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
         .align_outwards(DEVICE_TREE_ALIGN)
         .expect("device tree range alignment overflow");
     regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: dtb_range,
             flags: MemoryRegionFlags::READ
                 | MemoryRegionFlags::WRITE
@@ -251,7 +251,7 @@ pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
                 .expect("memory range overflow");
             let memory_range = PhysAddrRange::new(pa!(start as usize), pa!(end as usize));
             regions
-                .insert_uncovered(MemoryRegion {
+                .insert_uncovered(PhysMemoryRegion {
                     range: memory_range,
                     flags: DEFAULT_RAM_FLAGS,
                     desc: DEFAULT_RAM_DESC,

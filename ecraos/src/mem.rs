@@ -3,7 +3,7 @@
 //! Provides virtual memory management (VMM), physical memory management (PMM),
 //! early page allocation, and the final buddy+slab allocator integration.
 
-use exarch::mem::{MemoryRegion, MemoryRegionFlags, RawMemoryRegions};
+use exarch::mem::{MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions};
 use expt::pte::MappingFlags;
 use log::info;
 use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange};
@@ -67,7 +67,7 @@ fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
 
 /// Checks discovered ownership without retaining a borrow across address-translation callers.
 fn phys_addr_is_known(addr: PhysAddr) -> bool {
-    pmm::try_with_phys_mem_regions(|regions| {
+    pmm::try_lock_read_phys_mem_regions(|regions| {
         regions.iter().any(|region| region.range.contains(addr))
     })
     .unwrap_or(true)
@@ -93,11 +93,10 @@ pub fn init_and_enable_vmm(
 
     // Build the final physical memory region table by splitting raw boot
     // regions around the loader and kernel image.
-    pmm::build_phys_mem_regions(&raw_mem_regions, boot_arg.loader_range);
-    // RISC-V console output translates its buffer through this table, so print a snapshot
-    // after releasing the table lock. The same snapshot supplies the early mapping plan below.
-    let phys_regions = pmm::clone_early_regions();
-    print_mem_regions("Final physical memory regions:", phys_regions.as_slice());
+    pmm::init_early_phys_mem_regions(&raw_mem_regions, boot_arg.loader_range);
+    pmm::lock_read_phys_mem_regions(|regions| {
+        print_mem_regions("Final physical memory regions:", regions)
+    });
     // The final table is now the sole source of truth. boot_regions is never
     // used again.
 
@@ -109,7 +108,7 @@ pub fn init_and_enable_vmm(
     early::init_early_page_allocator();
 
     // Create the page table and early mappings. It depends on the early page allocator.
-    vmm::init_vmm_mapping_early(phys_regions.as_slice());
+    pmm::lock_read_phys_mem_regions(vmm::init_vmm_mapping_early);
 
     // Allocate the BSP stack area.
     early::init_bsp_stack(vmm::vmalloc_base());
@@ -179,7 +178,7 @@ pub fn init_after_enable_vmm() {
     allocs::malloc::init_malloc_current_cpu();
 
     // Promote boot-time region and mapping metadata after the formal heap is available.
-    pmm::use_dynamic_storage();
+    pmm::switch_to_final_storage();
     vmm::use_dynamic_mapping_storage();
 
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
@@ -274,7 +273,7 @@ unsafe fn call_fn_new_stack_arg2(
 }
 
 /// Prints a borrowed list whose owner does not hold the global region lock during output.
-fn print_mem_regions(heading: &str, mem_regions: &[MemoryRegion]) {
+fn print_mem_regions(heading: &str, mem_regions: &[PhysMemoryRegion]) {
     kprintln!("{}", heading);
     for region in mem_regions {
         kprintln!(

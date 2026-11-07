@@ -2,15 +2,15 @@
 
 use memory_addr::{PhysAddrRange, pa};
 
-use crate::mem::{MemoryRegion, MemoryRegionFlags};
+use crate::mem::{MemoryRegionFlags, PhysMemoryRegion};
 
 use super::{
     EarlyMappingRegions, check_mapping_attributes, check_mmio_ownership_pages, plan_early_mappings,
 };
 
 /// Creates one byte-granular region for a page-planning scenario.
-fn region(start: usize, end: usize, flags: MemoryRegionFlags) -> MemoryRegion {
-    MemoryRegion {
+fn region(start: usize, end: usize, flags: MemoryRegionFlags) -> PhysMemoryRegion {
+    PhysMemoryRegion {
         range: PhysAddrRange::new(pa!(start), pa!(end)),
         flags,
         desc: "test region",

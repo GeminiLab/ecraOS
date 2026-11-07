@@ -7,7 +7,7 @@ use ecraldr_base::{PhysAddr, PlatformBootArg};
 use fdt_rs::{base::DevTree, prelude::PropReader};
 
 use crate::{
-    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
+    mem::{DEFAULT_MMIO_FLAGS, PhysMemoryRegion},
     platform::{
         CpuTopology, PlatformDescription, PlatformInterruptController,
         dt::{
@@ -118,7 +118,7 @@ pub fn discover_platform(arg: PlatformBootArg) -> PlatformDescription {
             source_count: plic_ndev,
             contexts: contexts.into_boxed_slice(),
         };
-        let mmio_regions = alloc::vec![MemoryRegion {
+        let mmio_regions = alloc::vec![PhysMemoryRegion {
             range: memory_addr::PhysAddrRange::from_start_size(
                 controller.physical_base,
                 controller.size,

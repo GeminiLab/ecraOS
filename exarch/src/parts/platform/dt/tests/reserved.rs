@@ -8,7 +8,7 @@ use memory_addr::{PhysAddrRange, pa};
 use super::super::reserved::apply_device_tree_reservations;
 use super::{TestTree, begin_node, property, word};
 use crate::mem::{
-    DEFAULT_RAM_FLAGS, MAX_RAW_MEM_REGIONS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+    DEFAULT_RAM_FLAGS, MAX_RAW_MEM_REGIONS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions,
 };
 
 impl TestTree {
@@ -95,7 +95,7 @@ fn later_ordinary_reservation_does_not_downgrade_no_map() {
     let fixture = TestTree::with_reserved_memory();
     let mut regions = RawMemoryRegions::new();
     regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: PhysAddrRange::new(pa!(0x8000_0000), pa!(0x8100_0000)),
             flags: DEFAULT_RAM_FLAGS,
             desc: "free memory",
@@ -125,7 +125,7 @@ fn applies_overlapping_reserved_memory_nodes_and_reservation_map_to_ram() {
     let fixture = TestTree::with_reserved_memory();
     let mut regions = RawMemoryRegions::new();
     regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: PhysAddrRange::new(pa!(0x8000_0000), pa!(0x8100_0000)),
             flags: DEFAULT_RAM_FLAGS,
             desc: "free memory",
@@ -204,7 +204,7 @@ fn reservation_capacity_error_does_not_partially_update_regions() {
     let fixture = TestTree::with_reserved_memory();
     let mut regions = RawMemoryRegions::new();
     regions
-        .insert_disjoint(MemoryRegion {
+        .insert_disjoint(PhysMemoryRegion {
             range: PhysAddrRange::new(pa!(0x8000_0000), pa!(0x8100_0000)),
             flags: DEFAULT_RAM_FLAGS,
             desc: "free memory",
@@ -213,7 +213,7 @@ fn reservation_capacity_error_does_not_partially_update_regions() {
     for index in 0..MAX_RAW_MEM_REGIONS - 1 {
         let start = 0x9000_0000 + index * 0x2000;
         regions
-            .insert_disjoint(MemoryRegion {
+            .insert_disjoint(PhysMemoryRegion {
                 range: PhysAddrRange::new(pa!(start), pa!(start + 0x1000)),
                 flags: DEFAULT_RAM_FLAGS,
                 desc: "free memory",
@@ -240,7 +240,7 @@ fn no_map_conflicts_with_required_boot_and_device_regions() {
     ] {
         let mut regions = RawMemoryRegions::new();
         regions
-            .insert_disjoint(MemoryRegion {
+            .insert_disjoint(PhysMemoryRegion {
                 range: PhysAddrRange::new(pa!(0x8001_0000), pa!(0x8002_0000)),
                 flags: flags | MemoryRegionFlags::READ | MemoryRegionFlags::WRITE,
                 desc: "required boot region",

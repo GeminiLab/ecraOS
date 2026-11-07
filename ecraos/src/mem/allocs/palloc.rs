@@ -17,7 +17,6 @@ static BUDDY: SpinNoIrq<BuddyAllocator> = SpinNoIrq::new(BuddyAllocator::new());
 
 /// Initializes the page allocator.
 pub fn init_palloc() {
-    let phys_regions = pmm::clone_early_regions();
     let page_size_shift = vmm::page_size_shift();
     let page_size = vmm::page_size();
     let dmo = vmm::direct_mapping_offset();
@@ -37,35 +36,37 @@ pub fn init_palloc() {
     // SAFETY: we believe that we have mapped the physical memory to the virtual memory correctly.
     unsafe { buddy.init(page_size_shift, dmo) }.expect("failed to init buddy allocator");
 
-    for region in &phys_regions {
-        if !region.flags.contains(MemoryRegionFlags::FREE) {
-            continue;
-        }
+    pmm::lock_read_phys_mem_regions(|phys_regions| {
+        for region in phys_regions {
+            if !region.flags.contains(MemoryRegionFlags::FREE) {
+                continue;
+            }
 
-        let Some(range) = region.range.align_inwards(page_size) else {
-            continue;
-        };
+            let Some(range) = region.range.align_inwards(page_size) else {
+                continue;
+            };
 
-        if early_alloc_range.overlaps(range)
-            && buddy
-                .check_metadata_overlap(range, early_alloc_range)
-                .unwrap()
-        {
-            panic!(
-                "Buddy metadata overlaps early allocator for region {:x} ({})",
+            if early_alloc_range.overlaps(range)
+                && buddy
+                    .check_metadata_overlap(range, early_alloc_range)
+                    .unwrap()
+            {
+                panic!(
+                    "Buddy metadata overlaps early allocator for region {:x} ({})",
+                    range, region.desc
+                );
+            }
+
+            debug!(
+                "Adding region {:x} ({}) to buddy allocator",
                 range, region.desc
             );
+            // SAFETY: we trust exarch to provide a valid physical memory map for
+            // the active architecture.
+            unsafe { buddy.add_section(range) }
+                .expect("failed to add the previous region to buddy allocator");
         }
-
-        debug!(
-            "Adding region {:x} ({}) to buddy allocator",
-            range, region.desc
-        );
-        // SAFETY: we trust exarch to provide a valid physical memory map for
-        // the active architecture.
-        unsafe { buddy.add_section(range) }
-            .expect("failed to add the previous region to buddy allocator");
-    }
+    });
 
     assert!(
         buddy.section_count() > 0,

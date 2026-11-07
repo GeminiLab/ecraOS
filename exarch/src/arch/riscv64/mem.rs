@@ -19,7 +19,7 @@ use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, pa};
 
 use crate::{
     mem::{
-        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions,
         VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
     },
     platform::dt::{DeviceTreeNodeExt, reserved::apply_device_tree_reservations},
@@ -66,7 +66,7 @@ pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
             .expect("device tree range alignment overflow");
 
         regions
-            .insert_disjoint(MemoryRegion {
+            .insert_disjoint(PhysMemoryRegion {
                 range: dtb_range,
                 flags: MemoryRegionFlags::READ
                     | MemoryRegionFlags::WRITE
@@ -90,7 +90,7 @@ pub fn raw_mem_regions(arg: PlatformBootArg, regions: &mut RawMemoryRegions) {
             let size = reg.u64(1).unwrap();
             let memory_range = PhysAddrRange::from_start_size(pa!(start as _), size as _);
             regions
-                .insert_uncovered(MemoryRegion {
+                .insert_uncovered(PhysMemoryRegion {
                     range: memory_range,
                     flags: DEFAULT_RAM_FLAGS,
                     desc: DEFAULT_RAM_DESC,

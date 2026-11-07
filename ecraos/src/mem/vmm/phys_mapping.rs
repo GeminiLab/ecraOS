@@ -11,7 +11,7 @@ use log::info;
 use memory_addr::{AddrRangeBounds, PhysAddrRange, VirtAddr, va};
 
 use crate::{
-    mem::{MemoryRegion, MemoryRegionFlags, pmm, region_flags_to_mapping},
+    mem::{MemoryRegionFlags, PhysMemoryRegion, pmm, region_flags_to_mapping},
     tlb::TlbInvalidation,
 };
 
@@ -24,13 +24,13 @@ use super::{
 mod tests;
 
 /// Inline capacity for page records, including page-rounded no-map barriers during planning.
-const MAX_EARLY_MAPPING_REGIONS: usize = pmm::MAX_MEMORY_REGIONS;
+const MAX_EARLY_MAPPING_REGIONS: usize = pmm::MAX_EARLY_PHYS_MEMORY_REGIONS;
 
 /// Physical page records available before allocation is possible.
-type EarlyMappingRegions = PhysMemoryRegions<HeaplessVec<MemoryRegion, MAX_EARLY_MAPPING_REGIONS>>;
+type EarlyMappingRegions = PhysMemoryRegions<HeaplessVec<PhysMemoryRegion, MAX_EARLY_MAPPING_REGIONS>>;
 
 /// Physical page records that can grow after the kernel heap is initialized.
-type DynamicMappingRegions = PhysMemoryRegions<Vec<MemoryRegion>>;
+type DynamicMappingRegions = PhysMemoryRegions<Vec<PhysMemoryRegion>>;
 
 /// The storage phase of the physical page mapping records.
 #[expect(
@@ -47,7 +47,7 @@ enum MappingStorage {
 /// Storage-independent access to committed mapping records.
 impl MappingStorage {
     /// Returns the committed records independently of the storage phase.
-    fn as_slice(&self) -> &[MemoryRegion] {
+    fn as_slice(&self) -> &[PhysMemoryRegion] {
         match self {
             Self::Early(regions) => regions.as_slice(),
             Self::Dynamic(regions) => regions.as_slice(),
@@ -83,7 +83,7 @@ const ACCESS_PERMISSIONS: MemoryRegionFlags = MemoryRegionFlags::READ
 /// Both aliases cover exactly the same physical pages and use identical attributes. No-map
 /// bytes exclude their whole base pages. A required boot, kernel, or device mapping sharing such
 /// a page is rejected before any page-table entries are created.
-pub(in crate::mem) fn init_vmm_mapping_early(regions: &[MemoryRegion]) {
+pub(in crate::mem) fn init_vmm_mapping_early(regions: &[PhysMemoryRegion]) {
     let records = plan_early_mappings(regions, page_size())
         .expect("incompatible early physical mapping requirements");
     let mut table = VIRTUAL_ADDRESS_SPACE
@@ -134,9 +134,9 @@ pub(in crate::mem) fn use_dynamic_mapping_storage() {
 /// cannot become MMIO. While identity aliases remain active every new page receives both aliases.
 /// All metadata is prepared before the ownership update and page-table writes. Mapping failures
 /// during boot are fatal, and mapping records are committed only after both aliases succeed.
-pub fn map_mmio_regions(regions: &[MemoryRegion]) {
+pub fn map_mmio_regions(regions: &[PhysMemoryRegion]) {
     let _transaction = MAPPING_TRANSACTION.lock();
-    let mut ownership = pmm::clone_dynamic_regions();
+    let mut ownership = pmm::clone_final_regions();
     let mut state = PHYSICAL_MAPPINGS.lock();
     let MappingStorage::Dynamic(records) = &state.records else {
         panic!("physical mapping storage is still fixed");
@@ -169,14 +169,14 @@ pub fn map_mmio_regions(regions: &[MemoryRegion]) {
         // Keep gap subtraction in PhysMemoryRegions, including partially mapped requests.
         for range in proposed.uncovered(aligned.range) {
             direct_address(range);
-            pending.push(MemoryRegion { range, ..aligned });
+            pending.push(PhysMemoryRegion { range, ..aligned });
         }
         proposed
             .insert_uncovered(aligned)
             .expect("failed to prepare new physical mapping records");
     }
 
-    pmm::replace_dynamic_regions(ownership);
+    pmm::replace_final_regions(ownership);
     for region in pending {
         info!(
             "Mapping platform MMIO: {} {:#x} flags={}",
@@ -239,14 +239,14 @@ pub(in crate::mem) fn remove_identical_mapping() {
 
 /// Normalizes byte ranges into disjoint page mappings without allocating.
 fn plan_early_mappings(
-    regions: &[MemoryRegion],
+    regions: &[PhysMemoryRegion],
     page_size: usize,
 ) -> Result<EarlyMappingRegions, PhysMemoryRegionsError> {
     let mut plan = EarlyMappingRegions::new();
     // Install barriers first so a later rounded neighbor cannot map part of a no-map page.
     for region in regions.iter().copied() {
         if region.flags.contains(MemoryRegionFlags::NO_MAP) {
-            plan.insert_uncovered(MemoryRegion {
+            plan.insert_uncovered(PhysMemoryRegion {
                 range: aligned_range(region.range, page_size)?,
                 flags: MemoryRegionFlags::NO_MAP,
                 desc: region.desc,
@@ -299,10 +299,10 @@ fn aligned_range(
 
 /// Converts a region into page-aligned mapping attributes with a neutral ownership role.
 fn aligned_mapping_region(
-    region: MemoryRegion,
+    region: PhysMemoryRegion,
     page_size: usize,
-) -> Result<MemoryRegion, PhysMemoryRegionsError> {
-    Ok(MemoryRegion {
+) -> Result<PhysMemoryRegion, PhysMemoryRegionsError> {
+    Ok(PhysMemoryRegion {
         range: aligned_range(region.range, page_size)?,
         flags: (region.flags & MAPPING_ATTRIBUTES) | MemoryRegionFlags::RESERVED,
         desc: region.desc,
@@ -312,7 +312,7 @@ fn aligned_mapping_region(
 /// Rejects any recorded overlap whose actual page attributes disagree with a request.
 fn check_mapping_attributes<S: PhysMemoryRegionsStorage>(
     records: &PhysMemoryRegions<S>,
-    region: MemoryRegion,
+    region: PhysMemoryRegion,
 ) -> Result<(), PhysMemoryRegionsError> {
     if records
         .overlaps(region.range)
@@ -329,8 +329,8 @@ fn check_mapping_attributes<S: PhysMemoryRegionsStorage>(
 /// Even a disjoint subpage MMIO range cannot borrow a page from FREE RAM or required boot data.
 /// It also cannot acquire different memory attributes from an already described neighbor.
 fn check_mmio_ownership_pages(
-    ownership: &[MemoryRegion],
-    region: MemoryRegion,
+    ownership: &[PhysMemoryRegion],
+    region: PhysMemoryRegion,
     page_size: usize,
 ) -> Result<(), PhysMemoryRegionsError> {
     let aligned = aligned_range(region.range, page_size)?;
