@@ -9,6 +9,7 @@ use ecraos::{app_main_ap, app_main_bsp, reexport::exarch, task};
 use log::info;
 
 mod irq_nesting;
+mod regressions;
 
 /// Runs the Stage 2B preemption and synchronization smoke workload.
 ///
@@ -90,6 +91,7 @@ fn run_sync_preemption_smoke() {
 #[app_main_bsp]
 fn main() {
     irq_nesting::check();
+    regressions::check();
     run_sync_preemption_smoke();
 }
 

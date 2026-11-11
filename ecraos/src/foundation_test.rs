@@ -24,6 +24,24 @@ use crate::{
 pub use ipi::{IpiDiagnostic, IpiError};
 pub use vmalloc::VMAllocError;
 
+/// Forces one scheduling gap between a failed synchronization acquisition and registration.
+///
+/// The next contended mutex or semaphore acquisition on this CPU yields once before registering
+/// its waiter. Call from a cooperative test task so its peer can release the resource in that gap.
+/// This operation and its hook are absent from builds without `foundation-test`.
+pub fn yield_before_next_sync_wait() {
+    task::yield_before_next_sync_wait();
+}
+
+/// Replays a previous sleep-timer callback after a task registers an untimed wait.
+///
+/// Call only after observing that the task completed a sleep and blocked on a semaphore. This
+/// simulates timer work extracted before cancellation that executes after task reuse. It does not
+/// release a semaphore permit, and a semaphore acquisition must remain pending after this wake.
+pub fn wake_from_stale_sleep_timer(task: task::TaskRef) {
+    task::wake_from_stale_sleep_timer(task);
+}
+
 /// Returns the stable online and IPI-ready logical CPU snapshot.
 ///
 /// CPU inventory ownership remains with MP and no test maintains a second target list.

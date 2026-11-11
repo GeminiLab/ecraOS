@@ -2,16 +2,36 @@
 //!
 //! These primitives keep registration and wake publication separate from scheduler switching.
 
-use alloc::collections::VecDeque;
+use alloc::{collections::VecDeque, sync::Arc};
 use core::{
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use exspin::SpinNoIrq;
 
 use super::{TaskError, TaskId, TaskRef, WaitResult};
 use crate::mp::LogicalCpuId;
+
+/// One scheduling gap armed only by the deterministic foundation workload.
+#[cfg(feature = "foundation-test")]
+#[expercpu::def_percpu]
+static YIELD_BEFORE_WAIT: bool = false;
+
+/// Arms one yield after a failed acquisition and before waiter registration on this CPU.
+#[cfg(feature = "foundation-test")]
+pub(crate) fn yield_before_next_sync_wait() {
+    YIELD_BEFORE_WAIT.write_current(true);
+}
+
+/// Runs an armed scheduling gap before acquiring any synchronization queue lock.
+#[cfg(feature = "foundation-test")]
+pub(super) fn run_wait_registration_hook() {
+    if YIELD_BEFORE_WAIT.read_current() {
+        YIELD_BEFORE_WAIT.write_current(false);
+        super::scheduler::yield_now();
+    }
+}
 
 /// A predicate-free FIFO task wait queue.
 pub struct WaitQueue {
@@ -47,18 +67,31 @@ impl WaitQueue {
         task: TaskRef,
         cpu_id: LogicalCpuId,
     ) -> Result<(), TaskError> {
-        // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
-        // lifecycle -> completion or wait-queue locks. A future lock-free wait queue may replace
-        // these locks after a complete memory-ordering proof.
-        let _guard = exspin::NoPreemptIrqSave::new();
+        self.prepare_block_if(task, cpu_id, |_| true).map(|_| ())
+    }
+
+    /// Rechecks a resource predicate and registers a blocked waiter under the same queue lock.
+    ///
+    /// Returns false without changing task state when `should_block` is false. The predicate must
+    /// not block or reacquire this queue. Resource acquisition and release must use this queue
+    /// lock too, so neither can pass between the predicate check and waiter publication.
+    pub(crate) fn prepare_block_if(
+        &self,
+        task: TaskRef,
+        cpu_id: LogicalCpuId,
+        should_block: impl FnOnce(&VecDeque<TaskRef>) -> bool,
+    ) -> Result<bool, TaskError> {
         let mut queue = self.queue.lock();
+        if !should_block(&queue) {
+            return Ok(false);
+        }
         task.claim_waiting()?;
         if task.block(cpu_id).is_err() {
             task.release_waiting();
             return Err(TaskError::CannotBlock);
         }
         queue.push_back(task);
-        Ok(())
+        Ok(true)
     }
 
     /// Atomically registers a timed waiter and commits its `TimedWaiting` state.
@@ -146,10 +179,13 @@ impl WaitQueue {
 
     /// Removes the oldest waiter without changing its lifecycle state.
     pub(crate) fn take_one(&self) -> Option<TaskRef> {
-        // Lock order is NoPreemptIrqSave -> domain metadata -> Queue -> task lifecycle ->
-        // completion/wait queue. The caller performs wake publication after releasing this lock.
-        // A future lock-free wait queue may replace this lock after its memory-ordering proof.
-        let mut queue = self.queue.lock();
+        Self::take_one_locked(&mut self.queue.lock())
+    }
+
+    /// Removes the oldest blocked waiter while the caller retains the queue lock.
+    ///
+    /// Resource release may update ownership before dropping this lock and publishing the wake.
+    fn take_one_locked(queue: &mut VecDeque<TaskRef>) -> Option<TaskRef> {
         loop {
             let task = queue.pop_front()?;
             if matches!(
@@ -188,7 +224,10 @@ impl Default for WaitQueue {
     }
 }
 
-/// A non-reentrant blocking mutex.
+/// A non-reentrant blocking mutex with FIFO ownership handoff.
+///
+/// The wait-queue lock serializes admission, waiter registration, value return and reservation.
+/// No lock is retained across a scheduler context switch or wake publication.
 pub struct Mutex<T> {
     /// Protected value and ownership state.
     value: SpinNoIrq<Option<T>>,
@@ -214,20 +253,19 @@ impl<T> Mutex<T> {
     /// Attempts to acquire the mutex without blocking.
     pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, TaskError> {
         let caller = super::scheduler::current_task_id().map_or(0, |id| id.into_repr() as usize);
+        let queue = self.waiters.queue.lock();
         if self.owner.load(Ordering::Acquire) == caller && caller != 0 {
             return Err(TaskError::WouldDeadlock);
         }
-        let reserved = self.reserved.load(Ordering::Acquire);
-        if (reserved != 0 && reserved != caller) || (!self.waiters.is_empty() && reserved == 0) {
+        if self.admission_blocked(caller, &queue) {
             return Err(TaskError::CannotBlock);
         }
-        let _guard = exspin::NoPreemptIrqSave::new();
         let mut value = self.value.lock();
         let Some(inner) = value.take() else {
             return Err(TaskError::CannotBlock);
         };
         self.owner.store(caller, Ordering::Release);
-        if reserved == caller {
+        if self.reserved.load(Ordering::Acquire) == caller {
             self.reserved.store(0, Ordering::Release);
         }
         Ok(MutexGuard {
@@ -238,14 +276,18 @@ impl<T> Mutex<T> {
 
     /// Acquires the mutex, blocking in FIFO order while another task owns it.
     pub fn lock(&self) -> Result<MutexGuard<'_, T>, TaskError> {
-        if super::scheduler::current_task_id().is_none() {
-            return Err(TaskError::NotTaskContext);
-        }
+        let caller = super::scheduler::current_task_id()
+            .ok_or(TaskError::NotTaskContext)?
+            .into_repr() as usize;
         loop {
             match self.try_lock() {
                 Ok(guard) => return Ok(guard),
                 Err(TaskError::CannotBlock) => {
-                    super::scheduler::block_current_on_wait_queue(&self.waiters)?;
+                    super::scheduler::block_current_if(|task, cpu_id| {
+                        self.waiters.prepare_block_if(task, cpu_id, |queue| {
+                            self.admission_blocked(caller, queue)
+                        })
+                    })?;
                 }
                 Err(error) => return Err(error),
             }
@@ -257,20 +299,34 @@ impl<T> Mutex<T> {
         self.waiters.len()
     }
 
+    /// Tests FIFO admission and value availability while the caller holds this mutex's queue.
+    fn admission_blocked(&self, caller: usize, queue: &VecDeque<TaskRef>) -> bool {
+        let reserved = self.reserved.load(Ordering::Acquire);
+        (reserved != 0 && reserved != caller)
+            || (!queue.is_empty() && reserved == 0)
+            || self.value.lock().is_none()
+    }
+
     /// Returns the value and reserves FIFO ownership before waking a waiter.
     ///
     /// Remote queue notification follows release of the IRQ-saving publication guard.
     fn unlock(&self, value: T) {
-        let _guard = exspin::NoPreemptIrqSave::new();
-        *self.value.lock() = Some(value);
-        self.owner.store(0, Ordering::Release);
-        let waiter = self.waiters.take_one();
-        if let Some(task) = &waiter {
-            self.reserved
-                .store(task.id().into_repr() as usize, Ordering::Release);
-            task.release_waiting();
-        }
-        drop(_guard);
+        let waiter = {
+            let mut queue = self.waiters.queue.lock();
+            *self.value.lock() = Some(value);
+            self.owner.store(0, Ordering::Release);
+            let waiter = WaitQueue::take_one_locked(&mut queue);
+            self.reserved.store(
+                waiter
+                    .as_ref()
+                    .map_or(0, |task| task.id().into_repr() as usize),
+                Ordering::Release,
+            );
+            if let Some(task) = &waiter {
+                task.release_waiting();
+            }
+            waiter
+        };
         if let Some(task) = waiter {
             super::scheduler::wake_waiter(task);
         }
@@ -409,16 +465,31 @@ impl Default for Condvar {
     }
 }
 
-/// A bounded single-permit semaphore.
+/// A bounded FIFO counting semaphore with one permit per acquisition.
+///
+/// The wait-queue lock serializes permit consumption, waiter registration and release. A release
+/// either increments the available count or transfers one permit directly to the selected waiter.
+/// Each waiter retains its own grant, so unrelated wakes do not complete an acquisition and later
+/// releases cannot overwrite permits already assigned to other waiters.
 pub struct Semaphore {
     /// Number of currently available permits.
     permits: AtomicUsize,
     /// Maximum permit count.
     max: usize,
-    /// FIFO waiters blocked while no permit is available.
-    waiters: WaitQueue,
-    /// Task ID receiving the next released permit, or zero when no permit is reserved.
-    reserved: AtomicUsize,
+    /// FIFO acquisition records, retained across wakes that do not supply a permit.
+    waiters: SpinNoIrq<VecDeque<Arc<SemaphoreWaiter>>>,
+}
+
+/// One semaphore acquisition and its independent, monotonic permit grant.
+///
+/// The acquiring task retains this record until success. The release path removes its queue
+/// reference and publishes `granted` before wakeup. An unrelated wake preserves queue membership
+/// and cannot consume another acquisition's grant, even when the same task waits again later.
+struct SemaphoreWaiter {
+    /// The task whose acquisition owns this queue position.
+    task: TaskRef,
+    /// Whether one release has transferred its permit to this exact acquisition.
+    granted: AtomicBool,
 }
 
 impl Semaphore {
@@ -428,64 +499,110 @@ impl Semaphore {
         Self {
             permits: AtomicUsize::new(initial),
             max,
-            waiters: WaitQueue::new(),
-            reserved: AtomicUsize::new(0),
+            waiters: SpinNoIrq::new(VecDeque::new()),
         }
     }
 
     /// Acquires one permit, blocking in FIFO order while none is available.
+    ///
+    /// A blocked acquisition consumes only its own release-side grant. An unrelated wake rechecks
+    /// that grant and blocks again without losing its FIFO position.
     pub fn acquire(&self) -> Result<(), TaskError> {
-        let caller = super::scheduler::current_task_id().ok_or(TaskError::NotTaskContext)?;
+        super::scheduler::current_task_id().ok_or(TaskError::NotTaskContext)?;
+        let mut waiter = None;
         loop {
-            let current = self.permits.load(Ordering::Acquire);
-            let reserved = self.reserved.load(Ordering::Acquire);
-            if reserved == caller.into_repr() as usize {
-                self.reserved.store(0, Ordering::Release);
+            if self.try_acquire_permit(waiter.as_deref()) {
                 return Ok(());
             }
-            if current != 0 && self.waiters.is_empty() {
-                if self
-                    .permits
-                    .compare_exchange(current, current - 1, Ordering::AcqRel, Ordering::Acquire)
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-                continue;
-            }
-            super::scheduler::block_current_on_wait_queue(&self.waiters)?;
+            super::scheduler::block_current_if(|task, cpu_id| {
+                self.prepare_acquire(&mut waiter, task, cpu_id)
+            })?;
         }
     }
 
     /// Releases one permit and rejects over-release.
     pub fn release(&self) -> Result<(), TaskError> {
-        if let Some(task) = self.waiters.take_one() {
-            self.reserved
-                .store(task.id().into_repr() as usize, Ordering::Release);
-            task.release_waiting();
-            super::scheduler::wake_waiter(task);
-            return Ok(());
-        }
-        let mut current = self.permits.load(Ordering::Acquire);
-        loop {
-            if current >= self.max {
-                return Err(TaskError::InvalidTarget);
+        let waiter = {
+            let mut queue = self.waiters.lock();
+            let waiter = queue.pop_front();
+            if let Some(waiter) = &waiter {
+                waiter.granted.store(true, Ordering::Release);
+                waiter.task.release_waiting();
+            } else {
+                let current = self.permits.load(Ordering::Acquire);
+                if current >= self.max {
+                    return Err(TaskError::InvalidTarget);
+                }
+                self.permits.store(current + 1, Ordering::Release);
             }
-            match self.permits.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return Ok(()),
-                Err(observed) => current = observed,
-            }
+            waiter
+        };
+        if let Some(waiter) = waiter {
+            super::scheduler::wake_waiter(Arc::clone(&waiter.task));
         }
+        Ok(())
     }
 
     /// Returns the number of available permits.
     pub fn available(&self) -> usize {
         self.permits.load(Ordering::Acquire)
+    }
+
+    /// Consumes an unassigned permit while excluding waiter registration and release.
+    fn try_acquire_permit(&self, waiter: Option<&SemaphoreWaiter>) -> bool {
+        let queue = self.waiters.lock();
+        if waiter.is_some_and(|waiter| waiter.granted.load(Ordering::Acquire)) {
+            return true;
+        }
+        let current = self.permits.load(Ordering::Acquire);
+        if current == 0 || !queue.is_empty() {
+            return false;
+        }
+        self.permits.store(current - 1, Ordering::Release);
+        true
+    }
+
+    /// Rechecks admission and commits or renews this acquisition's wait under the resource lock.
+    ///
+    /// A waiter resumed without a grant still owns its existing queue entry and registration. It
+    /// may commit `Running -> Blocked` again without duplicating either entry or queue position.
+    fn prepare_acquire(
+        &self,
+        waiter: &mut Option<Arc<SemaphoreWaiter>>,
+        task: TaskRef,
+        cpu_id: LogicalCpuId,
+    ) -> Result<bool, TaskError> {
+        let mut queue = self.waiters.lock();
+        if waiter
+            .as_ref()
+            .is_some_and(|waiter| waiter.granted.load(Ordering::Acquire))
+            || (self.permits.load(Ordering::Acquire) != 0 && queue.is_empty())
+        {
+            return Ok(false);
+        }
+        let waiter = waiter.get_or_insert_with(|| {
+            Arc::new(SemaphoreWaiter {
+                task,
+                granted: AtomicBool::new(false),
+            })
+        });
+        let position = queue.iter().position(|entry| Arc::ptr_eq(entry, waiter));
+        match waiter.task.claim_waiting() {
+            Ok(()) => {}
+            Err(TaskError::AlreadyWaiting) if position.is_some() => {}
+            Err(error) => return Err(error),
+        }
+        if waiter.task.block(cpu_id).is_err() {
+            if let Some(position) = position {
+                queue.remove(position);
+            }
+            waiter.task.release_waiting();
+            return Err(TaskError::CannotBlock);
+        }
+        if position.is_none() {
+            queue.push_back(Arc::clone(waiter));
+        }
+        Ok(true)
     }
 }
 

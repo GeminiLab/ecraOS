@@ -24,6 +24,10 @@ pub use domain::{
 pub use preempt::{RescheduleGuard, can_schedule_now, request_reschedule};
 pub use queue::{PhysicalQueue, QueueState, QueueStateError};
 pub use scheduler::TargetError;
+#[cfg(feature = "foundation-test")]
+pub(crate) use scheduler::wake_from_stale_sleep_timer;
+#[cfg(feature = "foundation-test")]
+pub(crate) use sync::yield_before_next_sync_wait;
 pub use sync::{Condvar, Mutex, MutexGuard, Semaphore, WaitQueue};
 pub use trace::{TraceEvent, TraceEventKind, TraceRing};
 pub use types::TaskStateError;

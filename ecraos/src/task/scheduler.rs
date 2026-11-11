@@ -940,21 +940,36 @@ pub(super) fn wake_waiter(task: TaskRef) {
     }
 }
 
-/// Blocks the current task after atomically registering it with a generic FIFO wait queue.
+/// Replays an extracted sleep-timer callback against a later untimed wait for foundation tests.
 ///
-/// The wait queue performs registration and the `Running -> Blocked` transition under its lock.
-/// That lock is released before queue selection and before the architecture context switch.
-pub(super) fn block_current_on_wait_queue(
-    waiters: &super::sync::WaitQueue,
-) -> Result<(), super::TaskError> {
+/// The callback may be rejected by lifecycle validation. If accepted, publication follows the
+/// ordinary sleep-timer path so tests can verify that this wake cannot grant a semaphore permit.
+#[cfg(feature = "foundation-test")]
+pub(crate) fn wake_from_stale_sleep_timer(task: TaskRef) {
+    let generation = task.sleep_generation();
+    if task.wake_from_sleep(generation) {
+        enqueue_task(task, crate::mp::current_cpu_id());
+    }
+}
+
+/// Runs a resource's atomic admission and registration operation before conditionally waiting.
+///
+/// Calls `prepare` with local IRQs disabled and no run-queue lock held. It must return true after
+/// committing `Blocked`, or false without changing the running task. Its resource locks must be
+/// released before return. A true result means a registered wait resumed, not that a resource was
+/// granted. The primitive must check its own grant or predicate after resumption.
+pub(super) fn block_current_if(
+    prepare: impl FnOnce(TaskRef, LogicalCpuId) -> Result<bool, super::TaskError>,
+) -> Result<bool, super::TaskError> {
     assert_scheduler_initialized();
     if super::preempt::depth() != 0 {
         return Err(super::TaskError::InCriticalSection);
     }
+    #[cfg(feature = "foundation-test")]
+    super::sync::run_wait_registration_hook();
     let irq_enabled = exarch::trap::local_enabled();
     exarch::trap::disable_local();
     finish_switch();
-    let _ = super::preempt::take_reschedule_request();
     let cpu_id = crate::mp::current_cpu_id();
     let current = unsafe { current_task() };
     let idle = unsafe { idle_task() };
@@ -965,13 +980,17 @@ pub(super) fn block_current_on_wait_queue(
         }
         return Err(super::TaskError::NotTaskContext);
     }
-    if let Err(error) = waiters.prepare_block(Arc::clone(&current), cpu_id) {
-        if irq_enabled {
-            exarch::trap::enable_local();
-            super::stack::reap_released_stacks();
+    match prepare(Arc::clone(&current), cpu_id) {
+        Ok(true) => {}
+        result => {
+            if irq_enabled {
+                exarch::trap::enable_local();
+                super::stack::reap_released_stacks();
+            }
+            return result;
         }
-        return Err(error);
     }
+    let _ = super::preempt::take_reschedule_request();
     record_trace(TraceEventKind::Block, &current);
 
     // Lock order is NoPreemptIrqSave -> domain metadata -> Queue locks by CpuId -> task
@@ -991,7 +1010,7 @@ pub(super) fn block_current_on_wait_queue(
         exarch::trap::enable_local();
         super::stack::reap_released_stacks();
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Switches away from a task already registered and blocked on a wait queue.
