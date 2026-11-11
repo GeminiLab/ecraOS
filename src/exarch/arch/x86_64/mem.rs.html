@@ -20,8 +20,8 @@
 <a href=#20 id=20 data-nosnippet>20</a>    init::PlatformBootArg,
 <a href=#21 id=21 data-nosnippet>21</a>    mem::{
 <a href=#22 id=22 data-nosnippet>22</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, DEFAULT_RESERVED_DESC, DEFAULT_RESERVED_FLAGS,
-<a href=#23 id=23 data-nosnippet>23</a>        MemoryRegion, MemoryRegionFlags, RawMemoryRegions, VirtAddrSpaceMode, VirtAddrSpaceModes,
-<a href=#24 id=24 data-nosnippet>24</a>        VirtAddrSpaceProps,
+<a href=#23 id=23 data-nosnippet>23</a>        MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions, VirtAddrSpaceMode,
+<a href=#24 id=24 data-nosnippet>24</a>        VirtAddrSpaceModes, VirtAddrSpaceProps,
 <a href=#25 id=25 data-nosnippet>25</a>    },
 <a href=#26 id=26 data-nosnippet>26</a>};
 <a href=#27 id=27 data-nosnippet>27</a>
@@ -76,14 +76,14 @@
 <a href=#76 id=76 data-nosnippet>76</a>
 <a href=#77 id=77 data-nosnippet>77</a>    <span class="comment">// Add the low memory region.
 <a href=#78 id=78 data-nosnippet>78</a>    </span>memory_regions
-<a href=#79 id=79 data-nosnippet>79</a>        .insert_disjoint(MemoryRegion {
+<a href=#79 id=79 data-nosnippet>79</a>        .insert_disjoint(PhysMemoryRegion {
 <a href=#80 id=80 data-nosnippet>80</a>            range: PhysAddrRange::new(PhysAddr::from_usize(<span class="number">0</span>), imp::ap::AP_START_PAGE_RANGE.start),
 <a href=#81 id=81 data-nosnippet>81</a>            flags: DEFAULT_RESERVED_FLAGS,
 <a href=#82 id=82 data-nosnippet>82</a>            desc: LOW_MEMORT_DESC,
 <a href=#83 id=83 data-nosnippet>83</a>        })
 <a href=#84 id=84 data-nosnippet>84</a>        .expect(<span class="string">"invalid low memory region"</span>);
 <a href=#85 id=85 data-nosnippet>85</a>    memory_regions
-<a href=#86 id=86 data-nosnippet>86</a>        .insert_disjoint(MemoryRegion {
+<a href=#86 id=86 data-nosnippet>86</a>        .insert_disjoint(PhysMemoryRegion {
 <a href=#87 id=87 data-nosnippet>87</a>            range: imp::ap::AP_START_PAGE_RANGE,
 <a href=#88 id=88 data-nosnippet>88</a>            flags: MemoryRegionFlags::READ
 <a href=#89 id=89 data-nosnippet>89</a>                | MemoryRegionFlags::WRITE
@@ -93,7 +93,7 @@
 <a href=#93 id=93 data-nosnippet>93</a>        })
 <a href=#94 id=94 data-nosnippet>94</a>        .expect(<span class="string">"invalid AP start page region"</span>);
 <a href=#95 id=95 data-nosnippet>95</a>    memory_regions
-<a href=#96 id=96 data-nosnippet>96</a>        .insert_disjoint(MemoryRegion {
+<a href=#96 id=96 data-nosnippet>96</a>        .insert_disjoint(PhysMemoryRegion {
 <a href=#97 id=97 data-nosnippet>97</a>            range: PhysAddrRange::new(
 <a href=#98 id=98 data-nosnippet>98</a>                imp::ap::AP_START_PAGE_RANGE.end,
 <a href=#99 id=99 data-nosnippet>99</a>                PhysAddr::from_usize(LOW_MEMORY_END),
@@ -123,7 +123,7 @@
 <a href=#123 id=123 data-nosnippet>123</a>                MemoryType::Defect =&gt; <span class="kw">continue</span>,
 <a href=#124 id=124 data-nosnippet>124</a>            };
 <a href=#125 id=125 data-nosnippet>125</a>
-<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">let </span>push_result = memory_regions.insert_disjoint(MemoryRegion {
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">let </span>push_result = memory_regions.insert_disjoint(PhysMemoryRegion {
 <a href=#127 id=127 data-nosnippet>127</a>                range: region,
 <a href=#128 id=128 data-nosnippet>128</a>                flags,
 <a href=#129 id=129 data-nosnippet>129</a>                desc,

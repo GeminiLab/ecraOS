@@ -5,7 +5,7 @@ argument that will later be passed to the <code>InitIf::init_early</code> method
 <p>The kernel entry function should be called by boot code with the
 following conditions met:</p>
 <ul>
-<li>A pagetable providing identical mapping and covering the whole kernel
+<li>A pagetable providing identity mapping and covering the whole kernel
 image must be enabled on the bootstrap processor.</li>
 <li>Interrupts must be globally disabled on the bootstrap processor.</li>
 </ul>

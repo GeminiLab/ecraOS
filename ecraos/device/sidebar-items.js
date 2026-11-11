@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["discover_and_map_platform"]};
+window.SIDEBAR_ITEMS = {"constant":["PAGE_TABLE_BITS"],"fn":["discover_and_map_platform"]};

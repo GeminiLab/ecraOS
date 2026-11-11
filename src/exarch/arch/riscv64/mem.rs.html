@@ -19,7 +19,7 @@
 <a href=#19 id=19 data-nosnippet>19</a>
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use crate</span>::{
 <a href=#21 id=21 data-nosnippet>21</a>    mem::{
-<a href=#22 id=22 data-nosnippet>22</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+<a href=#22 id=22 data-nosnippet>22</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions,
 <a href=#23 id=23 data-nosnippet>23</a>        VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
 <a href=#24 id=24 data-nosnippet>24</a>    },
 <a href=#25 id=25 data-nosnippet>25</a>    platform::dt::{DeviceTreeNodeExt, reserved::apply_device_tree_reservations},
@@ -66,7 +66,7 @@
 <a href=#66 id=66 data-nosnippet>66</a>            .expect(<span class="string">"device tree range alignment overflow"</span>);
 <a href=#67 id=67 data-nosnippet>67</a>
 <a href=#68 id=68 data-nosnippet>68</a>        regions
-<a href=#69 id=69 data-nosnippet>69</a>            .insert_disjoint(MemoryRegion {
+<a href=#69 id=69 data-nosnippet>69</a>            .insert_disjoint(PhysMemoryRegion {
 <a href=#70 id=70 data-nosnippet>70</a>                range: dtb_range,
 <a href=#71 id=71 data-nosnippet>71</a>                flags: MemoryRegionFlags::READ
 <a href=#72 id=72 data-nosnippet>72</a>                    | MemoryRegionFlags::WRITE
@@ -90,7 +90,7 @@
 <a href=#90 id=90 data-nosnippet>90</a>            <span class="kw">let </span>size = reg.u64(<span class="number">1</span>).unwrap();
 <a href=#91 id=91 data-nosnippet>91</a>            <span class="kw">let </span>memory_range = PhysAddrRange::from_start_size(<span class="macro">pa!</span>(start <span class="kw">as _</span>), size <span class="kw">as _</span>);
 <a href=#92 id=92 data-nosnippet>92</a>            regions
-<a href=#93 id=93 data-nosnippet>93</a>                .insert_uncovered(MemoryRegion {
+<a href=#93 id=93 data-nosnippet>93</a>                .insert_uncovered(PhysMemoryRegion {
 <a href=#94 id=94 data-nosnippet>94</a>                    range: memory_range,
 <a href=#95 id=95 data-nosnippet>95</a>                    flags: DEFAULT_RAM_FLAGS,
 <a href=#96 id=96 data-nosnippet>96</a>                    desc: DEFAULT_RAM_DESC,

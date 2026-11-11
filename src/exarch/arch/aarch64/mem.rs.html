@@ -26,7 +26,7 @@
 <a href=#26 id=26 data-nosnippet>26</a>
 <a href=#27 id=27 data-nosnippet>27</a><span class="kw">use crate</span>::{
 <a href=#28 id=28 data-nosnippet>28</a>    mem::{
-<a href=#29 id=29 data-nosnippet>29</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegion, MemoryRegionFlags, RawMemoryRegions,
+<a href=#29 id=29 data-nosnippet>29</a>        DEFAULT_RAM_DESC, DEFAULT_RAM_FLAGS, MemoryRegionFlags, PhysMemoryRegion, RawMemoryRegions,
 <a href=#30 id=30 data-nosnippet>30</a>        VirtAddrSpaceMode, VirtAddrSpaceModes, VirtAddrSpaceProps,
 <a href=#31 id=31 data-nosnippet>31</a>    },
 <a href=#32 id=32 data-nosnippet>32</a>    platform::dt::{DeviceTreeNodeExt, reserved::apply_device_tree_reservations},
@@ -219,7 +219,7 @@
 <a href=#219 id=219 data-nosnippet>219</a>        .align_outwards(DEVICE_TREE_ALIGN)
 <a href=#220 id=220 data-nosnippet>220</a>        .expect(<span class="string">"device tree range alignment overflow"</span>);
 <a href=#221 id=221 data-nosnippet>221</a>    regions
-<a href=#222 id=222 data-nosnippet>222</a>        .insert_disjoint(MemoryRegion {
+<a href=#222 id=222 data-nosnippet>222</a>        .insert_disjoint(PhysMemoryRegion {
 <a href=#223 id=223 data-nosnippet>223</a>            range: dtb_range,
 <a href=#224 id=224 data-nosnippet>224</a>            flags: MemoryRegionFlags::READ
 <a href=#225 id=225 data-nosnippet>225</a>                | MemoryRegionFlags::WRITE
@@ -251,7 +251,7 @@
 <a href=#251 id=251 data-nosnippet>251</a>                .expect(<span class="string">"memory range overflow"</span>);
 <a href=#252 id=252 data-nosnippet>252</a>            <span class="kw">let </span>memory_range = PhysAddrRange::new(<span class="macro">pa!</span>(start <span class="kw">as </span>usize), <span class="macro">pa!</span>(end <span class="kw">as </span>usize));
 <a href=#253 id=253 data-nosnippet>253</a>            regions
-<a href=#254 id=254 data-nosnippet>254</a>                .insert_uncovered(MemoryRegion {
+<a href=#254 id=254 data-nosnippet>254</a>                .insert_uncovered(PhysMemoryRegion {
 <a href=#255 id=255 data-nosnippet>255</a>                    range: memory_range,
 <a href=#256 id=256 data-nosnippet>256</a>                    flags: DEFAULT_RAM_FLAGS,
 <a href=#257 id=257 data-nosnippet>257</a>                    desc: DEFAULT_RAM_DESC,

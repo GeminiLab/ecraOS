@@ -7,7 +7,7 @@
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>memory_addr::{PhysAddr, PhysAddrRange};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use crate</span>::{
-<a href=#10 id=10 data-nosnippet>10</a>    mem::{DEFAULT_MMIO_FLAGS, MemoryRegion},
+<a href=#10 id=10 data-nosnippet>10</a>    mem::{DEFAULT_MMIO_FLAGS, PhysMemoryRegion},
 <a href=#11 id=11 data-nosnippet>11</a>    platform::dt::DeviceTreeNodeExt,
 <a href=#12 id=12 data-nosnippet>12</a>};
 <a href=#13 id=13 data-nosnippet>13</a>
@@ -115,9 +115,9 @@
 <a href=#115 id=115 data-nosnippet>115</a></span>}
 <a href=#116 id=116 data-nosnippet>116</a>
 <a href=#117 id=117 data-nosnippet>117</a><span class="doccomment">/// Returns the discovered PL011 range for early and platform memory mapping.
-<a href=#118 id=118 data-nosnippet>118</a></span><span class="kw">pub fn </span>mmio_region() -&gt; <span class="prelude-ty">Option</span>&lt;MemoryRegion&gt; {
+<a href=#118 id=118 data-nosnippet>118</a></span><span class="kw">pub fn </span>mmio_region() -&gt; <span class="prelude-ty">Option</span>&lt;PhysMemoryRegion&gt; {
 <a href=#119 id=119 data-nosnippet>119</a>    <span class="kw">let </span>base = PL011_BASE.load(Ordering::Acquire);
-<a href=#120 id=120 data-nosnippet>120</a>    (base != <span class="number">0</span>).then(|| MemoryRegion {
+<a href=#120 id=120 data-nosnippet>120</a>    (base != <span class="number">0</span>).then(|| PhysMemoryRegion {
 <a href=#121 id=121 data-nosnippet>121</a>        range: PhysAddrRange::from_start_size(
 <a href=#122 id=122 data-nosnippet>122</a>            PhysAddr::from_usize(base),
 <a href=#123 id=123 data-nosnippet>123</a>            PL011_SIZE.load(Ordering::Relaxed),

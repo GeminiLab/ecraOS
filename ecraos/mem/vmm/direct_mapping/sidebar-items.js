@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACCESS_BITS","NO_SHRINK_BITS","PAGE_TABLE_BITS"],"fn":["add_and_map_phys_regions","align_region","are_aligned_regions_compatible","direct_mapping_address","identity_mapping_address","init_vmm_mapping_early","plan_formal_mappings","plan_mappings","remove_identity_mapping"],"type":["EarlyRegions","FinalRegions"]};

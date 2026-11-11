@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["acquire_transition"],"static":["NEXT_MAPPING_TRANSACTION_ID"],"struct":["MappingTransaction"]};

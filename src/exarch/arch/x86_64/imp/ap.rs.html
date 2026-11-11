@@ -37,9 +37,9 @@
 <a href=#37 id=37 data-nosnippet>37</a>    </span><span class="kw">pub </span>phys_cpu_id: PhysicalCpuId,
 <a href=#38 id=38 data-nosnippet>38</a>    <span class="doccomment">/// The physical address of the page table root of the AP.
 <a href=#39 id=39 data-nosnippet>39</a>    </span><span class="kw">pub </span>page_table_root: PhysAddr,
-<a href=#40 id=40 data-nosnippet>40</a>    <span class="doccomment">/// The physical address of the 5-level identical page table.
+<a href=#40 id=40 data-nosnippet>40</a>    <span class="doccomment">/// The physical address of the 5-level identity page table.
 <a href=#41 id=41 data-nosnippet>41</a>    </span><span class="kw">pub </span>id_pt_pml5: PhysAddr,
-<a href=#42 id=42 data-nosnippet>42</a>    <span class="doccomment">/// The physical address of the 4-level identical page table.
+<a href=#42 id=42 data-nosnippet>42</a>    <span class="doccomment">/// The physical address of the 4-level identity page table.
 <a href=#43 id=43 data-nosnippet>43</a>    </span><span class="kw">pub </span>id_pt_pml4: PhysAddr,
 <a href=#44 id=44 data-nosnippet>44</a>    <span class="doccomment">/// The virtual address of the stack top of the AP.
 <a href=#45 id=45 data-nosnippet>45</a>    </span><span class="kw">pub </span>stack_top: VirtAddr,
@@ -92,8 +92,8 @@
 <a href=#92 id=92 data-nosnippet>92</a>    options(att_syntax),
 <a href=#93 id=93 data-nosnippet>93</a>);
 <a href=#94 id=94 data-nosnippet>94</a>
-<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Sets up the secondary CPU start page with the given arguments, assuming that the page is mapped
-<a href=#96 id=96 data-nosnippet>96</a>/// identically.
+<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Sets up the secondary CPU start page with the given arguments, assuming that the page is
+<a href=#96 id=96 data-nosnippet>96</a>/// identity-mapped.
 <a href=#97 id=97 data-nosnippet>97</a></span><span class="kw">pub fn </span>setup_ap_start_page(
 <a href=#98 id=98 data-nosnippet>98</a>    phys_cpu_id: PhysicalCpuId,
 <a href=#99 id=99 data-nosnippet>99</a>    page_table_root: PhysAddr,

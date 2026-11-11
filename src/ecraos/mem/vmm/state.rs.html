@@ -1,0 +1,171 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `ecraos/src/mem/vmm/state.rs`."><title>state.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="ecraos" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">ecraos/mem/vmm/</div>state.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! VMM lifecycle states.
+<a href=#2 id=2 data-nosnippet>2</a>
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>core::mem;
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>expt::opaque::{OpaquePageTable, OpaquePageTableType};
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>memory_addr::VirtAddr;
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span><span class="kw">super</span>::direct_mapping::FinalRegions;
+<a href=#9 id=9 data-nosnippet>9</a>
+<a href=#10 id=10 data-nosnippet>10</a><span class="attr">#[cfg(test)]
+<a href=#11 id=11 data-nosnippet>11</a></span><span class="kw">mod </span>tests;
+<a href=#12 id=12 data-nosnippet>12</a>
+<a href=#13 id=13 data-nosnippet>13</a><span class="doccomment">/// A [`FormalPhase`] that is stable (not transitioning).
+<a href=#14 id=14 data-nosnippet>14</a></span><span class="attr">#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+<a href=#15 id=15 data-nosnippet>15</a></span><span class="kw">pub enum </span>StableFormalPhase {
+<a href=#16 id=16 data-nosnippet>16</a>    <span class="doccomment">/// Same as [`FormalPhase::IdentityActive`].
+<a href=#17 id=17 data-nosnippet>17</a>    </span>IdentityActive,
+<a href=#18 id=18 data-nosnippet>18</a>    <span class="doccomment">/// Same as [`FormalPhase::Active`].
+<a href=#19 id=19 data-nosnippet>19</a>    </span>Active,
+<a href=#20 id=20 data-nosnippet>20</a>}
+<a href=#21 id=21 data-nosnippet>21</a>
+<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// A phase of [`VmmState::Formal`].
+<a href=#23 id=23 data-nosnippet>23</a></span><span class="attr">#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+<a href=#24 id=24 data-nosnippet>24</a></span><span class="kw">pub enum </span>FormalPhase {
+<a href=#25 id=25 data-nosnippet>25</a>    <span class="doccomment">/// The formal page table is active on the hardware and contains identity mappings.
+<a href=#26 id=26 data-nosnippet>26</a>    </span>IdentityActive,
+<a href=#27 id=27 data-nosnippet>27</a>    <span class="doccomment">/// A mapping transaction is updating the formal page table or completing its invalidations.
+<a href=#28 id=28 data-nosnippet>28</a>    </span>Transitioning {
+<a href=#29 id=29 data-nosnippet>29</a>        <span class="doccomment">/// ID of the transaction currently changing the page table.
+<a href=#30 id=30 data-nosnippet>30</a>        </span>transaction_id: u64,
+<a href=#31 id=31 data-nosnippet>31</a>    },
+<a href=#32 id=32 data-nosnippet>32</a>    <span class="doccomment">/// The formal page table is active on the hardware and contains no identity mappings.
+<a href=#33 id=33 data-nosnippet>33</a>    </span>Active,
+<a href=#34 id=34 data-nosnippet>34</a>}
+<a href=#35 id=35 data-nosnippet>35</a>
+<a href=#36 id=36 data-nosnippet>36</a><span class="doccomment">/// State updates at the beginning and end of a formal page-table update.
+<a href=#37 id=37 data-nosnippet>37</a></span><span class="kw">impl </span>FormalPhase {
+<a href=#38 id=38 data-nosnippet>38</a>    <span class="doccomment">/// Begins an exclusive formal page-table update and returns the previous stable phase.
+<a href=#39 id=39 data-nosnippet>39</a>    ///
+<a href=#40 id=40 data-nosnippet>40</a>    /// Returns [`None`] without changing the phase if another transaction is in progress.
+<a href=#41 id=41 data-nosnippet>41</a>    </span><span class="kw">pub fn </span>begin_transition(<span class="kw-2">&amp;mut </span><span class="self">self</span>, transaction_id: u64) -&gt; <span class="prelude-ty">Option</span>&lt;StableFormalPhase&gt; {
+<a href=#42 id=42 data-nosnippet>42</a>        <span class="kw">let </span>stable = <span class="kw">match </span><span class="kw-2">*</span><span class="self">self </span>{
+<a href=#43 id=43 data-nosnippet>43</a>            <span class="self">Self</span>::IdentityActive =&gt; StableFormalPhase::IdentityActive,
+<a href=#44 id=44 data-nosnippet>44</a>            <span class="self">Self</span>::Active =&gt; StableFormalPhase::Active,
+<a href=#45 id=45 data-nosnippet>45</a>            <span class="self">Self</span>::Transitioning { .. } =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#46 id=46 data-nosnippet>46</a>        };
+<a href=#47 id=47 data-nosnippet>47</a>        <span class="kw-2">*</span><span class="self">self </span>= <span class="self">Self</span>::Transitioning { transaction_id };
+<a href=#48 id=48 data-nosnippet>48</a>        <span class="prelude-val">Some</span>(stable)
+<a href=#49 id=49 data-nosnippet>49</a>    }
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="doccomment">/// Ends an exclusive formal page-table update owned by `transaction_id`.
+<a href=#52 id=52 data-nosnippet>52</a>    ///
+<a href=#53 id=53 data-nosnippet>53</a>    /// Sets the phase to `next` and returns `true` on success. Returns `false` without changing
+<a href=#54 id=54 data-nosnippet>54</a>    /// the phase if the transaction does not match.
+<a href=#55 id=55 data-nosnippet>55</a>    </span><span class="kw">pub fn </span>finish_transition(<span class="kw-2">&amp;mut </span><span class="self">self</span>, transaction_id: u64, next: StableFormalPhase) -&gt; bool {
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">if </span><span class="kw-2">*</span><span class="self">self </span>!= (<span class="self">Self</span>::Transitioning { transaction_id }) {
+<a href=#57 id=57 data-nosnippet>57</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#58 id=58 data-nosnippet>58</a>        }
+<a href=#59 id=59 data-nosnippet>59</a>        <span class="kw-2">*</span><span class="self">self </span>= <span class="kw">match </span>next {
+<a href=#60 id=60 data-nosnippet>60</a>            StableFormalPhase::IdentityActive =&gt; <span class="self">Self</span>::IdentityActive,
+<a href=#61 id=61 data-nosnippet>61</a>            StableFormalPhase::Active =&gt; <span class="self">Self</span>::Active,
+<a href=#62 id=62 data-nosnippet>62</a>        };
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="bool-val">true
+<a href=#64 id=64 data-nosnippet>64</a>    </span>}
+<a href=#65 id=65 data-nosnippet>65</a>}
+<a href=#66 id=66 data-nosnippet>66</a>
+<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// A phase of [`VmmState::Early`].
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="attr">#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+<a href=#69 id=69 data-nosnippet>69</a></span><span class="kw">pub enum </span>EarlyPhase {
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// The early page table is ready, but is not active on the hardware.
+<a href=#71 id=71 data-nosnippet>71</a>    </span>TableReady,
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// The early page table is active on the hardware and contains identity mappings.
+<a href=#73 id=73 data-nosnippet>73</a>    </span>Active,
+<a href=#74 id=74 data-nosnippet>74</a>}
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a><span class="doccomment">/// State updates at the beginning of early page-table activation.
+<a href=#77 id=77 data-nosnippet>77</a></span><span class="kw">impl </span>EarlyPhase {
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// Marks the early page table as active and returns `true` on success.
+<a href=#79 id=79 data-nosnippet>79</a>    ///
+<a href=#80 id=80 data-nosnippet>80</a>    /// Returns `false` without changing the phase if the early page table was already marked
+<a href=#81 id=81 data-nosnippet>81</a>    /// active.
+<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">pub fn </span>activate(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; bool {
+<a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">if </span><span class="kw-2">*</span><span class="self">self </span>!= <span class="self">Self</span>::TableReady {
+<a href=#84 id=84 data-nosnippet>84</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#85 id=85 data-nosnippet>85</a>        }
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw-2">*</span><span class="self">self </span>= <span class="self">Self</span>::Active;
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="bool-val">true
+<a href=#88 id=88 data-nosnippet>88</a>    </span>}
+<a href=#89 id=89 data-nosnippet>89</a>}
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a><span class="doccomment">/// The current VMM lifecycle state and its page-table data.
+<a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub enum </span>VmmState {
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// The address layout is ready, but the first page table has not been created.
+<a href=#94 id=94 data-nosnippet>94</a>    </span>LayoutReady {
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="doccomment">/// The early page-table type, using the early page allocator.
+<a href=#96 id=96 data-nosnippet>96</a>        </span>page_table_type: OpaquePageTableType&lt;VirtAddr&gt;,
+<a href=#97 id=97 data-nosnippet>97</a>    },
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// The early page table has been created and may or may not be active on the hardware.
+<a href=#99 id=99 data-nosnippet>99</a>    </span>Early {
+<a href=#100 id=100 data-nosnippet>100</a>        <span class="doccomment">/// The early page-table, using the early page allocator.
+<a href=#101 id=101 data-nosnippet>101</a>        </span>page_table: OpaquePageTable&lt;VirtAddr&gt;,
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="doccomment">/// The phase of the early page table, indicating whether it is active on the hardware.
+<a href=#103 id=103 data-nosnippet>103</a>        </span>phase: EarlyPhase,
+<a href=#104 id=104 data-nosnippet>104</a>    },
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// The formal page table has been created and is active on the hardware.
+<a href=#106 id=106 data-nosnippet>106</a>    </span>Formal {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="doccomment">/// The formal page table, using the buddy allocator for new table frames.
+<a href=#108 id=108 data-nosnippet>108</a>        </span>page_table: OpaquePageTable&lt;VirtAddr&gt;,
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="doccomment">/// Page-aligned direct-mapping records, including any retained `NO_MAP` ranges.
+<a href=#110 id=110 data-nosnippet>110</a>        </span>mappings: FinalRegions,
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="doccomment">/// The phase of the formal page table, indicating whether identity mappings remain or a
+<a href=#112 id=112 data-nosnippet>112</a>        /// page-table change is in progress.
+<a href=#113 id=113 data-nosnippet>113</a>        </span>phase: FormalPhase,
+<a href=#114 id=114 data-nosnippet>114</a>    },
+<a href=#115 id=115 data-nosnippet>115</a>}
+<a href=#116 id=116 data-nosnippet>116</a>
+<a href=#117 id=117 data-nosnippet>117</a><span class="doccomment">/// Transfer of the early page table to the formal allocator.
+<a href=#118 id=118 data-nosnippet>118</a></span><span class="kw">impl </span>VmmState {
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="doccomment">/// Switches to the formal page table allocator without changing the page table hierarchy.
+<a href=#120 id=120 data-nosnippet>120</a>    ///
+<a href=#121 id=121 data-nosnippet>121</a>    /// Preserves the existing hierarchy and starts the formal phase with identity mappings active.
+<a href=#122 id=122 data-nosnippet>122</a>    /// `mappings` must describe the direct mappings installed in that hierarchy.
+<a href=#123 id=123 data-nosnippet>123</a>    ///
+<a href=#124 id=124 data-nosnippet>124</a>    /// # Safety
+<a href=#125 id=125 data-nosnippet>125</a>    ///
+<a href=#126 id=126 data-nosnippet>126</a>    /// The descriptor must match the existing page-table hierarchy. Its allocator must be able to
+<a href=#127 id=127 data-nosnippet>127</a>    /// access and deallocate every frame in that hierarchy.
+<a href=#128 id=128 data-nosnippet>128</a>    ///
+<a href=#129 id=129 data-nosnippet>129</a>    /// # Panics
+<a href=#130 id=130 data-nosnippet>130</a>    ///
+<a href=#131 id=131 data-nosnippet>131</a>    /// Panics if the VMM does not own an active early page table.
+<a href=#132 id=132 data-nosnippet>132</a>    </span><span class="kw">pub unsafe fn </span>switch_to_formal_page_table(
+<a href=#133 id=133 data-nosnippet>133</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#134 id=134 data-nosnippet>134</a>        page_table_type: OpaquePageTableType&lt;VirtAddr&gt;,
+<a href=#135 id=135 data-nosnippet>135</a>        mappings: FinalRegions,
+<a href=#136 id=136 data-nosnippet>136</a>    ) {
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span><span class="self">Self</span>::Early {
+<a href=#138 id=138 data-nosnippet>138</a>            page_table,
+<a href=#139 id=139 data-nosnippet>139</a>            phase: EarlyPhase::Active,
+<a href=#140 id=140 data-nosnippet>140</a>        } = <span class="self">self
+<a href=#141 id=141 data-nosnippet>141</a>        </span><span class="kw">else </span>{
+<a href=#142 id=142 data-nosnippet>142</a>            <span class="macro">panic!</span>(<span class="string">"formal handoff requires an active early page table"</span>);
+<a href=#143 id=143 data-nosnippet>143</a>        };
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>root = mem::replace(page_table, OpaquePageTable::dummy()).leak();
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="comment">// SAFETY: Leaking the only owner preserves the hierarchy without calling its old methods.
+<a href=#146 id=146 data-nosnippet>146</a>        // The caller guarantees that the descriptor matches and can manage every table frame.
+<a href=#147 id=147 data-nosnippet>147</a>        </span><span class="kw">let </span>page_table = <span class="kw">unsafe </span>{ page_table_type.new_pagetable_at(root) };
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw-2">*</span><span class="self">self </span>= <span class="self">Self</span>::Formal {
+<a href=#149 id=149 data-nosnippet>149</a>            page_table,
+<a href=#150 id=150 data-nosnippet>150</a>            mappings,
+<a href=#151 id=151 data-nosnippet>151</a>            phase: FormalPhase::IdentityActive,
+<a href=#152 id=152 data-nosnippet>152</a>        };
+<a href=#153 id=153 data-nosnippet>153</a>    }
+<a href=#154 id=154 data-nosnippet>154</a>
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="doccomment">/// Returns a short description of the current state.
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="kw">pub const fn </span>desc(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#158 id=158 data-nosnippet>158</a>            <span class="self">Self</span>::LayoutReady { .. } =&gt; <span class="string">"layout ready"</span>,
+<a href=#159 id=159 data-nosnippet>159</a>            <span class="self">Self</span>::Early { phase, .. } =&gt; <span class="kw">match </span>phase {
+<a href=#160 id=160 data-nosnippet>160</a>                EarlyPhase::TableReady =&gt; <span class="string">"early page table ready"</span>,
+<a href=#161 id=161 data-nosnippet>161</a>                EarlyPhase::Active =&gt; <span class="string">"early page table active"</span>,
+<a href=#162 id=162 data-nosnippet>162</a>            },
+<a href=#163 id=163 data-nosnippet>163</a>            <span class="self">Self</span>::Formal { phase, .. } =&gt; <span class="kw">match </span>phase {
+<a href=#164 id=164 data-nosnippet>164</a>                FormalPhase::IdentityActive =&gt; <span class="string">"formal and identity mappings active"</span>,
+<a href=#165 id=165 data-nosnippet>165</a>                FormalPhase::Transitioning { .. } =&gt; <span class="string">"formal mapping in transition"</span>,
+<a href=#166 id=166 data-nosnippet>166</a>                FormalPhase::Active =&gt; <span class="string">"formal mappings active"</span>,
+<a href=#167 id=167 data-nosnippet>167</a>            },
+<a href=#168 id=168 data-nosnippet>168</a>        }
+<a href=#169 id=169 data-nosnippet>169</a>    }
+<a href=#170 id=170 data-nosnippet>170</a>}
+</code></pre></div></section></main></body></html>

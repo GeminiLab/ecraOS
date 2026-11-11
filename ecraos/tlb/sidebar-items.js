@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["TlbInvalidation","TlbShootdownError"],"fn":["handle_ipi","init","remote_targets","shootdown","validate"],"static":["REQUEST"],"struct":["Payload"]};
+window.SIDEBAR_ITEMS = {"enum":["TlbShootdownError"],"fn":["handle_ipi","init","remote_targets","shootdown","validate"],"static":["REQUEST"],"struct":["Payload"]};
