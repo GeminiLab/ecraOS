@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Condvar","Mutex","MutexGuard","Semaphore","WaitQueue"]};
+window.SIDEBAR_ITEMS = {"struct":["Condvar","Mutex","MutexGuard","Semaphore","SemaphoreWaiter","WaitQueue"]};
