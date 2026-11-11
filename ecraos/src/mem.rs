@@ -273,7 +273,7 @@ unsafe fn call_fn_new_stack_arg2(
 }
 
 /// Prints physical memory ranges, sizes, flags, and descriptions.
-fn print_mem_regions(heading: &str, mem_regions: &[PhysMemoryRegion]) {
+pub(crate) fn print_mem_regions(heading: &str, mem_regions: &[PhysMemoryRegion]) {
     kprintln!("{}", heading);
     for region in mem_regions {
         kprintln!(

@@ -204,6 +204,10 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     let boot_arg = unsafe { arg.as_ref_unchecked() };
     device::discover_and_map_platform(boot_arg.plat_arg);
 
+    mem::pmm::lock_read_phys_mem_regions(|regions| {
+        mem::print_mem_regions("Physical memory regions after platform discovery:", regions);
+    });
+
     // Perform later platform initialization. (As for now it covers mainly the global and BSP local
     // interrupt controller)
     exarch::init::init_later();
@@ -221,7 +225,7 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     exarch::trap::enable_local();
 
     // Here we go!
-    kprintln!("\n\nHere we go!\n\n");
+    info!("\n\n\nHere we go!\n\n");
 
     // Start up the secondary CPUs.
     info!("Starting up secondary CPUs...");

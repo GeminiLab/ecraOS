@@ -2,6 +2,7 @@
 
 use ecraldr_base::PlatformBootArg;
 use exarch::mem::MemoryRegionFlags;
+use log::info;
 
 // TODO: remove this duplicate definition
 /// Access and memory-type bits in memory region flags that can affect the flag bits of page table
@@ -16,6 +17,8 @@ const PAGE_TABLE_BITS: MemoryRegionFlags = MemoryRegionFlags::READ
 ///
 /// Interrupt-controller setup is deferred until the architecture later-initialization hook.
 pub fn discover_and_map_platform(arg: PlatformBootArg) {
+    info!("Discovering and mapping platform devices...");
+
     let description = exarch::platform::discover_platform(arg);
     let (cpu_topology, interrupt_controller, mmio_regions) = description.into_parts();
     crate::mp::init_cpu_list(cpu_topology);
