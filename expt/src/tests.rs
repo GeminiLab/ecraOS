@@ -2075,6 +2075,57 @@ mod flush_and_coverage {
         assert_eq!(flushes(), vec![(1, None)]);
     }
 
+    /// Retains a borrowed batch for local cleanup after recording it for another processor.
+    #[test]
+    fn borrowed_batches_preserve_both_flush_sequences() {
+        let _test = TestContext::new();
+        let mut local = TlbFlushes::None + TlbFlush::Page(va(PAGE)) + TlbFlush::Page(va(3 * PAGE));
+        let mut remote = TlbFlushes::None + TlbFlush::Page(va(2 * PAGE));
+        remote.append_ref(&local);
+        assert!(flushes().is_empty());
+
+        local.flush_with(&DynTlbFlusher::new::<RecordingFlusher<1>>());
+        remote.flush_with(&DynTlbFlusher::new::<RecordingFlusher<2>>());
+        assert_eq!(
+            flushes(),
+            vec![
+                (1, Some(va(PAGE))),
+                (1, Some(va(3 * PAGE))),
+                (2, Some(va(2 * PAGE))),
+                (2, Some(va(PAGE))),
+                (2, Some(va(3 * PAGE))),
+            ]
+        );
+    }
+
+    /// Handles empty, full, and capacity-boundary batches without changing borrowed requests.
+    #[test]
+    fn borrowed_batches_obey_full_dominance_and_capacity() {
+        let _test = TestContext::new();
+        let mut source = TlbFlushes::None;
+        for index in 0..SMALL_FLUSH_THRESHOLD - 1 {
+            source += TlbFlush::Page(va(index * PAGE));
+        }
+        let mut remote = TlbFlushes::None;
+        remote.append_ref(&source);
+        remote.append_ref(&TlbFlushes::None);
+        remote.append_ref(&(TlbFlushes::None + TlbFlush::Page(va(PAGE))));
+        assert!(
+            matches!(&remote, TlbFlushes::Pages(pages) if pages.len() == SMALL_FLUSH_THRESHOLD)
+        );
+        remote.append_ref(&(TlbFlushes::None + TlbFlush::Page(va(2 * PAGE))));
+        assert!(matches!(remote, TlbFlushes::Full));
+        remote.append_ref(&source);
+        remote.flush_with(&DynTlbFlusher::new::<RecordingFlusher<2>>());
+        assert_eq!(flushes(), vec![(2, None)]);
+        assert!(
+            matches!(&source, TlbFlushes::Pages(pages) if pages.len() == SMALL_FLUSH_THRESHOLD - 1)
+        );
+
+        remote.append_ref(&TlbFlushes::Full);
+        assert!(matches!(remote, TlbFlushes::Full));
+    }
+
     /// Verifies that clearing requests discards them without dispatch.
     ///
     /// Both individual and full states become empty and can accept a fresh request afterward.

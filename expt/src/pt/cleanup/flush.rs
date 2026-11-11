@@ -5,6 +5,7 @@
 use core::ops::{Add, AddAssign};
 
 use dyn_static_traits::dyn_static_traits;
+use expanic::UnwrapOrBug;
 use heapless::Vec as HeaplessVec;
 
 use crate::meta::VirtAddr;
@@ -90,6 +91,8 @@ pub enum TlbFlushes<A: VirtAddr> {
     Full,
 }
 
+// TODO: Consider retaining address ranges so large contiguous batches need not become full flushes.
+
 /// Accumulates requests and promotes overflowing page lists to full invalidation.
 impl<A: VirtAddr> AddAssign<TlbFlush<A>> for TlbFlushes<A> {
     /// Merges one invalidation request into the pending state.
@@ -159,18 +162,49 @@ impl<A: VirtAddr> TlbFlushes<A> {
         *self = TlbFlushes::None;
     }
 
+    /// Returns whether this collection has no pending requests.
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
     /// Merges another collection without performing invalidation.
     ///
-    /// Full dominates both collections and individual addresses retain their insertion order.
+    /// Preserves insertion order and duplicate addresses. Copies only the recorded addresses,
+    /// and skips copying when either collection requires a full flush or their combined page
+    /// count exceeds [`SMALL_FLUSH_THRESHOLD`]. Moves the other collection directly if the current
+    /// one is empty.
     pub fn append(&mut self, other: Self) {
-        match &other {
-            Self::None => {}
-            Self::Pages(pages) => {
-                for &address in pages {
-                    *self += TlbFlush::Page(address);
+        if matches!(self, Self::Full) || matches!(&other, Self::None) {
+            return;
+        }
+        if matches!(self, Self::None) || matches!(&other, Self::Full) {
+            *self = other;
+            return;
+        }
+        self.append_ref(&other);
+    }
+
+    /// Merges a borrowed collection without consuming it or performing invalidation.
+    ///
+    /// Preserves insertion order and duplicate addresses. Copies only the recorded addresses,
+    /// and skips copying when either collection requires a full flush or their combined page
+    /// count exceeds [`SMALL_FLUSH_THRESHOLD`]. The borrowed collection remains unchanged.
+    pub fn append_ref(&mut self, other: &Self) {
+        match (&mut *self, other) {
+            (Self::Full, _) | (_, Self::None) => {}
+            (this, Self::Full) => *this = Self::Full,
+            (this @ Self::None, Self::Pages(pages)) => *this = Self::Pages(pages.clone()),
+            (Self::Pages(pages), Self::Pages(other_pages)) => {
+                if pages.len() + other_pages.len() > SMALL_FLUSH_THRESHOLD {
+                    *self = Self::Full;
+                } else {
+                    pages
+                        .extend_from_slice(other_pages.as_slice())
+                        .expect_or_bug(
+                            "combined TLB page requests fit within the checked capacity",
+                        );
                 }
             }
-            Self::Full => *self += TlbFlush::Full,
         }
     }
 }

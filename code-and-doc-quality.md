@@ -63,3 +63,31 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
 - [x] [utils/maybe_non_generic](utils/maybe_non_generic)
 - [x] [utils/memory_range_set](utils/memory_range_set)
 - [x] [utils/size_disp](utils/size_disp)
+
+### Module list for `ecraos` and `exarch`
+
+- [ ] ecraos
+  - [ ] device
+  - [ ] ipi
+  - [ ] kernel_if
+  - [ ] logging
+  - [ ] mem
+    - [ ] allocs
+      - [ ] malloc
+      - [ ] palloc
+      - [ ] vmalloc
+    - [ ] early
+    - [x] pmm
+    - [ ] reloc
+    - [ ] sections
+    - [x] vmm
+  - [ ] mp
+    - [ ] state
+  - [ ] panic
+  - [ ] percpu
+  - [ ] task
+  - [ ] test_guard
+  - [ ] timer
+  - [ ] tlb
+  - [ ] trap
+- [ ] exarch

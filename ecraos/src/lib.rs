@@ -25,18 +25,18 @@ pub mod foundation_test;
 mod ipi;
 mod kernel_if;
 mod logging;
-mod mem;
+pub mod mem;
 pub mod mp;
 pub mod panic;
 mod percpu;
 pub mod task;
 mod test_guard;
 mod timer;
-/// Semantic cross-CPU translation invalidation.
-///
-/// Mapping transactions reuse the common acknowledged IPI protocol.
-mod tlb;
+pub mod tlb;
 mod trap;
+
+// Temporary re-export, visibility of `ipi` to be reviewed later.
+pub use ipi::IpiError;
 
 #[doc(hidden)]
 pub mod reexport {
@@ -162,7 +162,9 @@ unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::BootArg) -> ! {
     );
 
     // Enable the VMM, and jump to the upper address space.
-    mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg)
+    // SAFETY: Early BSP initialization is complete and interrupts remain disabled. The loader
+    // provides the valid boot argument, and the kernel entry and argument lie in mapped regions.
+    unsafe { mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg) }
 }
 
 /// The later kernel entry function that runs after the VMM is initialized.
@@ -225,8 +227,8 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
     info!("Starting up secondary CPUs...");
     mp::start_secondary_cpus().expect("failed to start secondary CPUs");
 
-    // Remove identical mappings.
-    mem::remove_identical_mappings();
+    // Remove identity mappings.
+    mem::remove_identity_mappings();
     mp::publish_boot_mapping_completion();
 
     // Run the BSP main function of the application.

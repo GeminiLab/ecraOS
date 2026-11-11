@@ -56,7 +56,7 @@ pub fn kernel_entry(attr: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// The kernel entry function should be called by boot code with the
 /// following conditions met:
-/// - A pagetable providing identical mapping and covering the whole kernel
+/// - A pagetable providing identity mapping and covering the whole kernel
 ///   image must be enabled on the bootstrap processor.
 /// - Interrupts must be globally disabled on the bootstrap processor.
 ///

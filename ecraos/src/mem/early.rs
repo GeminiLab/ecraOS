@@ -31,7 +31,7 @@ impl PageAllocator for EarlyPageAllocatorImpl {
     }
 
     fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
-        // Early allocator is only used when identical mapping is used.
+        // Early allocator is only used when identity mapping is used.
         addr.as_usize().into()
     }
 }

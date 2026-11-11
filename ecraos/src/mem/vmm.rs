@@ -1,168 +1,267 @@
 //! Virtual memory management.
 //!
-//! Owns the kernel page tables and coordinates acknowledged mapping changes across ready CPUs.
+//! This module manages the kernel's [virtual address space layout](#virtual-address-space-layout)
+//! and [page table](#page-table).
+//!
+//! # Virtual address space layout
+//!
+//! ecraOS currently uses a single shared virtual address space across all CPUs and tasks. Only the
+//! upper half of the virtual address space is used (after the
+//! [temporary identity mappings](#identity-mapping) are removed). It is divided into three areas:
+//!
+//! | Area | Portion of the upper half | Purpose |
+//! | --- | --- | --- |
+//! | [Direct mapping](#direct-mapping-area) | Lower half | Physical memory access. |
+//! | [Vmalloc](#vmalloc-area) | Next quarter | [`vmalloc`](super::allocs::vmalloc) allocations. |
+//! | Reserved | Final quarter | Not used. |
+//!
+//! The kernel
+//! [selects the virtual address space mode](#selection-of-the-virtual-address-space-mode)
+//! and calculates the layout during early boot.
+//!
+//! ## Direct mapping area
+//!
+//! The direct mapping area provides access to physical memory at a fixed virtual address offset,
+//! returned by [`direct_mapping_offset`]. Adding this offset to a physical address gives its
+//! direct mapping address, provided the physical address fits in the area.
+//!
+//! Use [`direct_mapping_phys_to_virt`] and [`direct_mapping_virt_to_phys`] to convert addresses
+//! within the direct mapping area once [`is_page_table_active`] returns `true`. These functions
+//! check address bounds, but do not look up page-table entries. A successful conversion does not
+//! guarantee that the resulting address is mapped.
+//!
+//! ### Physical region mappings
+//!
+//! [`super::pmm`] maintains physical memory regions with byte-precise boundaries. Direct mappings
+//! round these regions outwards to base-page boundaries (the original physical memory regions table
+//! from [`super::pmm`] is not modified). Regions that share a page must satisfy the following
+//! rules:
+//!
+//! - Regions without any `READ`, `WRITE`, or `EXECUTE` bits are ignored unless marked `NO_MAP`.
+//! - A `NO_MAP` region excludes its entire rounded pages from mapping. A region marked `KERNEL`,
+//!   `BOOT_SERVICE`, `DEVICE`, or `EXECUTE` must not share a page with a `NO_MAP` region.
+//! - Other mapped regions sharing a page must agree on their `READ`, `WRITE`, `EXECUTE`, `DEVICE`,
+//!   and `UNCACHED` bits. Compatible regions share one mapping for each overlapping page.
+//!
+//! Use [`add_and_map_phys_regions`] to add or overwrite physical regions and update their mappings.
+//! It also updates identity mappings while they remain active. Adding regions is expensive, so
+//! prefer adding them in batches.
+//!
+//! ## Vmalloc area
+//!
+//! The vmalloc area is used for kernel allocations whose virtual addresses are chosen
+//! independently of their physical backing. Neighboring virtual pages can map non-contiguous
+//! physical pages. Use [`vmalloc`](super::allocs::vmalloc) to allocate and map memory in this area.
+//!
+//! [`vmalloc_base`] and [`vmalloc_area`] describe the area reserved for these allocations.
+//! Querying this reservation does not allocate memory or guarantee that an address is mapped.
+//!
+//! # Page table
+//!
+//! The kernel page table defines the mappings and access permissions for the shared address
+//! space. Its format depends on the selected [`VirtAddrSpaceMode`]. Depending on the architecture,
+//! it may have a single root or separate roots for the lower and upper halves. All CPUs use the
+//! same kernel page table.
+//!
+//! ## Mapping transactions
+//!
+//! [Mapping transactions](MappingTransaction) provide exclusive access to the VMM state, allowing
+//! page-table changes, TLB invalidation, and mapping record updates to be performed safely and
+//! serially.
+//!
+//! Transactions do not roll back page-table changes if an operation fails. See the documentation
+//! for each method of [`MappingTransaction`] for details.
+//!
+//! See [`add_and_map_phys_regions`] and the [`vmalloc`](super::allocs::vmalloc) interfaces for
+//! their calling requirements and failure behavior.
+//!
+//! # Identity mapping
+//!
+//! An identity mapping maps a virtual address to the physical address with the same numerical
+//! value. It allows startup code to execute before switching to the kernel's upper-half addresses.
+//! Temporary identity mappings are needed by the bootstrap processor (BSP) during early boot and
+//! by application processors (APs) during secondary CPU startup. Identity mappings are removed
+//! after APs have finished early startup and no longer need them.
+//!
+//! # Lifecycle of the virtual address space and page table
+//!
+//! ## When the kernel starts
+//!
+//! The bootloader must provide a valid identity mapping for kernel entry, and that mapping must
+//! cover all physical addresses that the kernel will need to access before the early page table
+//! can be installed. The kernel initially executes through this mapping. Its own virtual address
+//! layout and page table have not yet been initialized. Both [`is_layout_initialized`] and
+//! [`is_page_table_active`] return `false`.
+//!
+//! ## Selection of the virtual address space mode
+//!
+//! The platform reports supported virtual address space modes as [`VirtAddrSpaceMode`] values.
+//! A mode describes which halves are available, their address widths and page sizes, and whether
+//! they use separate page-table roots. The kernel currently selects its preferred mode as follows:
+//!
+//! 1. Remove all modes that do not cover both halves of the virtual address space.
+//! 2. Remove modes whose two halves have different address widths or base-page sizes.
+//! 3. Choose the mode with the largest address width per half.
+//! 4. If multiple modes remain, choose the one with the largest base-page size.
+//!
+//! The platform then activates the selected mode and must ensure that a valid identity mapping
+//! remains available. It may preserve the existing identity mapping or install temporary page
+//! tables. The kernel then calculates its layout. The selected mode and layout remain unchanged
+//! throughout the rest of the kernel's lifetime.
+//!
+//! From this point, [`is_layout_initialized`] returns `true` and layout queries are available.
+//! [`is_page_table_active`] remains `false`, and both direct-map address conversion functions
+//! return `None` until the kernel page table is installed.
+//!
+//! ## Early page table
+//!
+//! The kernel initializes its early page allocator and uses it to construct the early page table.
+//! Physical regions are mapped into the direct map according to the
+//! [physical-region mapping rules](#physical-region-mappings), with low-address identity mappings.
+//! The kernel also allocates and maps a BSP stack in the vmalloc area.
+//!
+//! Constructing this table does not activate it. Once the mappings are ready, the BSP installs
+//! the table, after which [`is_page_table_active`] returns `true` and direct-map address conversion
+//! is available in both directions. Execution then moves to the kernel's direct-map code address
+//! and the new stack. The identity mappings remain available.
+//!
+//! ## Formal page table
+//!
+//! After entering the upper half, the kernel initializes the buddy page allocator and the heap.
+//! The buddy allocator takes over allocation of frames already in use, including early page-table
+//! frames.
+//!
+//! This begins the formal page-table phase. The existing page-table tree and its mappings are
+//! preserved. Runtime mapping transactions are now available, including updates through
+//! [`add_and_map_phys_regions`]. The vmalloc allocator is then initialized over its reserved area
+//! and records the existing BSP stack mapping. Identity mappings remain for AP startup.
+//!
+//! ## Removal of the identity mapping
+//!
+//! Once APs have finished early startup and no longer need identity mappings, the kernel removes
+//! those mappings and completes the required local and remote TLB invalidation. Direct mappings and
+//! vmalloc mappings remain in place. Later physical-region updates maintain direct mappings
+//! without recreating identity mappings.
 
-use alloc::vec::Vec;
-use core::{
-    mem,
-    ops::DerefMut,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use exarch::mem::{LocalTlbFlusher, VirtAddrSpaceMode, VirtAddrSpaceModes};
 use expalloc_trait::PageAllocator;
 use expt::{
-    opaque::{OpaquePageTable, OpaquePageTableRoot, OpaquePageTableType},
+    opaque::OpaquePageTableRoot,
     pt::cleanup::{PendingCleanup, TlbFlushes},
+    pte::MappingFlags,
 };
-use exspin::{SpinNoIrq, SpinNoPreempt, SpinNoPreemptGuard};
+use exspin::RwLockNoIrq;
 use lazyinit::LazyInit;
 use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange, va};
 use size_disp::SizeDisplay;
 
-use crate::{
-    kprintln,
-    mem::allocs,
-    mp::{self, LogicalCpuId},
-    tlb::{self, TlbInvalidation, TlbShootdownError},
-};
+use crate::{kprintln, mem::allocs};
 
-mod phys_mapping;
+mod direct_mapping;
+mod state;
+mod transaction;
 
-pub use phys_mapping::map_mmio_regions;
-pub(super) use phys_mapping::{
-    init_vmm_mapping_early, remove_identical_mapping, use_dynamic_mapping_storage,
-};
+#[cfg(test)]
+mod tests;
 
-/// The serialization lock for kernel mapping changes and delayed reuse.
-///
-/// The request payload has one writer throughout mutation, remote completion and finalization.
-static MAPPING_TRANSACTION: SpinNoPreempt<()> = SpinNoPreempt::new(());
-
-// Lock order:
-// Allocate the MP online/IPI-ready snapshot before acquiring the mapping transaction.
-// mapping transaction (preemption disabled, interrupts enabled)
-//   -> vmalloc metadata lock, only for prepare/finalize phases
-//   -> page-table SpinNoIrq lock, only for PTE mutation and error-path local cleanup
-//   -> release every IRQ-disabling and allocator lock
-//   -> finish pending local cleanup, then publish/send/wait for remote acknowledgements
-//   -> reacquire vmalloc metadata briefly to finalize or quarantine
-//   -> release physical frames outside vmalloc and page-table locks.
-// No scheduler queue lock crosses this boundary. The IPI handler takes none of these locks.
-// A future lock-free mapping/request structure may replace this serialized design after a complete
-// memory-ordering proof. Early not-ready CPUs may add fresh mappings locally, but cannot remove or
-// replace mappings without completing the normal remote protocol.
-
-/// An owned kernel mapping transaction and its stable remote target set.
-///
-/// Only this preemption guard survives the remote completion phase.
-pub(crate) struct MappingTransaction {
-    /// The MP-owned snapshot excluding the pinned caller.
-    ///
-    /// Allocation precedes acquisition of the serialization lock.
-    targets: Vec<LogicalCpuId>,
-    /// The serialization and CPU-pinning guard.
-    ///
-    /// It leaves interrupts enabled throughout remote completion.
-    _guard: SpinNoPreemptGuard<'static, ()>,
-}
-
-impl MappingTransaction {
-    /// Captures ready CPUs and serializes mutation without disabling interrupts.
-    ///
-    /// A ready CPU cannot spin on this lock with interrupts disabled while another owner awaits it.
-    pub(crate) fn begin() -> Result<Self, TlbShootdownError> {
-        let snapshot = mp::ipi_ready_cpu_ids();
-        let pin = kernel_guard::NoPreempt::new();
-        if mp::is_ipi_ready(mp::current_cpu_id()) && !exarch::trap::local_enabled() {
-            return Err(TlbShootdownError::Ipi(
-                crate::ipi::IpiError::InterruptsDisabled,
-            ));
-        }
-        let targets = tlb::remote_targets(snapshot, mp::current_cpu_id());
-        let guard = MAPPING_TRANSACTION.lock();
-        drop(pin);
-        Ok(Self {
-            targets,
-            _guard: guard,
-        })
-    }
-
-    /// Completes remote invalidation after the local page-table guard has been released.
-    ///
-    /// The same snapshot is used for every mutation in this transaction.
-    pub(crate) fn complete(&self, request: TlbInvalidation) -> Result<(), TlbShootdownError> {
-        tlb::shootdown(&self.targets, request)
-    }
-
-    /// Returns the captured remote logical destinations for diagnostics.
-    ///
-    /// The returned slice does not create a second CPU inventory.
-    pub(crate) fn targets(&self) -> &[LogicalCpuId] {
-        &self.targets
-    }
-}
+pub use direct_mapping::add_and_map_phys_regions;
+pub(super) use direct_mapping::{init_vmm_mapping_early, remove_identity_mapping};
+pub use state::{EarlyPhase, FormalPhase, StableFormalPhase, VmmState};
+pub use transaction::MappingTransaction;
 
 /// The layout of the virtual address space.
-pub struct VirtualAddressSpaceLayout {
+struct VirtualAddressSpaceLayout {
     /// The selected architecture translation mode.
     mode: VirtAddrSpaceMode,
     /// The logarithm of the base-page size in bytes.
     page_shift: u8,
-    /// The virtual range reserved for the physical-memory direct map.
-    direct_mapping_range: VirtAddrRange,
-    /// The virtual range reserved for independent kernel allocations.
-    vmalloc_range: VirtAddrRange,
+    /// The virtual address range reserved for the physical-memory direct map.
+    direct_mapping_area: VirtAddrRange,
+    /// The virtual address range reserved for independent kernel allocations.
+    vmalloc_area: VirtAddrRange,
 }
 
 /// The virtual address space.
-pub struct VirtualAddressSpace {
+struct VirtualAddressSpace {
     /// The selected kernel virtual-address layout.
     layout: VirtualAddressSpaceLayout,
-    /// The descriptor for the currently selected page-table allocator.
-    ///
-    /// Early initialization uses the early allocator and post-relocation handoff replaces it with
-    /// the formal allocator's descriptor.
-    page_table_type_mutex: SpinNoIrq<OpaquePageTableType<VirtAddr>>,
-    /// The owner of the kernel page-table pages.
-    page_table_mutex: SpinNoIrq<OpaquePageTable<VirtAddr>>,
+    /// The VMM lifecycle and current page-table owner.
+    state: RwLockNoIrq<VmmState>,
 }
 
 /// The kernel virtual address space.
 static VIRTUAL_ADDRESS_SPACE: LazyInit<VirtualAddressSpace> = LazyInit::new();
 
-/// Indicates that the final page-table roots are active.
+/// Publication flag for kernel page-table activation.
 ///
-/// Address conversion uses the direct map only after the processor has installed these roots.
+/// This flag exists to avoid taking the VMM state lock when checking if the page table is active.
+/// It is basically equivalent to the following function:
+///
+/// ```rust,ignore
+/// fn is_page_table_active() -> bool {
+///     let Some(addr_space) = VIRTUAL_ADDRESS_SPACE.get() else { return false };
+///     matches!(
+///         &*addr_space.state.read(),
+///         VmmState::Early { phase: EarlyPhase::Active, .. } | VmmState::Formal { .. }
+///     )
+/// }
+/// ```
+///
+/// Set after the BSP installs the early page table. [`is_page_table_active`] reads this flag
+/// without taking the VMM state lock, including from address conversion paths. It remains set
+/// during later lifecycle transitions and does not track individual mappings.
 static PAGE_TABLE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Returns whether the virtual address space has been initialized.
+/// Returns whether the kernel virtual-address layout has been initialized.
 ///
-/// Layout availability alone does not imply that the final page-table roots are active.
-pub fn is_initialized() -> bool {
+/// A ready layout does not imply that the kernel page table has been created or installed.
+#[inline]
+pub fn is_layout_initialized() -> bool {
     VIRTUAL_ADDRESS_SPACE.get().is_some()
+}
+
+/// Returns whether the BSP has activated the kernel page table.
+///
+/// Becomes true after the early page table is installed and remains true through the formal
+/// allocator handoff and later mapping updates.
+#[inline]
+pub fn is_page_table_active() -> bool {
+    PAGE_TABLE_ACTIVE.load(Ordering::Acquire)
 }
 
 /// Returns the selected architecture translation mode.
 ///
-/// The virtual address space must have been initialized before this accessor is called.
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
-#[expect(unused)]
 pub fn mode() -> VirtAddrSpaceMode {
     VIRTUAL_ADDRESS_SPACE.layout.mode
 }
 
-/// Returns the logarithm of the selected base-page size in bytes.
+/// Returns the base-2 logarithm of the selected base page size in bytes.
 ///
-/// Both halves of the kernel address space use the returned page-size shift.
+/// The base page size is `1 << page_size_shift()`. Both halves of the kernel address space use this
+/// size.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
 pub fn page_size_shift() -> usize {
     VIRTUAL_ADDRESS_SPACE.layout.page_shift as usize
 }
 
-/// Returns the selected base-page size in bytes.
+/// Returns the selected base page size in bytes.
 ///
-/// Physical allocation and virtual mapping operations share this granularity.
+/// Both halves of the kernel address space use this size. This is the granularity of physical
+/// allocation and virtual mapping operations.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
 pub fn page_size() -> usize {
     1usize << page_size_shift()
@@ -170,136 +269,203 @@ pub fn page_size() -> usize {
 
 /// Returns the number of base pages needed for a byte count.
 ///
-/// A partial final page is included in the returned count.
+/// Rounds up to include a partial final page. Returns zero for zero bytes.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
 pub fn page_count_for_bytes(bytes: usize) -> usize {
     bytes.div_ceil(page_size())
 }
 
-/// Returns the offset between physical addresses and their direct-map virtual addresses.
+/// Returns the offset between physical addresses and their direct mapping virtual addresses.
 ///
-/// The integer represents a translation offset used during relocation and physical-memory access.
+/// Adding this offset to a physical address gives its direct mapping address, provided it fits in
+/// the reserved direct mapping range. This calculation does not check whether the address is
+/// mapped.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
 pub fn direct_mapping_offset() -> usize {
     VIRTUAL_ADDRESS_SPACE
         .layout
-        .direct_mapping_range
+        .direct_mapping_area
         .start
         .as_usize()
 }
 
 /// Returns the first virtual address reserved for vmalloc.
 ///
-/// Early boot uses this boundary when reserving the BSP stack.
+/// Use [`vmalloc_area`] to obtain both boundaries of the reservation.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
 pub fn vmalloc_base() -> VirtAddr {
-    vmalloc_range().start
+    vmalloc_area().start
 }
 
-/// Returns the virtual-address range reserved for vmalloc.
+/// Returns the virtual address range reserved for vmalloc.
 ///
-/// The formal virtual allocator uses this reservation after early boot completes.
+/// Use [`super::allocs::vmalloc`] to allocate and map memory within this range.
+///
+/// # Panics
+///
+/// Panics if the virtual-address layout has not been initialized.
 #[inline]
-pub fn vmalloc_range() -> VirtAddrRange {
-    VIRTUAL_ADDRESS_SPACE.layout.vmalloc_range
+pub fn vmalloc_area() -> VirtAddrRange {
+    VIRTUAL_ADDRESS_SPACE.layout.vmalloc_area
 }
 
-/// Computes the physical address corresponding to a direct-map virtual address.
+/// Computes the physical address corresponding to a direct mapping virtual address.
 ///
-/// Checks only whether the address lies in the configured direct-map window. It does not verify
-/// that a page-table mapping exists for the address, so callers must only pass mapped addresses.
+/// Available once [`is_page_table_active`] returns `true`. Checks whether the address lies in the
+/// configured direct mapping area, but does not check whether the page table maps the address.
 ///
-/// Returns [`None`] when the layout is unavailable or the address lies outside the direct map.
+/// Returns [`None`] before the kernel page table is active or when the address lies outside the
+/// direct mapping area.
 pub fn direct_mapping_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
+    if !is_page_table_active() {
+        return None;
+    }
+
     let addr_space = VIRTUAL_ADDRESS_SPACE.get()?;
-    if !addr_space.layout.direct_mapping_range.contains(addr) {
+    if !addr_space.layout.direct_mapping_area.contains(addr) {
         return None;
     }
 
     Some(PhysAddr::from_usize(
-        addr.as_usize() - addr_space.layout.direct_mapping_range.start.as_usize(),
+        addr.as_usize() - addr_space.layout.direct_mapping_area.start.as_usize(),
     ))
 }
 
-/// Computes the direct-map virtual address corresponding to a physical address.
+/// Computes the direct mapping virtual address corresponding to a physical address.
 ///
-/// Checks that the final roots are active and that the address fits in the reserved direct-map
-/// window. It does not check whether that physical address is mapped there. NO_MAP regions
-/// intentionally have no direct-map mapping.
+/// Available once [`is_page_table_active`] returns `true`. Checks that the address fits in the
+/// reserved direct mapping area, but does not check whether it is mapped. In particular, `NO_MAP`
+/// regions have no direct mappings.
 ///
-/// Returns [`None`] before the final roots are active or when the offset exceeds the reservation.
+/// Returns [`None`] before the early page table is installed or when the address does not fit.
 pub fn direct_mapping_phys_to_virt(addr: PhysAddr) -> Option<VirtAddr> {
-    if !PAGE_TABLE_ACTIVE.load(Ordering::Acquire) {
+    if !is_page_table_active() {
         return None;
     }
 
     let addr_space = VIRTUAL_ADDRESS_SPACE.get()?;
     let offset = addr.as_usize();
-    let start = addr_space.layout.direct_mapping_range.start.as_usize();
+    let start = addr_space.layout.direct_mapping_area.start.as_usize();
     let virt = VirtAddr::from_usize(start.checked_add(offset)?);
     addr_space
         .layout
-        .direct_mapping_range
+        .direct_mapping_area
         .contains(virt)
         .then_some(virt)
 }
 
-/// Runs a closure with exclusive access to the kernel page-table owner.
+/// Maps a range needed during early boot.
 ///
-/// Operations use the allocator captured by the owner's descriptor. The page-table slot must
-/// already be initialized and cannot be observed while allocator handoff holds the same lock.
-#[inline]
-pub fn with_page_table<F, T>(f: F) -> T
-where
-    F: FnOnce(&mut OpaquePageTable<VirtAddr>) -> T,
-{
-    let mut pt = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
-    f(&mut pt)
-}
-
-/// Completes local cleanup and preserves its required remote invalidation scope.
+/// The early page table must be created but not yet installed. This is used to map the BSP stack.
 ///
-/// The caller releases the page-table lock before calling this helper and supplies a request
-/// covering every changed base page. A full cleanup request also widens remote invalidation,
-/// including changes to huge mappings or intermediate descriptors. The returned request must
-/// complete on all captured remote CPUs before mappings are published or data frames are reused.
-pub(crate) fn finish_local_cleanup(
-    cleanup: PendingCleanup<VirtAddr>,
-    request: TlbInvalidation,
-) -> TlbInvalidation {
-    // SAFETY: Process every request locally through its captured strategy, then return the
-    // required remote scope to the mapping transaction. No pending invalidation is discarded.
-    let (mut flushes, flusher) = unsafe { cleanup.into_inner() };
-    let request = if matches!(flushes, TlbFlushes::Full) {
-        TlbInvalidation::All
-    } else {
-        request
+/// # Panics
+///
+/// Panics unless the early table is ready but inactive, or if mapping fails.
+pub(super) fn map_early_range(
+    virtual_range: VirtAddrRange,
+    physical_start: PhysAddr,
+    flags: MappingFlags,
+) {
+    let mut state = VIRTUAL_ADDRESS_SPACE.state.write();
+    let VmmState::Early {
+        page_table,
+        phase: EarlyPhase::TableReady,
+    } = &mut *state
+    else {
+        panic!("early mapping requires an inactive early table");
     };
-    flushes.flush_with(&flusher);
-    request
+    page_table
+        .map(
+            virtual_range.start,
+            physical_start,
+            virtual_range.size(),
+            flags,
+        )
+        .expect("failed to map early boot range");
 }
 
-/// Marks the final page-table roots as active.
+/// Performs local TLB invalidations and appends them to a list of pending remote invalidations.
 ///
-/// Called after installing these roots so physical-address translation can use the direct map.
-pub(crate) fn mark_page_table_active() {
+/// It's the caller's responsibility to complete the remote invalidations before publishing the new
+/// mapping or reusing affected frames.
+fn finish_local_cleanup(
+    cleanup: PendingCleanup<VirtAddr>,
+    remote_flushes: &mut TlbFlushes<VirtAddr>,
+) {
+    // SAFETY: Preserve every request for remote invalidation and process it locally through the
+    // captured strategy. The transaction retains responsibility for remote completion.
+    let (mut flushes, flusher) = unsafe { cleanup.into_inner() };
+    remote_flushes.append_ref(&flushes);
+    flushes.flush_with(&flusher);
+}
+
+/// Installs the early page table.
+///
+/// Call on the BSP with interrupts disabled, before starting APs. This function locks the VMM state
+/// temporarily.
+///
+/// Direct mapping conversions are enabled after this function returns.
+///
+/// # Panics
+///
+/// Panics unless an inactive early table has been constructed.
+pub(super) fn activate_early_page_table() {
+    let root = {
+        let mut state = VIRTUAL_ADDRESS_SPACE.state.write();
+        let VmmState::Early { page_table, phase } = &mut *state else {
+            panic!("activation requires an early page table");
+        };
+        assert!(phase.activate(), "early page table already active");
+        page_table.root()
+    };
+    // On x86, the low per-CPU area becomes read-only after this switch. The state lock must
+    // already be released so dropping its execution guard does not write to that area.
+    exarch::mem::set_page_table_root(root);
     PAGE_TABLE_ACTIVE.store(true, Ordering::Release);
 }
 
-/// Returns the active page-table root.
+/// Returns the kernel page-table root addresses.
 ///
-/// The borrowed identifier does not transfer ownership of the installed table pages.
+/// Does not transfer ownership of page-table frames. Secondary CPU startup uses these addresses
+/// to install the same page table.
+///
+/// # Panics
+///
+/// Panics before the initial table has been constructed.
 #[inline]
-pub fn page_table_root() -> OpaquePageTableRoot {
-    with_page_table(|pt| pt.root())
+pub(crate) fn page_table_root() -> OpaquePageTableRoot {
+    let state = VIRTUAL_ADDRESS_SPACE.state.read();
+    match &*state {
+        VmmState::Early { page_table, .. } | VmmState::Formal { page_table, .. } => {
+            page_table.root()
+        }
+        VmmState::LayoutReady { .. } => panic!("page table has not been created"),
+    }
 }
 
-/// Initializes the virtual address space.
+/// Selects the kernel address space mode and calculates the layout.
 ///
-/// Detects the translation mode and calculates the kernel layout without allocating table pages.
-/// The initial opaque page table type captures the early allocator `AL` and [`LocalTlbFlusher`]
-/// for cleanup on the calling processor.
-pub(super) fn init_vmm_layout<AL: PageAllocator>() {
+/// `AL` is the early allocator used when the first page table is created. This function does not
+/// allocate, so `AL` can be initialized after this function and before the first page table is
+/// created.
+///
+/// # Panics
+///
+/// Panics if the layout is already initialized or no supported mode provides matching address
+/// widths and page sizes for both halves.
+pub(super) fn init_vmm_mode_and_layout<AL: PageAllocator>() {
     kprintln!("Virtual address space:");
 
     let mode = select_va_mode(exarch::mem::virt_addr_space_modes());
@@ -308,11 +474,9 @@ pub(super) fn init_vmm_layout<AL: PageAllocator>() {
 
     VIRTUAL_ADDRESS_SPACE.init_once(VirtualAddressSpace {
         layout,
-        page_table_type_mutex: SpinNoIrq::new(exarch::mem::get_page_table_type::<
-            AL,
-            LocalTlbFlusher,
-        >(mode)),
-        page_table_mutex: SpinNoIrq::new(OpaquePageTable::dummy()),
+        state: RwLockNoIrq::new(VmmState::LayoutReady {
+            page_table_type: exarch::mem::get_page_table_type::<AL, LocalTlbFlusher>(mode),
+        }),
     });
 }
 
@@ -385,57 +549,60 @@ fn calculate_vmm_layout(mode: VirtAddrSpaceMode) -> VirtualAddressSpaceLayout {
     //   - 4th quarter: not used
     // This scheme gives us at least the same size of these areas as Linux does.
     let quarter_size = 1usize << (upper_bits - 2);
-    let direct_mapping_range = VirtAddrRange::from_start_size(upper_start, quarter_size * 2);
-    let vmalloc_range =
-        VirtAddrRange::from_start_size(upper_start + quarter_size * 2, quarter_size);
+    let direct_mapping_area = VirtAddrRange::from_start_size(upper_start, quarter_size * 2);
+    let vmalloc_area = VirtAddrRange::from_start_size(upper_start + quarter_size * 2, quarter_size);
     kprintln!(
         "  Direct mapping area : {:x}, {}",
-        direct_mapping_range,
-        direct_mapping_range.size().size_display_wide()
+        direct_mapping_area,
+        direct_mapping_area.size().size_display_wide()
     );
     kprintln!(
         "  Vmalloc area        : {:x}, {}",
-        vmalloc_range,
-        vmalloc_range.size().size_display_wide()
+        vmalloc_area,
+        vmalloc_area.size().size_display_wide()
     );
 
     VirtualAddressSpaceLayout {
         mode,
         page_shift,
-        direct_mapping_range,
-        vmalloc_range,
+        direct_mapping_area,
+        vmalloc_area,
     }
 }
 
-/// Transfers the active page-table owner to the formal allocator.
+/// Switches page-table frame allocation and deallocation to the buddy allocator.
 ///
-/// Refreshes relocated function pointers and transfers the early owner's roots to the formal
-/// allocator without freeing them or calling old method pointers. Before this handoff, the formal
-/// allocator must have registered all early page-table allocations so it can release them.
+/// Keeps the existing page-table tree and rebuilds its direct mapping records from the physical
+/// memory table. Call after the heap and final PMM storage are ready, but before MMIO discovery
+/// adds regions. The buddy allocator must already own all frames used by the early page table.
+///
+/// # Panics
+///
+/// Panics if the early page table is not active, PMM is not using final storage, or the mapping
+/// records cannot be built.
 pub(super) fn use_formal_page_table_allocator() {
-    // Fix function addresses in the opaque page table type first.
+    let regions = super::pmm::clone_final_regions();
+    let mappings = direct_mapping::plan_formal_mappings(regions.as_slice(), page_size(), true)
+        .expect("failed to reconstruct formal mapping records");
     let page_table_type = exarch::mem::get_page_table_type::<FormalPageAllocator, LocalTlbFlusher>(
         VIRTUAL_ADDRESS_SPACE.layout.mode,
     );
-    *VIRTUAL_ADDRESS_SPACE.page_table_type_mutex.lock() = page_table_type.clone();
-
-    let mut page_table_guard = VIRTUAL_ADDRESS_SPACE.page_table_mutex.lock();
-
-    let root = mem::replace(page_table_guard.deref_mut(), OpaquePageTable::dummy()).leak();
-
-    // SAFETY: leak transfers the existing roots and all their table pages out of the only owner.
-    // The refreshed descriptor has the same geometry and can access and release those pages.
-    *page_table_guard = unsafe { page_table_type.new_pagetable_at(root) };
+    // SAFETY: The unchanged mode selects the same page-table format. The buddy allocator has
+    // registered all early table frames, and the active direct map provides access to them.
+    unsafe {
+        VIRTUAL_ADDRESS_SPACE
+            .state
+            .write()
+            .switch_to_formal_page_table(page_table_type, mappings);
+    }
 }
 
-/// The kernel's formal page allocator for page-table storage.
-///
-/// Uses the initialized buddy allocator and the high physical-memory direct map. The buddy
-/// allocator adopts early allocations before this type becomes the active descriptor's allocator.
-pub struct FormalPageAllocator;
+/// The buddy-backed allocator for kernel page-table frames.
+struct FormalPageAllocator;
 
+/// Page-table frame allocation, deallocation, and direct mapping access.
 impl PageAllocator for FormalPageAllocator {
-    /// Returns the logarithm of the kernel base-page size in bytes.
+    /// Returns the logarithm of the kernel base page size in bytes.
     ///
     /// Page-table allocations use the same granularity as the physical allocator.
     fn page_size_shift() -> usize {
@@ -472,76 +639,8 @@ impl PageAllocator for FormalPageAllocator {
 
     /// Translates a physical page-table address through the kernel direct map.
     ///
-    /// The final page-table roots must be active before this allocator accesses table storage.
+    /// The early page table must already provide direct-map access to the frame.
     fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
         VirtAddr::from_usize(addr.as_usize() + direct_mapping_offset())
-    }
-}
-
-/// Deferred page-table cleanup and remote invalidation tests.
-///
-/// Recording local invalidations avoids privileged instructions on the host.
-#[cfg(test)]
-mod tests {
-    use core::cell::RefCell;
-
-    use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher};
-    use memory_addr::{VirtAddr, VirtAddrRange, va};
-
-    use crate::tlb::TlbInvalidation;
-
-    use super::finish_local_cleanup;
-
-    std::thread_local! {
-        /// The local invalidations completed by the calling test thread.
-        ///
-        /// Each test starts with an independent empty recording.
-        static FLUSHES: RefCell<Vec<Option<VirtAddr>>> = const { RefCell::new(Vec::new()) };
-    }
-
-    /// A local invalidation recorder.
-    ///
-    /// It models the captured strategy without executing architecture instructions.
-    struct RecordingFlusher;
-
-    /// The host recording strategy implementation.
-    ///
-    /// Cleanup completes by storing observations in thread-local test state.
-    impl TlbFlusher<VirtAddr> for RecordingFlusher {
-        /// Records one completed local invalidation.
-        ///
-        /// The returned remote request must be inspected only after this record exists.
-        fn flush(address: Option<VirtAddr>) {
-            FLUSHES.with_borrow_mut(|flushes| flushes.push(address));
-        }
-    }
-
-    /// Completes local pages before returning the requested remote range.
-    ///
-    /// Batching must retain every pending address without widening a sufficient range.
-    #[test]
-    fn finishes_local_pages_before_remote_completion() {
-        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
-        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
-        cleanup.push_flush(TlbFlush::Page(va!(0x2000)));
-        let request = TlbInvalidation::Range(VirtAddrRange::new(va!(0x1000), va!(0x3000)));
-        let remote = finish_local_cleanup(cleanup, request);
-        FLUSHES.with_borrow(|flushes| {
-            assert_eq!(flushes.as_slice(), &[Some(va!(0x1000)), Some(va!(0x2000))]);
-        });
-        assert_eq!(remote, request);
-    }
-
-    /// Widens remote invalidation when a page-table mutation requires a full flush.
-    ///
-    /// Huge-leaf splits and accumulated flush overflow cannot be completed by one remote page.
-    #[test]
-    fn full_cleanup_requires_full_remote_invalidation() {
-        let mut cleanup = PendingCleanup::new_with::<RecordingFlusher>();
-        cleanup.push_flush(TlbFlush::Page(va!(0x1000)));
-        cleanup.push_flush(TlbFlush::Full);
-        let remote = finish_local_cleanup(cleanup, TlbInvalidation::Page(va!(0x1000)));
-        FLUSHES.with_borrow(|flushes| assert_eq!(flushes.as_slice(), &[None]));
-        assert_eq!(remote, TlbInvalidation::All);
     }
 }

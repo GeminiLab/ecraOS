@@ -1,4 +1,9 @@
-//! Kernel relocation handling.
+//! Kernel self-relocation support.
+
+// This module should not be visible outside this crate, or (at least for the nightly-2026-06-01
+// toolchain, it's the only one tested) rustc will use GOT to call `relocate_me` on x86-64.
+//
+// TODO: find a better and "promised to work" solution. Maybe make `relocate_me` a macro?
 
 use crate::kernel_entry;
 

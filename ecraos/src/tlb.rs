@@ -1,6 +1,6 @@
 //! Semantic cross-CPU translation invalidation.
 //!
-//! Requests reuse common exact-generation acknowledgement and the MP ready snapshot.
+//! Mapping transactions reuse the common acknowledged IPI protocol.
 
 use alloc::vec::Vec;
 use core::{
@@ -9,8 +9,8 @@ use core::{
 };
 
 use exarch::mem::LocalTlbFlusher;
-use expt::pt::cleanup::TlbFlusher;
-use memory_addr::{AddrRangeBounds, MemoryAddr, VirtAddr, VirtAddrRange, va};
+use expt::pt::cleanup::{DynTlbFlusher, SMALL_FLUSH_THRESHOLD, TlbFlush, TlbFlushes};
+use memory_addr::{MemoryAddr, VirtAddr, va};
 
 use crate::{
     ipi,
@@ -18,31 +18,12 @@ use crate::{
     mp::{self, LogicalCpuId},
 };
 
-/// A semantic invalidation in the global kernel address space.
-///
-/// Page and range boundaries use the runtime-selected kernel granule.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TlbInvalidation {
-    /// One runtime-sized page.
-    ///
-    /// The address must be aligned to the active granule.
-    Page(VirtAddr),
-    /// A nonempty half-open page range.
-    ///
-    /// Every runtime-sized page receives a local invalidation.
-    Range(VirtAddrRange),
-    /// All translations in the active kernel address space.
-    ///
-    /// No ASID or PCID lifetime is implied.
-    All,
-}
-
 /// A rejected request or incomplete remote invalidation.
 ///
 /// Common IPI errors preserve the target, generation and absolute deadline diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TlbShootdownError {
-    /// An invalid runtime granule or request boundary.
+pub enum TlbShootdownError {
+    /// An invalid page size or unaligned virtual address.
     ///
     /// Validation precedes publication and delivery.
     InvalidRequest,
@@ -56,19 +37,17 @@ pub(crate) enum TlbShootdownError {
     Ipi(ipi::IpiError),
 }
 
-/// Validates a request against the active page granule.
+/// Validates every requested page against the active page granule.
 ///
-/// Empty, reversed and unaligned ranges cannot reach the interrupt handler.
-pub(crate) fn validate(request: TlbInvalidation, size: usize) -> Result<(), TlbShootdownError> {
+/// Empty and full batches need no addresses. Page lists must contain only aligned addresses.
+pub(crate) fn validate(
+    requests: &TlbFlushes<VirtAddr>,
+    size: usize,
+) -> Result<(), TlbShootdownError> {
     let valid = size.is_power_of_two()
-        && match request {
-            TlbInvalidation::Page(address) => address.is_aligned(size),
-            TlbInvalidation::Range(range) => {
-                range.start < range.end
-                    && range.start.is_aligned(size)
-                    && range.end.is_aligned(size)
-            }
-            TlbInvalidation::All => true,
+        && match requests {
+            TlbFlushes::Pages(pages) => pages.iter().all(|address| address.is_aligned(size)),
+            TlbFlushes::None | TlbFlushes::Full => true,
         };
     valid.then_some(()).ok_or(TlbShootdownError::InvalidRequest)
 }
@@ -94,20 +73,13 @@ struct Payload {
     ///
     /// Common IPI generations are never zero or reused.
     generation: AtomicU64,
-    /// The page, range or full request discriminator.
-    ///
-    /// Values one through three encode the semantic variants.
-    kind: AtomicUsize,
-    /// The first virtual address at the atomic storage boundary.
-    ///
-    /// Full invalidation stores zero here.
-    start: AtomicUsize,
-    /// The exclusive range end at the atomic storage boundary.
-    ///
-    /// Page and full invalidations store zero here.
-    end: AtomicUsize,
+    /// The number of pages, zero for an empty batch, or `usize::MAX` for full invalidation.
+    count: AtomicUsize,
+    /// Virtual addresses stored atomically for readers of a potentially timed-out generation.
+    pages: [AtomicUsize; SMALL_FLUSH_THRESHOLD],
 }
 
+/// Publishes and decodes TLB requests for one IPI generation.
 impl Payload {
     /// Creates unpublished atomic request storage.
     ///
@@ -115,47 +87,52 @@ impl Payload {
     const fn new() -> Self {
         Self {
             generation: AtomicU64::new(0),
-            kind: AtomicUsize::new(0),
-            start: AtomicUsize::new(0),
-            end: AtomicUsize::new(0),
+            count: AtomicUsize::new(0),
+            pages: [const { AtomicUsize::new(0) }; SMALL_FLUSH_THRESHOLD],
         }
     }
 
     /// Publishes all fields before the common pending reasons become visible.
     ///
-    /// The transaction lock gives this storage exactly one writer.
-    fn publish(&self, generation: u64, request: TlbInvalidation) {
+    /// The VMM's Transitioning phase gives this storage exactly one writer.
+    fn publish(&self, generation: u64, requests: &TlbFlushes<VirtAddr>) {
         self.generation.store(0, Ordering::SeqCst);
-        let (kind, start, end) = match request {
-            TlbInvalidation::Page(address) => (1, address.as_usize(), 0),
-            TlbInvalidation::Range(range) => (2, range.start.as_usize(), range.end.as_usize()),
-            TlbInvalidation::All => (3, 0, 0),
+        let count = match requests {
+            TlbFlushes::None => 0,
+            TlbFlushes::Pages(pages) => {
+                for (slot, address) in self.pages.iter().zip(pages) {
+                    slot.store(address.as_usize(), Ordering::SeqCst);
+                }
+                pages.len()
+            }
+            TlbFlushes::Full => usize::MAX,
         };
-        self.kind.store(kind, Ordering::SeqCst);
-        self.start.store(start, Ordering::SeqCst);
-        self.end.store(end, Ordering::SeqCst);
+        self.count.store(count, Ordering::SeqCst);
         self.generation.store(generation, Ordering::SeqCst);
     }
 
     /// Decodes only an unchanged exact-generation publication.
     ///
     /// A delayed interrupt cannot acknowledge a newer payload on behalf of an older request.
-    fn decode(&self, generation: u64) -> Option<TlbInvalidation> {
+    fn decode(&self, generation: u64) -> Option<TlbFlushes<VirtAddr>> {
         if generation == 0 || self.generation.load(Ordering::SeqCst) != generation {
             return None;
         }
-        let kind = self.kind.load(Ordering::SeqCst);
-        let start = va!(self.start.load(Ordering::SeqCst));
-        let end = va!(self.end.load(Ordering::SeqCst));
+        let count = self.count.load(Ordering::SeqCst);
+        let mut requests = TlbFlushes::None;
+        if count == usize::MAX {
+            requests = TlbFlushes::Full;
+        } else if count <= SMALL_FLUSH_THRESHOLD {
+            for slot in &self.pages[..count] {
+                requests += TlbFlush::Page(va!(slot.load(Ordering::SeqCst)));
+            }
+        } else {
+            return None;
+        }
         if self.generation.load(Ordering::SeqCst) != generation {
             return None;
         }
-        match kind {
-            1 => Some(TlbInvalidation::Page(start)),
-            2 => Some(TlbInvalidation::Range(VirtAddrRange { start, end })),
-            3 => Some(TlbInvalidation::All),
-            _ => None,
-        }
+        Some(requests)
     }
 }
 
@@ -172,6 +149,12 @@ pub(crate) fn published_generation() -> u64 {
     REQUEST.generation.load(Ordering::SeqCst)
 }
 
+/// Returns the published requests if their generation still matches.
+#[cfg(feature = "foundation-test")]
+pub(crate) fn published_requests(generation: u64) -> Option<TlbFlushes<VirtAddr>> {
+    REQUEST.decode(generation)
+}
+
 /// Installs the semantic handler before any CPU becomes IPI-ready.
 ///
 /// Registration is immutable throughout the Online CPU lifetime.
@@ -183,30 +166,27 @@ pub(crate) fn init() {
 ///
 /// Common IPI publishes acknowledgement only when decoding and every flush have completed.
 fn handle_ipi(generation: u64) -> bool {
-    let Some(request) = REQUEST.decode(generation) else {
+    let Some(mut requests) = REQUEST.decode(generation) else {
         return false;
     };
-    match request {
-        TlbInvalidation::Page(address) => LocalTlbFlusher::flush(Some(address)),
-        TlbInvalidation::Range(range) => {
-            for address in range.iter(vmm::page_size()).expect("validated TLB range") {
-                LocalTlbFlusher::flush(Some(address));
-            }
-        }
-        TlbInvalidation::All => LocalTlbFlusher::flush(None),
-    }
+    requests.flush_with(&DynTlbFlusher::new::<LocalTlbFlusher>());
     true
 }
 
 /// Waits for the same exact generation on every captured remote CPU.
 ///
 /// The caller holds only the mapping transaction guard and has finished local mutation/flush.
-/// Empty boot snapshots need no publication and permit early local-only mapping operations.
+/// Empty request batches and target snapshots need no publication or interprocessor interrupts.
 pub(crate) fn shootdown(
     targets: &[LogicalCpuId],
-    request: TlbInvalidation,
+    requests: &TlbFlushes<VirtAddr>,
 ) -> Result<(), TlbShootdownError> {
-    validate(request, vmm::page_size())?;
+    if matches!(requests, TlbFlushes::None)
+        || matches!(requests, TlbFlushes::Pages(pages) if pages.is_empty())
+    {
+        return Ok(());
+    }
+    validate(requests, vmm::page_size())?;
     if targets.contains(&mp::current_cpu_id()) {
         return Err(TlbShootdownError::LocalTarget);
     }
@@ -217,72 +197,48 @@ pub(crate) fn shootdown(
         targets,
         ipi::IpiReason::TlbShootdown,
         Duration::from_millis(500),
-        |generation| REQUEST.publish(generation, request),
+        |generation| REQUEST.publish(generation, requests),
     )
     .map_err(TlbShootdownError::Ipi)
 }
 
-/// Semantic invalidation and payload tests.
-///
-/// Privileged instructions are replaced by pure request observations on the host.
 #[cfg(test)]
 mod tests {
+    //! Request validation and IPI payload tests.
+
+    use core::sync::atomic::Ordering;
+
+    use expt::pt::cleanup::{SMALL_FLUSH_THRESHOLD, TlbFlush, TlbFlushes};
+    use memory_addr::va;
+
     use crate::mp::LogicalCpuId;
-    use memory_addr::{VirtAddrRange, va};
 
-    use super::{Payload, TlbInvalidation, remote_targets, validate};
+    use super::{Payload, remote_targets, shootdown, validate};
 
-    /// Rejects invalid runtime-sized page and range requests.
-    ///
-    /// The same validation handles 4 KiB, 16 KiB and 64 KiB kernels.
+    /// Empty requests need no initialized VMM, CPU inventory, or IPI transport.
+    #[test]
+    fn empty_batches_do_not_send_ipis() {
+        assert!(shootdown(&[], &TlbFlushes::None).is_ok());
+        assert!(shootdown(&[], &TlbFlushes::Pages(Default::default())).is_ok());
+    }
+
+    /// Rejects unaligned pages for every supported runtime granule.
     #[test]
     fn validates_runtime_granules() {
         for size in [4096, 16384, 65536] {
-            assert!(validate(TlbInvalidation::Page(va!(size)), size).is_ok());
-            assert!(validate(TlbInvalidation::Page(va!(size + 1)), size).is_err());
-            assert!(
-                validate(
-                    TlbInvalidation::Range(VirtAddrRange {
-                        start: va!(size),
-                        end: va!(size)
-                    }),
-                    size
-                )
-                .is_err()
-            );
-            assert!(
-                validate(
-                    TlbInvalidation::Range(VirtAddrRange {
-                        start: va!(size * 2),
-                        end: va!(size)
-                    }),
-                    size
-                )
-                .is_err()
-            );
-            assert!(
-                validate(
-                    TlbInvalidation::Range(VirtAddrRange {
-                        start: va!(size),
-                        end: va!(size * 3 + 1)
-                    }),
-                    size
-                )
-                .is_err()
-            );
-            assert!(
-                validate(
-                    TlbInvalidation::Range(VirtAddrRange::new(va!(size), va!(size * 3))),
-                    size
-                )
-                .is_ok()
-            );
+            let mut requests = TlbFlushes::None + TlbFlush::Page(va!(size));
+            requests += TlbFlush::Page(va!(size * 3));
+            assert!(validate(&requests, size).is_ok());
+            requests += TlbFlush::Page(va!(size + 1));
+            assert!(validate(&requests, size).is_err());
+            assert!(validate(&TlbFlushes::None, size).is_ok());
+            assert!(validate(&TlbFlushes::Full, size).is_ok());
         }
+        assert!(validate(&TlbFlushes::Full, 0).is_err());
+        assert!(validate(&TlbFlushes::None, 3).is_err());
     }
 
     /// Excludes the local CPU from an already filtered common snapshot.
-    ///
-    /// Offline and not-ready membership remains the MP owner's tested responsibility.
     #[test]
     fn excludes_current_cpu() {
         assert_eq!(
@@ -298,25 +254,70 @@ mod tests {
         );
     }
 
-    /// Round-trips all request forms only for the matching generation.
-    ///
-    /// A timed-out older handler cannot decode a newer publication as its own payload.
+    /// Preserves a full-capacity noncontiguous page list and rejects stale generations.
     #[test]
-    fn payload_requires_exact_generation() {
+    fn payload_preserves_pages_and_requires_exact_generation() {
         let payload = Payload::new();
-        let requests = [
-            TlbInvalidation::Page(va!(0x10000)),
-            TlbInvalidation::Range(VirtAddrRange::new(va!(0x10000), va!(0x30000))),
-            TlbInvalidation::All,
-        ];
-        for (index, request) in requests.into_iter().enumerate() {
-            let generation = index as u64 + 1;
-            payload.publish(generation, request);
-            assert_eq!(payload.decode(generation), Some(request));
-            assert_eq!(payload.decode(generation + 1), None);
-            if generation > 1 {
-                assert_eq!(payload.decode(generation - 1), None);
-            }
+        assert!(payload.decode(0).is_none());
+        assert!(payload.decode(1).is_none());
+        let mut requests = TlbFlushes::None;
+        for index in 0..SMALL_FLUSH_THRESHOLD {
+            requests += TlbFlush::Page(va!(0x1000 + index * 0x3000));
         }
+        payload.publish(1, &requests);
+        let Some(TlbFlushes::Pages(pages)) = payload.decode(1) else {
+            panic!("page-list payload lost");
+        };
+        assert_eq!(pages.len(), SMALL_FLUSH_THRESHOLD);
+        for (index, address) in pages.into_iter().enumerate() {
+            assert_eq!(address, va!(0x1000 + index * 0x3000));
+        }
+        assert!(payload.decode(2).is_none());
+
+        payload.publish(2, &(TlbFlushes::None + TlbFlush::Page(va!(0x7000))));
+        let Some(TlbFlushes::Pages(pages)) = payload.decode(2) else {
+            panic!("single-page payload lost");
+        };
+        assert_eq!(pages.as_slice(), &[va!(0x7000)]);
+        assert!(payload.decode(1).is_none());
+        payload.publish(3, &TlbFlushes::Full);
+        assert!(matches!(payload.decode(3), Some(TlbFlushes::Full)));
+        assert!(payload.decode(2).is_none());
+        payload.publish(4, &TlbFlushes::None);
+        assert!(matches!(payload.decode(4), Some(TlbFlushes::None)));
+        assert!(payload.decode(3).is_none());
+    }
+
+    /// Never accepts fields belonging to a concurrently replaced generation.
+    #[test]
+    fn payload_replacement_does_not_mix_page_lists() {
+        let payload = Payload::new();
+        std::thread::scope(|scope| {
+            let shared = &payload;
+            let writer = scope.spawn(move || {
+                for generation in 1..=2000 {
+                    let mut requests = TlbFlushes::None;
+                    for index in 0..SMALL_FLUSH_THRESHOLD {
+                        requests +=
+                            TlbFlush::Page(va!(generation as usize * 0x100000 + index * 0x1000));
+                    }
+                    shared.publish(generation, &requests);
+                }
+            });
+            for _ in 0..2000 {
+                let generation = payload.generation.load(Ordering::SeqCst);
+                if let Some(TlbFlushes::Pages(pages)) = payload.decode(generation) {
+                    assert_eq!(pages.len(), SMALL_FLUSH_THRESHOLD);
+                    for (index, address) in pages.iter().enumerate() {
+                        assert_eq!(
+                            *address,
+                            va!(generation as usize * 0x100000 + index * 0x1000)
+                        );
+                    }
+                }
+            }
+            writer.join().unwrap();
+        });
+        assert!(payload.decode(2000).is_some());
     }
 }

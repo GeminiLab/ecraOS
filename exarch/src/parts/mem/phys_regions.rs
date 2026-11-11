@@ -56,6 +56,15 @@ pub trait PhysMemoryRegionsStorage: Default + Clone {
         index: usize,
         region: PhysMemoryRegion,
     ) -> Result<(), PhysMemoryRegionsError>;
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements `e` for which `f(&e)` returns false. This method
+    /// operates in place, visiting each element exactly once in the original order, and preserves
+    /// the order of the retained elements.
+    fn retain<F>(&mut self, predicate: F)
+    where
+        F: FnMut(&PhysMemoryRegion) -> bool;
 }
 
 /// Allocation-free storage operations on an inline-capacity vector.
@@ -88,6 +97,14 @@ impl<const N: usize> PhysMemoryRegionsStorage for HeaplessVec<PhysMemoryRegion, 
         self.insert(index, region)
             .map_err(|_| PhysMemoryRegionsError::CapacityExceeded)
     }
+
+    /// Retains only the elements specified by the predicate.
+    fn retain<F>(&mut self, predicate: F)
+    where
+        F: FnMut(&PhysMemoryRegion) -> bool,
+    {
+        self.retain(predicate);
+    }
 }
 
 /// Fallible storage operations on a dynamically allocated vector.
@@ -119,6 +136,14 @@ impl PhysMemoryRegionsStorage for Vec<PhysMemoryRegion> {
         self.insert(index, region);
         Ok(())
     }
+
+    /// Retains only the elements specified by the predicate.
+    fn retain<F>(&mut self, predicate: F)
+    where
+        F: FnMut(&PhysMemoryRegion) -> bool,
+    {
+        self.retain(predicate);
+    }
 }
 
 /// A sorted collection of nonempty, nonoverlapping regions with one ownership role each.
@@ -142,6 +167,17 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     /// Creates an empty region collection.
     pub fn new() -> Self {
         Self(S::default())
+    }
+
+    /// Creates a region collection from raw storage.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the storage is valid: regions must remain sorted and
+    /// non-overlapping, every range must be nonempty, and all flags must remain valid.
+    /// Valid flags contain only defined bits and exactly one role.
+    pub unsafe fn new_unchecked(storage: S) -> Self {
+        Self(storage)
     }
 
     /// Returns the regions without permitting mutation of their ranges or attributes.
@@ -185,6 +221,14 @@ impl<S: PhysMemoryRegionsStorage> PhysMemoryRegions<S> {
     /// Returns whether no regions are stored.
     pub fn is_empty(&self) -> bool {
         self.as_slice().is_empty()
+    }
+
+    /// Retains only the regions specified by the predicate.
+    pub fn retain<F>(&mut self, predicate: F)
+    where
+        F: FnMut(&PhysMemoryRegion) -> bool,
+    {
+        self.0.retain(predicate);
     }
 
     /// Consumes the collection and returns its storage.

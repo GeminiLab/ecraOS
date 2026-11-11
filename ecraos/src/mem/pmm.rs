@@ -1,24 +1,48 @@
 //! Physical memory region management.
 //!
-//! Maintains the kernel's global table of physical memory regions. Each
-//! [`PhysMemoryRegion`] describes a physical address range, its flags, and a
-//! description. Regions are nonempty, sorted by physical address, and nonoverlapping.
-//! Their boundaries retain byte precision.
+//! # The table
 //!
-//! The table combines platform memory information with kernel and loader reservations
-//! and can be extended with discovered device regions. Page allocators use it to
-//! identify usable RAM, and [`super::vmm`] uses it to prepare physical-memory mappings.
-//! A `FREE` region identifies RAM eligible for page allocation. Individual page
-//! allocations are tracked by [`super::allocs::palloc`].
+//! This module maintains the kernel's global table of physical memory regions,
+//! as a list of [`PhysMemoryRegion`]s. Each `PhysMemoryRegion` describes a
+//! physical address range, its flags, and a description. Regions are nonempty,
+//! sorted by physical address, and non-overlapping. Their boundaries are of
+//! byte precision.
 //!
-//! Use [`lock_read_phys_mem_regions`] to inspect the table under a shared lock, or
-//! [`try_lock_read_phys_mem_regions`] to avoid waiting for conflicting lock holders.
-//! Write access requires an exclusive lock and preserving the region invariants.
-//! Callbacks run with local interrupts and preemption disabled.
+//! The table itself is not public, it should be accessed through the methods
+//! provided in this module. The table is protected by a read-write lock, so
+//! concurrent read-only access is possible.
 //!
-//! The table is initialized during early boot with a fixed capacity. After heap
-//! initialization, its storage can be switched to support additional regions without
-//! the early capacity limit.
+//! # Initialization
+//!
+//! The table is initialized during early boot with a fixed capacity, from the
+//! platform memory information and kernel and loader reservations. After heap
+//! initialization, its storage can be switched to support additional regions
+//! without the early capacity limit, and can be extended with discovered device
+//! regions.
+//!
+//! # Cross-module interaction
+//!
+//! Page allocators use the table to identify usable RAM, and [`super::vmm`]
+//! uses the table to map the direct-mapping areas.
+//!
+//! # Access
+//!
+//! Use [`lock_read_phys_mem_regions`] and [`try_lock_read_phys_mem_regions`] to
+//! inspect the table under a shared read lock.
+//!
+//! Use [`lock_write_phys_mem_regions`] and [`try_lock_write_phys_mem_regions`]
+//! to modify the table under an exclusive write lock, these functions are
+//! unsafe because they require the caller to preserve the region invariants.
+//! These functions **will NOT** update the direct-mapping areas or the page
+//! allocator.
+//!
+//! The table may be appended (and overwritten) with
+//! [`add_and_map_phys_regions`]. Adding new regions automatically maps them to
+//! the direct-mapping area (and identity-maps them if the identity mappings are
+//! still active). Therefore, adding new regions is a relatively expensive
+//! operation, so it is recommended to add regions in batches.
+//!
+//! Removing regions is not supported yet.
 
 use alloc::vec::Vec;
 
@@ -28,6 +52,7 @@ use heapless::Vec as HeaplessVec;
 use lazyinit::LazyInit;
 use memory_addr::{AddrRangeBounds, PhysAddr, PhysAddrRange, VirtAddr, VirtAddrRange};
 
+pub use super::vmm::add_and_map_phys_regions;
 use crate::mem::{sections, vmm};
 
 #[cfg(test)]
@@ -36,11 +61,17 @@ mod tests;
 /// The capacity of the kernel physical memory region table before the heap allocator is available.
 pub(crate) const MAX_EARLY_PHYS_MEMORY_REGIONS: usize = 64;
 
+/// Fixed-capacity storage for physical memory regions before the heap allocator is available.
+pub(crate) type EarlyRegionsStorage = HeaplessVec<PhysMemoryRegion, MAX_EARLY_PHYS_MEMORY_REGIONS>;
+
+/// Dynamically extensible storage for physical memory regions after the heap allocator is available.
+pub(crate) type FinalRegionsStorage = Vec<PhysMemoryRegion>;
+
 /// Fixed-capacity physical memory regions used before the heap allocator is available.
-pub(crate) type EarlyRegions = PhysMemoryRegions<HeaplessVec<PhysMemoryRegion, MAX_EARLY_PHYS_MEMORY_REGIONS>>;
+pub(crate) type EarlyRegions = PhysMemoryRegions<EarlyRegionsStorage>;
 
 /// Dynamically extensible physical memory regions used after the heap allocator is available.
-pub(crate) type FinalRegions = PhysMemoryRegions<Vec<PhysMemoryRegion>>;
+pub(crate) type FinalRegions = PhysMemoryRegions<FinalRegionsStorage>;
 
 /// A [`PhysMemoryRegions`] that is backed by either a `HeaplessVec` or a `Vec`.
 ///
@@ -95,7 +126,8 @@ static PHYS_MEM_REGIONS: LazyInit<RegionTable> = LazyInit::new();
 /// it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table.
+/// acquire a write lock on the same table as it will deadlock. Acquiring a read lock on the same
+/// table from the callback is generally safe, but should be avoided if possible.
 fn read_region_table<R>(table: &RegionTable, reader: impl FnOnce(&RuntimeRegions) -> R) -> R {
     let regions = table.read();
     reader(&regions)
@@ -107,7 +139,8 @@ fn read_region_table<R>(table: &RegionTable, reader: impl FnOnce(&RuntimeRegions
 /// Returns `None` if the lock could not be acquired.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table.
+/// acquire a write lock on the same table as it will deadlock. Acquiring a read lock on the same
+/// table from the callback is generally safe, but should be avoided if possible.
 fn try_read_region_table<R>(
     table: &RegionTable,
     reader: impl FnOnce(&RuntimeRegions) -> R,
@@ -120,7 +153,7 @@ fn try_read_region_table<R>(
 /// holding it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table.
+/// acquire another read or write lock on the same table as it will deadlock.
 fn write_region_table<R>(table: &RegionTable, writer: impl FnOnce(&mut RuntimeRegions) -> R) -> R {
     let mut regions = table.write();
     writer(&mut regions)
@@ -131,7 +164,7 @@ fn write_region_table<R>(table: &RegionTable, writer: impl FnOnce(&mut RuntimeRe
 /// Returns `None` if the lock could not be acquired.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table.
+/// acquire another read or write lock on the same table as it will deadlock.
 fn try_write_region_table<R>(
     table: &RegionTable,
     writer: impl FnOnce(&mut RuntimeRegions) -> R,
@@ -155,8 +188,11 @@ pub enum PhysMemoryRegionsLockError {
 /// holding it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table. Some operations, such as console output or logging, may
-/// invoke address translation and must be checked carefully.
+/// acquire a write lock on the same table as it will deadlock. Acquiring a read lock on the same
+/// table from the callback is generally safe, but should be avoided if possible.
+///
+/// Some operations, such as console output or logging, may access the table implicitly and must be
+/// checked carefully.
 ///
 /// # Panics
 ///
@@ -169,7 +205,11 @@ pub fn lock_read_phys_mem_regions<R>(reader: impl FnOnce(&[PhysMemoryRegion]) ->
 /// while holding it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table.
+/// acquire a write lock on the same table as it will deadlock. Acquiring a read lock on the same
+/// table from the callback is generally safe, but should be avoided if possible.
+///
+/// Some operations, such as console output or logging, may access the table implicitly and must be
+/// checked carefully.
 ///
 /// # Errors
 ///
@@ -189,8 +229,10 @@ pub fn try_lock_read_phys_mem_regions<R>(
 /// while holding it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table. Some operations, such as console output or logging, may
-/// invoke address translation and must be checked carefully.
+/// acquire another read or write lock on the same table as it will deadlock.
+///
+/// Some operations, such as console output or logging, may access the table implicitly and must be
+/// checked carefully.
 ///
 /// # Safety
 ///
@@ -214,8 +256,10 @@ pub unsafe fn lock_write_phys_mem_regions<R>(
 /// writer while holding it.
 ///
 /// Local interrupts and preemption are disabled throughout the callback. The callback must not
-/// acquire another lock on the same table. Some operations, such as console output or logging, may
-/// invoke address translation and must be checked carefully.
+/// acquire another read or write lock on the same table as it will deadlock.
+///
+/// Some operations, such as console output or logging, may access the table implicitly and must be
+/// checked carefully.
 ///
 /// # Errors
 ///
@@ -252,12 +296,15 @@ pub unsafe fn try_lock_write_phys_mem_regions<R>(
 /// or [`PhysMemoryRegionsLockError::AlreadyLocked`] if either required lock cannot be
 /// acquired immediately.
 pub(super) fn switch_to_final_storage() -> Result<(), PhysMemoryRegionsLockError> {
-    let regions = PHYS_MEM_REGIONS.get().ok_or(PhysMemoryRegionsLockError::NotInitialized)?;
+    let regions = PHYS_MEM_REGIONS
+        .get()
+        .ok_or(PhysMemoryRegionsLockError::NotInitialized)?;
 
     let early = try_read_region_table(regions, |table| match table {
         RuntimeRegions::Early(regions) => Some(regions.clone()),
         RuntimeRegions::Final(_) => None,
-    }).ok_or(PhysMemoryRegionsLockError::AlreadyLocked)?;
+    })
+    .ok_or(PhysMemoryRegionsLockError::AlreadyLocked)?;
 
     if let Some(early_regions) = early {
         // The conversion allocates, so do it without holding the ownership-table lock.
@@ -265,7 +312,8 @@ pub(super) fn switch_to_final_storage() -> Result<(), PhysMemoryRegionsLockError
         relocate_region_descriptions(&mut final_regions);
         try_write_region_table(regions, |table| {
             *table = RuntimeRegions::Final(final_regions);
-        }).ok_or(PhysMemoryRegionsLockError::AlreadyLocked)?;
+        })
+        .ok_or(PhysMemoryRegionsLockError::AlreadyLocked)?;
     }
 
     Ok(())
@@ -275,7 +323,7 @@ pub(super) fn switch_to_final_storage() -> Result<(), PhysMemoryRegionsLockError
 ///
 /// Region descriptions are kernel static strings captured before the high-half jump. Copying the
 /// region entries does not relocate these runtime pointers automatically.
-pub(super) fn relocate_region_descriptions(regions: &mut FinalRegions) {
+fn relocate_region_descriptions(regions: &mut FinalRegions) {
     // SAFETY: We update the region descriptions in place, without changing the ranges or attributes.
     for region in unsafe { regions.iter_mut() } {
         let address = VirtAddr::from_ptr_of(region.desc.as_ptr());

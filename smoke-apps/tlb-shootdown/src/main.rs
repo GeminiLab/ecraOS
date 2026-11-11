@@ -178,23 +178,33 @@ fn main() {
     }
     command(&targets, 1, None);
     let page = test::page_range(range.start);
-    let generation =
-        test::replace_shared(page, &[0x33], test::Invalidation::Page(range.start)).unwrap();
+    let generation = test::replace_shared(
+        page,
+        &[0x33],
+        test::TlbFlushes::None + test::TlbFlush::Page(range.start),
+    )
+    .unwrap();
     command(&targets, 2, Some(generation));
     test::assert_tlb_completed(&targets, generation);
     kprintln!(
         "TLB Page exact generation={generation} targets={targets:?} remote-observation=[0x33,0x22] adjacent=unchanged"
     );
 
-    let generation =
-        test::replace_shared(range, &[0x44, 0x55], test::Invalidation::Range(range)).unwrap();
+    let generation = test::replace_shared(
+        range,
+        &[0x44, 0x55],
+        test::TlbFlushes::None
+            + test::TlbFlush::Page(range.start)
+            + test::TlbFlush::Page(range.start + size),
+    )
+    .unwrap();
     command(&targets, 3, Some(generation));
     test::assert_tlb_completed(&targets, generation);
     kprintln!(
-        "TLB Range exact generation={generation} targets={targets:?} remote-observation=[0x44,0x55]"
+        "TLB Pages exact generation={generation} targets={targets:?} remote-observation=[0x44,0x55]"
     );
 
-    let generation = test::replace_shared(range, &[0x66, 0x77], test::Invalidation::All).unwrap();
+    let generation = test::replace_shared(range, &[0x66, 0x77], test::TlbFlushes::Full).unwrap();
     command(&targets, 4, Some(generation));
     test::assert_tlb_completed(&targets, generation);
     kprintln!(
@@ -253,6 +263,11 @@ fn main() {
     assert!(generation > details.generation.unwrap());
     test::assert_tlb_completed(&targets, generation);
     kprintln!("TLB recovery exact generation={generation} targets={targets:?}");
+
+    test::assert_try_mapping_transaction();
+    kprintln!("TLB nonwaiting transaction handles contention with interrupts disabled");
+    test::assert_tlb_transaction_retry([distinct.start, distinct.start + size], target);
+    kprintln!("TLB transaction retry retained both requests and cleared them after success");
 
     COMMAND.store(6, Ordering::Release);
     for reader in &readers {

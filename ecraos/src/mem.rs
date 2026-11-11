@@ -14,7 +14,7 @@ use crate::kprintln;
 pub mod allocs;
 mod early;
 pub mod pmm;
-pub mod reloc;
+pub(crate) mod reloc;
 pub mod sections;
 pub mod vmm;
 
@@ -35,9 +35,6 @@ pub fn virt_to_phys(addr: VirtAddr) -> PhysAddr {
 /// In particular, NO_MAP regions have no direct-map mapping, so the returned address must not be
 /// dereferenced for those regions.
 pub fn phys_to_virt(addr: PhysAddr) -> VirtAddr {
-    if !vmm::is_initialized() {
-        return VirtAddr::from_usize(addr.as_usize());
-    }
     vmm::direct_mapping_phys_to_virt(addr).unwrap_or_else(|| VirtAddr::from_usize(addr.as_usize()))
 }
 
@@ -47,12 +44,10 @@ fn try_virt_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
         return Some(low_identity);
     }
 
-    if vmm::is_initialized() {
-        if let Some(paddr) = vmm::direct_mapping_virt_to_phys(addr)
-            && phys_addr_is_known(paddr)
-        {
-            return Some(paddr);
-        }
+    if let Some(paddr) = vmm::direct_mapping_virt_to_phys(addr)
+        && phys_addr_is_known(paddr)
+    {
+        return Some(paddr);
     }
 
     if let Some(stack) = early::try_bsp_stack()
@@ -74,7 +69,17 @@ fn phys_addr_is_known(addr: PhysAddr) -> bool {
 }
 
 /// Initializes early memory management and installs the kernel page-table.
-pub fn init_and_enable_vmm(
+///
+/// Continues at `entry_with_vmm` using the direct-map code address and a newly mapped BSP stack.
+///
+/// # Safety
+///
+/// Call exactly once on the BSP, with local interrupts disabled and early per-CPU, trap, and
+/// platform initialization complete. `arg` must point to a valid [`ecraldr_base::BootArg`].
+/// `entry_with_vmm` must be the identity-mapped address of an entry function with the
+/// [`ecraldr_base::KernelEntryType`] signature. The entry and boot argument must be covered by
+/// the physical regions mapped during this call.
+pub unsafe fn init_and_enable_vmm(
     entry_with_vmm: *const ecraldr_base::KernelEntryType,
     hart_id: usize,
     arg: *const ecraldr_base::BootArg,
@@ -83,6 +88,7 @@ pub fn init_and_enable_vmm(
     print_kernel_location("Kernel location immediately after boot:");
 
     // Get physical memory regions from the boot argument.
+    // SAFETY: The caller guarantees that the boot argument is valid and accessible.
     let boot_arg = *unsafe { arg.as_ref_unchecked() };
     let mut raw_mem_regions = RawMemoryRegions::new();
     exarch::mem::raw_mem_regions(boot_arg.plat_arg, &mut raw_mem_regions);
@@ -101,37 +107,33 @@ pub fn init_and_enable_vmm(
     // used again.
 
     // Determine the layout of the virtual address space.
-    vmm::init_vmm_layout::<early::EarlyPageAllocatorImpl>();
+    vmm::init_vmm_mode_and_layout::<early::EarlyPageAllocatorImpl>();
 
     // Initialize the early page allocator using the final region table. It depends on the page
     // size info.
     early::init_early_page_allocator();
 
     // Create the page table and early mappings. It depends on the early page allocator.
-    pmm::lock_read_phys_mem_regions(vmm::init_vmm_mapping_early);
+    // SAFETY: The regions are valid.
+    pmm::lock_read_phys_mem_regions(|regions| unsafe { vmm::init_vmm_mapping_early(regions) });
 
-    // Allocate the BSP stack area.
+    // Allocate the BSP stack area and map it.
     early::init_bsp_stack(vmm::vmalloc_base());
     let bsp_stack = early::bsp_stack();
 
-    vmm::with_page_table(|pt| {
-        pt.map(
-            bsp_stack.alloc_range.start,
-            bsp_stack.pa_range.start,
-            bsp_stack.alloc_range.size(),
-            MappingFlags::READ | MappingFlags::WRITE,
-        )
-        .unwrap();
-    });
+    vmm::map_early_range(
+        bsp_stack.alloc_range,
+        bsp_stack.pa_range.start,
+        MappingFlags::READ | MappingFlags::WRITE,
+    );
 
     // Load the early page table.
-    exarch::mem::set_page_table_root(vmm::page_table_root());
-    vmm::mark_page_table_active();
+    vmm::activate_early_page_table();
 
     // Call the relocation hook.
     exarch::reloc_hook::before_reloc();
 
-    // Use a returnless call to jump to non-identical PC/SP.
+    // Use a returnless call to jump to non-identity-mapped PC/SP.
     unsafe {
         let direct_mapping_offset = vmm::direct_mapping_offset();
 
@@ -170,20 +172,18 @@ pub fn init_after_enable_vmm() {
     // TODO: recycle the loader memory region (as well as the bootstack).
     allocs::palloc::init_palloc();
 
-    // The early allocator is now destroyed. Transfer the active tree to the formal allocator and
-    // refresh relocated method pointers before any later initialization can use vmalloc.
-    vmm::use_formal_page_table_allocator();
-
     // Initialize the small object allocator.
     allocs::malloc::init_malloc_current_cpu();
 
-    // Promote boot-time region and mapping metadata after the formal heap is available.
-    pmm::switch_to_final_storage();
-    vmm::use_dynamic_mapping_storage();
+    // The heap is ready, migrate the physical memory region records to the heap.
+    pmm::switch_to_final_storage().expect("failed to switch to final storage");
+
+    // Transfer the active page-table to the formal allocator.
+    vmm::use_formal_page_table_allocator();
 
     // Initialize the VMAllocator, and add the BSP stack/percpu area to it.
     let page_size_shift = vmm::page_size_shift();
-    allocs::vmalloc::init_vmalloc(vmm::vmalloc_range(), page_size_shift);
+    allocs::vmalloc::init_vmalloc(vmm::vmalloc_area(), page_size_shift);
 
     let early_bsp_stack = early::bsp_stack();
     allocs::vmalloc::register_external_range(
@@ -205,8 +205,8 @@ pub fn init_ap() {
 ///
 /// Runs after secondary CPUs finish early startup. Page-table operations use the formal allocator
 /// captured by the owner during post-relocation memory initialization.
-pub fn remove_identical_mappings() {
-    vmm::remove_identical_mapping();
+pub fn remove_identity_mappings() {
+    vmm::remove_identity_mapping();
 }
 
 /// Converts [`MemoryRegionFlags`] to [`MappingFlags`] for page table entries.
@@ -272,7 +272,7 @@ unsafe fn call_fn_new_stack_arg2(
     }
 }
 
-/// Prints a borrowed list whose owner does not hold the global region lock during output.
+/// Prints physical memory ranges, sizes, flags, and descriptions.
 fn print_mem_regions(heading: &str, mem_regions: &[PhysMemoryRegion]) {
     kprintln!("{}", heading);
     for region in mem_regions {

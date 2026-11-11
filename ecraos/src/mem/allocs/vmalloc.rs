@@ -1,13 +1,14 @@
-//! Vmalloc reservations and acknowledged mapping transactions.
+//! Kernel virtual-address reservations and their physical page mappings.
 //!
-//! Metadata preparation, PTE mutation, unlocked remote completion and resource release are distinct
-//! phases. Failed completion retains both physical backing and the complete virtual reservation.
+//! It reserves virtual ranges with guard pages and maps them to physical pages. Owned pages are
+//! released only after CPUs that could use an old translation have invalidated it. If a mapping
+//! change may be incomplete, the virtual range and its backing pages remain reserved.
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use core::range::Range;
 
 use ecraldr_base::PhysAddrRange;
-use expt::{opaque::PageTableAction, pte::MappingFlags};
+use expt::{opaque::PageTableAction, pt::cleanup::TlbFlushes, pte::MappingFlags};
 use exspin::SpinNoIrq;
 use lazyinit::LazyInit;
 use log::{error, info};
@@ -20,7 +21,7 @@ use crate::{
         vmm::{self, MappingTransaction},
     },
     mp,
-    tlb::{TlbInvalidation, TlbShootdownError},
+    tlb::TlbShootdownError,
 };
 
 /// Per-page mapping and completion state.
@@ -672,17 +673,17 @@ pub fn init_vmalloc(range: VirtAddrRange, shift: usize) {
     VMALLOC.init_once(SpinNoIrq::new(VMAllocator::new(range, shift).unwrap()));
 }
 
-/// Runs only a metadata operation with the reservation owner locked.
+/// Runs an operation on vmalloc allocation records.
 ///
-/// PTE mutation, shootdown and physical release must take place outside this closure.
+/// The callback holds the allocator lock with local interrupts and preemption disabled. It must
+/// not recursively access the global allocator, change page tables, wait for other CPUs, or
+/// release physical frames.
 pub fn with_allocator<R>(function: impl FnOnce(&mut VMAllocator) -> R) -> Result<R, VMAllocError> {
     let mut allocator = VMALLOC.get().ok_or(VMAllocError::NotInitialized)?.lock();
     Ok(function(&mut allocator))
 }
 
-/// Validates an external physical page list.
-///
-/// Empty lists and unaligned frames cannot reach a mapping transaction.
+/// Checks that a physical page list is nonempty and page-aligned.
 fn validate_phys_pages(pages: &[PhysAddr], size: usize) -> Result<(), VMAllocError> {
     if pages.is_empty() {
         return Err(VMAllocError::EmptyRange);
@@ -728,12 +729,12 @@ fn release_empty_reservation(range: VirtAddrRange) {
     });
 }
 
-/// Installs a prepared list of physical frames without waiting under metadata or PTE locks.
+/// Maps physical pages into a reserved virtual range.
 ///
-/// New boot mappings on a not-ready caller need no remote translation removal. Every runtime
-/// publication and all rollback removal use the common completion protocol.
+/// `owned` determines whether vmalloc releases the frames after a successful unmap. If an update
+/// may have partially changed the page table, the range and its frames are retained.
 fn map_pages_inner(
-    transaction: &MappingTransaction,
+    transaction: &mut MappingTransaction,
     range: VirtAddrRange,
     pages: &[PhysAddr],
     owned: bool,
@@ -777,29 +778,29 @@ fn map_pages_inner(
         Ok::<_, VMAllocError>(())
     })??;
     // VMALLOC has been released before the short PTE mutation phase.
-    let mutation = vmm::with_page_table(|table| {
-        table.apply_actions_with_cleanup(token.pages.iter().map(|page| PageTableAction::Map {
-            vaddr: page.virtual_address,
-            paddr: page.physical_address,
-            size,
-            flags,
-        }))
-    });
-    let cleanup = match mutation {
-        Ok(cleanup) => cleanup,
-        Err(error) => {
-            error!("vmalloc map partial mutation range={range:#x}: {error:?}");
-            quarantine(&token)?;
-            return Err(VMAllocError::PageTableError);
-        }
-    };
-    let request = vmm::finish_local_cleanup(cleanup, TlbInvalidation::All);
+    transaction.append_remote_flushes(TlbFlushes::Full);
+    let mutation = transaction.apply_actions(token.pages.iter().map(|page| PageTableAction::Map {
+        vaddr: page.virtual_address,
+        paddr: page.physical_address,
+        size,
+        flags,
+    }));
+    if let Err(error) = mutation {
+        error!("vmalloc map partial mutation range={range:#x}: {error:?}");
+        quarantine(&token)?;
+        return Err(VMAllocError::PageTableError);
+    }
     // No metadata, page-table, physical allocator, queue or IRQ-saving guard remains here.
     if mp::is_ipi_ready(mp::current_cpu_id()) {
-        if let Err(error) = transaction.complete(request) {
+        if let Err(error) = transaction.perform_remote_flushes() {
             quarantine(&token)?;
             return Err(error.into());
         }
+    } else {
+        // SAFETY: Local invalidation is complete, and these new boot-time mappings are private
+        // to the initializing CPU. Identity-mapping removal performs a full remote invalidation
+        // before the boot mapping barrier allows other CPUs to use them.
+        unsafe { transaction.discard_remote_flushes() };
     }
     let status = if owned {
         VMAllocPageStatus::Owned { flags }
@@ -814,7 +815,7 @@ fn map_pages_inner(
 ///
 /// Physical acquisition finishes before PTE mutation. Any uncertain mutation retains all frames.
 pub fn map_alloc(range: VirtAddrRange, flags: MappingFlags) -> Result<(), VMAllocError> {
-    let transaction = MappingTransaction::begin()?;
+    let mut transaction = MappingTransaction::begin()?;
     VMAllocator::validate_range(range, vmm::page_size())?;
     with_allocator(|allocator| allocator.ensure_unmapped(range))??;
     let mut pages = Vec::new();
@@ -830,7 +831,7 @@ pub fn map_alloc(range: VirtAddrRange, flags: MappingFlags) -> Result<(), VMAllo
             }
         }
     }
-    let result = map_pages_inner(&transaction, range, &pages, true, flags);
+    let result = map_pages_inner(&mut transaction, range, &pages, true, flags);
     if result.is_err() {
         // Before-PTE failures leave the metadata empty. After-PTE failures mark quarantine and
         // retain every frame, including pages whose individual mapping was never attempted.
@@ -844,20 +845,18 @@ pub fn map_alloc(range: VirtAddrRange, flags: MappingFlags) -> Result<(), VMAllo
 /// Maps external physical pages into an empty global subrange.
 ///
 /// Vmalloc retains their addresses on quarantine but never claims physical ownership.
-#[expect(unused)]
 pub fn map_phys_pages(
     range: VirtAddrRange,
     pages: &[PhysAddr],
     flags: MappingFlags,
 ) -> Result<(), VMAllocError> {
-    let transaction = MappingTransaction::begin()?;
-    map_pages_inner(&transaction, range, pages, false, flags)
+    let mut transaction = MappingTransaction::begin()?;
+    map_pages_inner(&mut transaction, range, pages, false, flags)
 }
 
 /// Maps an external contiguous physical span into an empty subrange.
 ///
 /// The physical and virtual sizes must match exactly.
-#[expect(unused)]
 pub fn map_phys_range(
     range: VirtAddrRange,
     physical: PhysAddrRange,
@@ -874,7 +873,6 @@ pub fn map_phys_range(
 /// Allocates a guarded reservation mapped to external pages.
 ///
 /// Untouched preparation failures release the empty virtual reservation.
-#[expect(unused)]
 pub fn alloc_range_and_map_phys_pages(
     guards: usize,
     pages: &[PhysAddr],
@@ -892,7 +890,6 @@ pub fn alloc_range_and_map_phys_pages(
 /// Allocates a guarded reservation mapped to an external contiguous span.
 ///
 /// External storage remains owned by its caller throughout the mapping lifetime.
-#[expect(unused)]
 pub fn alloc_range_and_map_phys_range(
     guards: usize,
     physical: PhysAddrRange,
@@ -915,10 +912,10 @@ pub fn register_external_range(
     with_allocator(|allocator| allocator.register_external_range(full, range, physical, flags))?
 }
 
-/// Registers an already-mapped external page list.
+/// Registers an existing external mapping and its virtual reservation.
 ///
-/// No local mutation or remote completion is needed for adoption.
-#[expect(unused)]
+/// `full` includes guard pages, while `range` describes the mapped pages listed in `pages`.
+/// Records the mapping without changing page tables or taking ownership of the frames.
 pub fn register_external_pages(
     full: VirtAddrRange,
     range: VirtAddrRange,
@@ -928,9 +925,10 @@ pub fn register_external_pages(
     with_allocator(|allocator| allocator.register_external_pages(full, range, pages, flags))?
 }
 
-/// Retains uncertain backing and diagnoses the complete operation.
+/// Quarantines a reservation whose mappings may not match its page table.
 ///
-/// Quarantine records never report a live mapping or permit reservation reuse.
+/// The virtual reservation remains occupied and vmalloc retains its owned backing frames.
+/// [`virt_to_phys`] returns [`None`] for the quarantined pages.
 fn quarantine(token: &PreparedUnmap) -> Result<(), VMAllocError> {
     with_allocator(|allocator| allocator.quarantine_unmap(token))??;
     error!(
@@ -941,9 +939,10 @@ fn quarantine(token: &PreparedUnmap) -> Result<(), VMAllocError> {
     Ok(())
 }
 
-/// Returns owned frames outside all metadata and page-table locks.
+/// Returns vmalloc-owned frames to the physical allocator.
 ///
-/// This helper is used only before mutation or after completed remote invalidation.
+/// The frames must have no vmalloc mappings or stale remote translations. Call outside the
+/// allocator metadata and VMM locks.
 fn release_frames(pages: &[PhysAddr]) -> Result<(), VMAllocError> {
     for &page in pages {
         palloc::dealloc_frame(page).map_err(|error| {
@@ -954,42 +953,33 @@ fn release_frames(pages: &[PhysAddr]) -> Result<(), VMAllocError> {
     Ok(())
 }
 
-/// Completes a prepared unmap while retaining only the mapping transaction guard.
+/// Removes a prepared mapping and finalizes its reservation records.
 ///
-/// Any attempted mutation error is conservatively partial, so the entire token is quarantined.
+/// Owned frames are released after remote CPUs invalidate stale translations. If changing the page
+/// table or completing invalidation fails, the reservation and backing frames are quarantined.
 fn complete_unmap(
-    transaction: &MappingTransaction,
+    transaction: &mut MappingTransaction,
     token: PreparedUnmap,
 ) -> Result<(), VMAllocError> {
     if !transaction.targets().is_empty() && !exarch::trap::local_enabled() {
         with_allocator(|allocator| allocator.restore_unmutated(&token))??;
         return Err(TlbShootdownError::Ipi(crate::ipi::IpiError::InterruptsDisabled).into());
     }
-    let mutation = vmm::with_page_table(|table| {
-        table.apply_actions_with_cleanup(token.pages.iter().map(|page| PageTableAction::Unmap {
+    let mutation =
+        transaction.apply_actions(token.pages.iter().map(|page| PageTableAction::Unmap {
             vaddr: page.virtual_address,
             size: vmm::page_size(),
-        }))
-    });
-    let cleanup = match mutation {
-        Ok(cleanup) => cleanup,
-        Err(error) => {
-            error!(
-                "vmalloc unmap partial mutation range={:#x}: {error:?}",
-                token.range
-            );
-            quarantine(&token)?;
-            return Err(VMAllocError::PageTableError);
-        }
-    };
-    // Both VMALLOC and page-table guards are released before cleanup and remote completion.
-    let request = if token.range.size() == vmm::page_size() {
-        TlbInvalidation::Page(token.range.start)
-    } else {
-        TlbInvalidation::Range(token.range)
-    };
-    let request = vmm::finish_local_cleanup(cleanup, request);
-    if let Err(error) = transaction.complete(request) {
+        }));
+    if let Err(error) = mutation {
+        error!(
+            "vmalloc unmap partial mutation range={:#x}: {error:?}",
+            token.range
+        );
+        quarantine(&token)?;
+        return Err(VMAllocError::PageTableError);
+    }
+    // Local cleanup has finished and both metadata and VMM locks are released before waiting.
+    if let Err(error) = transaction.perform_remote_flushes() {
         error!(
             "vmalloc completion range={:#x} targets={:?}: {error:?}",
             token.range,
@@ -1007,54 +997,57 @@ fn complete_unmap(
     Ok(())
 }
 
-/// Unmaps a usable subrange with exact remote completion.
+/// Unmaps the mapped pages in a subrange while keeping its virtual reservation.
 ///
-/// Success retains the virtual reservation while releasing owned backing pages.
-#[expect(unused)]
+/// Owned frames are released after other CPUs can no longer use the old translations. Frames
+/// supplied by the caller remain caller-owned.
 pub fn unmap(range: VirtAddrRange) -> Result<(), VMAllocError> {
-    let transaction = MappingTransaction::begin()?;
+    let mut transaction = MappingTransaction::begin()?;
     let token = with_allocator(|allocator| allocator.prepare_unmap(range, false))??;
-    complete_unmap(&transaction, token)
+    complete_unmap(&mut transaction, token)
 }
 
-/// Deallocates a complete guarded reservation after exact remote completion.
+/// Unmaps an allocation's usable pages and releases its full virtual reservation.
 ///
-/// Timeout or possible partial mutation retains every frame and the complete virtual reservation.
+/// The reservation includes its guard pages. If the page-table change or remote invalidation may be
+/// incomplete, the reservation and backing frames remain held. Frames supplied by the caller are
+/// not released by vmalloc.
 pub fn dealloc_range(address: VirtAddr) -> Result<(), VMAllocError> {
-    let transaction = MappingTransaction::begin()?;
+    let mut transaction = MappingTransaction::begin()?;
     let token = with_allocator(|allocator| {
         let range = allocator.allocation_range(address)?;
         allocator.prepare_unmap(range, true)
     })??;
-    complete_unmap(&transaction, token)
+    complete_unmap(&mut transaction, token)
 }
 
-/// Translates only acknowledged live mapping records.
+/// Looks up the physical address mapped at a vmalloc address.
 ///
-/// Pending or quarantined metadata cannot masquerade as the old mapping.
+/// Returns [`None`] for guards, unmapped pages, or pages whose mapping is pending or quarantined.
 pub fn virt_to_phys(address: VirtAddr) -> Option<PhysAddr> {
     VMALLOC.get()?.lock().virt_to_phys(address)
 }
 
-/// Replaces owned diagnostic pages under one acknowledged mapping transaction.
+/// Replaces an allocated range's backing with newly allocated pages initialized from `values`.
 ///
-/// Reader barriers prevent access during break-before-make. New frames are allocated while old
-/// backing is still live, ensuring the smoke test exercises distinct physical translations.
+/// `values` contains one value for each page in `range`. Returns the TLB generation for the
+/// completed replacement. Old frames are released only after all required invalidations succeed.
+/// The new frames remain mapped.
 #[cfg(feature = "foundation-test")]
 pub(crate) fn replace_for_foundation(
     range: VirtAddrRange,
     values: &[u64],
-    request: TlbInvalidation,
+    requests: TlbFlushes<VirtAddr>,
 ) -> Result<u64, VMAllocError> {
-    let transaction = MappingTransaction::begin()?;
+    let mut transaction = MappingTransaction::begin()?;
     let size = vmm::page_size();
-    crate::tlb::validate(request, size)?;
+    crate::tlb::validate(&requests, size)?;
     VMAllocator::validate_range(range, size)?;
     if values.len() != range.size() / size
-        || !match request {
-            TlbInvalidation::Page(address) => address == range.start && range.size() == size,
-            TlbInvalidation::Range(selected) => selected == range,
-            TlbInvalidation::All => true,
+        || !match &requests {
+            TlbFlushes::Pages(pages) => pages.iter().copied().eq(range.iter(size).unwrap()),
+            TlbFlushes::Full => true,
+            TlbFlushes::None => false,
         }
     {
         return Err(VMAllocError::RangeSizeMismatch);
@@ -1090,34 +1083,41 @@ pub(crate) fn replace_for_foundation(
         release_frames(&new_pages)?;
         return Err(VMAllocError::RangeSizeMismatch);
     }
-    let mutation = vmm::with_page_table(|table| {
-        table.apply_actions_with_cleanup(token.pages.iter().map(|old| PageTableAction::Unmap {
+    let full_flush = matches!(requests, TlbFlushes::Full);
+    if full_flush {
+        transaction.append_remote_flushes(TlbFlushes::Full);
+    }
+    let mutation =
+        transaction.apply_actions(token.pages.iter().map(|old| PageTableAction::Unmap {
             vaddr: old.virtual_address,
             size,
-        }))
-    });
+        }));
     let result = mutation
         .map_err(|_| VMAllocError::PageTableError)
-        .and_then(|cleanup| {
-            let request = vmm::finish_local_cleanup(cleanup, request);
-            transaction.complete(request).map_err(VMAllocError::from)
+        .and_then(|()| {
+            transaction
+                .perform_remote_flushes()
+                .map_err(VMAllocError::from)
         })
         .and_then(|()| {
             // Complete break-before-make on every PE before publishing replacement descriptors.
             // Old and new frames both remain owned throughout both completion phases.
-            let cleanup = vmm::with_page_table(|table| {
-                table.apply_actions_with_cleanup(token.pages.iter().zip(&new_pages).map(
-                    |(old, &new)| PageTableAction::Map {
+            if full_flush {
+                transaction.append_remote_flushes(TlbFlushes::Full);
+            }
+            transaction
+                .apply_actions(token.pages.iter().zip(&new_pages).map(|(old, &new)| {
+                    PageTableAction::Map {
                         vaddr: old.virtual_address,
                         paddr: new,
                         size,
                         flags: MappingFlags::READ.union(MappingFlags::WRITE),
-                    },
-                ))
-            })
-            .map_err(|_| VMAllocError::PageTableError)?;
-            let request = vmm::finish_local_cleanup(cleanup, request);
-            transaction.complete(request).map_err(VMAllocError::from)
+                    }
+                }))
+                .map_err(|_| VMAllocError::PageTableError)?;
+            transaction
+                .perform_remote_flushes()
+                .map_err(VMAllocError::from)
         });
     if let Err(error) = result {
         quarantine(&token)?;

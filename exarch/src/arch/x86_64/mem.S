@@ -104,7 +104,7 @@ switch_page_level64:
     # Return to the caller
     retq
 
-# The identical page tables
+# The identity page tables
 .section .data
 .balign 4096
 .global exarch_pt_pml5

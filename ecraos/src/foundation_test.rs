@@ -6,8 +6,9 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use exarch::mem::LocalTlbFlusher;
+pub use expt::pt::cleanup::{TlbFlush, TlbFlushes};
 use expt::{pt::cleanup::TlbFlusher, pte::MappingFlags};
-use memory_addr::{AddrRangeBounds, PhysAddr, VirtAddr, VirtAddrRange};
+use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange};
 
 use crate::{
     ipi,
@@ -21,7 +22,6 @@ use crate::{
 };
 
 pub use ipi::{IpiDiagnostic, IpiError};
-pub use tlb::TlbInvalidation as Invalidation;
 pub use vmalloc::VMAllocError;
 
 /// Returns the stable online and IPI-ready logical CPU snapshot.
@@ -102,15 +102,15 @@ pub fn allocate_shared(values: &[u64]) -> Result<VirtAddrRange, VMAllocError> {
 
 /// Replaces barrier-protected shared pages with distinct physical backing.
 ///
-/// The chosen Page, Range or All request completes for all captured remote targets after breaking
-/// the old mapping and again after publishing its replacement. The returned generation identifies
-/// the replacement's completion.
+/// `requests` must list every page in `range` in order, or request a full flush. Page-table cleanup
+/// may widen the request to a full flush. Remote invalidation completes after removing the old
+/// mapping and again after installing its replacement. Returns the latter completion's generation.
 pub fn replace_shared(
     range: VirtAddrRange,
     values: &[u64],
-    request: Invalidation,
+    requests: TlbFlushes<VirtAddr>,
 ) -> Result<u64, VMAllocError> {
-    vmalloc::replace_for_foundation(range, values, request)
+    vmalloc::replace_for_foundation(range, values, requests)
 }
 
 /// Verifies that every selected CPU acknowledged exactly one generation.
@@ -127,10 +127,83 @@ pub fn assert_tlb_completed(targets: &[LogicalCpuId], generation: u64) {
 ///
 /// This uses the same transaction, request payload and common acknowledgement as mapping changes.
 pub fn flush_all() -> Result<u64, VMAllocError> {
-    let transaction = vmm::MappingTransaction::begin()?;
+    let mut transaction = vmm::MappingTransaction::begin()?;
     LocalTlbFlusher::flush(None);
-    transaction.complete(Invalidation::All)?;
+    transaction.append_remote_flushes(TlbFlushes::Full);
+    transaction.perform_remote_flushes()?;
     Ok(tlb::published_generation())
+}
+
+/// Verifies nonwaiting transaction acquisition with local interrupts disabled.
+///
+/// Call from an IPI-ready CPU with interrupts enabled and no active mapping transaction.
+///
+/// # Panics
+///
+/// Panics if waiting acquisition accepts disabled interrupts, nonwaiting acquisition fails on an
+/// available VMM, contention is not reported, or ending a transaction prevents the next attempt.
+pub fn assert_try_mapping_transaction() {
+    assert!(exarch::trap::local_enabled());
+    {
+        let _interrupt_guard = exspin::NoPreemptIrqSave::new();
+        assert!(matches!(
+            vmm::MappingTransaction::begin(),
+            Err(TlbShootdownError::Ipi(IpiError::InterruptsDisabled))
+        ));
+        let transaction = vmm::MappingTransaction::try_begin()
+            .unwrap()
+            .expect("nonwaiting transaction rejected an available VMM");
+        assert!(!exarch::trap::local_enabled());
+        assert!(vmm::MappingTransaction::try_begin().unwrap().is_none());
+        drop(transaction);
+        drop(
+            vmm::MappingTransaction::try_begin()
+                .unwrap()
+                .expect("ending a transaction left the VMM busy"),
+        );
+        assert!(!exarch::trap::local_enabled());
+    }
+    assert!(exarch::trap::local_enabled());
+}
+
+/// Verifies request retention after a timeout and clearing after successful retry.
+///
+/// `addresses` must contain two distinct page-aligned addresses. `target` must be a ready remote
+/// CPU whose next TLB acknowledgement can be suppressed. No mappings are changed.
+///
+/// # Panics
+///
+/// Panics if the inputs are invalid, the injected timeout is not reported, the retry loses either
+/// request, or a subsequent flush publishes another request without new work.
+pub fn assert_tlb_transaction_retry(addresses: [VirtAddr; 2], target: LogicalCpuId) {
+    let mut transaction = vmm::MappingTransaction::begin().unwrap();
+    assert!(transaction.targets().contains(&target));
+    assert_ne!(addresses[0], addresses[1]);
+    for address in addresses {
+        assert!(address.is_aligned(vmm::page_size()));
+        LocalTlbFlusher::flush(Some(address));
+        transaction.append_remote_flushes(TlbFlushes::None + TlbFlush::Page(address));
+    }
+    suppress_tlb_ack(target);
+    let Err(TlbShootdownError::Ipi(IpiError::Timeout(details))) =
+        transaction.perform_remote_flushes()
+    else {
+        panic!("TLB transaction did not report the injected timeout");
+    };
+    assert_eq!(details.logical_cpu, target);
+    clear_tlb_injection(target);
+
+    transaction.perform_remote_flushes().unwrap();
+    let generation = tlb::published_generation();
+    assert!(generation > details.generation.unwrap());
+    let Some(TlbFlushes::Pages(pages)) = tlb::published_requests(generation) else {
+        panic!("TLB retry did not publish the accumulated page requests");
+    };
+    assert_eq!(pages.as_slice(), addresses.as_slice());
+    assert_tlb_completed(transaction.targets(), generation);
+
+    transaction.perform_remote_flushes().unwrap();
+    assert_eq!(tlb::published_generation(), generation);
 }
 
 /// Collects the currently live shared backing frame addresses.

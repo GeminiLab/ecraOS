@@ -420,8 +420,8 @@ look_at! {
 
     /// Sets the current virtual address space mode.
     ///
-    /// It's guaranteed that this function will only be called when an identical mapping is
-    /// currently active. It's also required that when this function returns, a valid identical
+    /// It's guaranteed that this function will only be called when an identity mapping is
+    /// currently active. It's also required that when this function returns, a valid identity
     /// mapping is active.
     ///
     /// When this function is called, allocation is not available.

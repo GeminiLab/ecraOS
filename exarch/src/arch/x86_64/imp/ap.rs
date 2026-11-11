@@ -37,9 +37,9 @@ struct APStartArgs {
     pub phys_cpu_id: PhysicalCpuId,
     /// The physical address of the page table root of the AP.
     pub page_table_root: PhysAddr,
-    /// The physical address of the 5-level identical page table.
+    /// The physical address of the 5-level identity page table.
     pub id_pt_pml5: PhysAddr,
-    /// The physical address of the 4-level identical page table.
+    /// The physical address of the 4-level identity page table.
     pub id_pt_pml4: PhysAddr,
     /// The virtual address of the stack top of the AP.
     pub stack_top: VirtAddr,
@@ -92,8 +92,8 @@ core::arch::global_asm!(
     options(att_syntax),
 );
 
-/// Sets up the secondary CPU start page with the given arguments, assuming that the page is mapped
-/// identically.
+/// Sets up the secondary CPU start page with the given arguments, assuming that the page is
+/// identity-mapped.
 pub fn setup_ap_start_page(
     phys_cpu_id: PhysicalCpuId,
     page_table_root: PhysAddr,
