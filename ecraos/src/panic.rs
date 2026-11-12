@@ -1,6 +1,22 @@
-//! Kernel panic handling and terminal diagnostics.
+//! Kernel panic and bug handling.
 //!
-//! Supplies the expanic backend for kernel logging and shutdown, with a host-safe test exit.
+//! # Usage
+//!
+//! Use [`kpanic!`] for fatal kernel errors and [`bug!`] for unexpected internal errors.
+//! [`UnwrapOrBug`] adds methods to [`Option`] and [`Result`] that report a bug on failure.
+//! These interfaces are provided by [`expanic`].
+//!
+//! # Termination
+//!
+//! This module provides the [`terminate`] function as the backend for [`expanic`]. It can also be
+//! used directly to terminate the kernel. `terminate` prints the diagnostic to the logger (or the
+//! debug console if the logging subsystem is not initialized), and then requests shutdown with
+//! [`ShutdownReason::Panicked`].
+//!
+//! Diagnostics include the reason, file, line, column, and message. Output is not reentrant and may
+//! deadlock if the logger or console is already locked.
+//!
+//! With `host-test`, termination panics with the diagnostic instead of accessing kernel devices.
 
 use core::fmt;
 
@@ -13,9 +29,14 @@ use log::Record;
 #[cfg(not(feature = "host-test"))]
 use crate::kprintln;
 
-/// Logs a terminal diagnostic and stops kernel execution.
+/// Reports a fatal error and terminates execution.
 ///
-/// Host tests unwind with the diagnostic as a panic payload. Kernel builds shut down the platform.
+/// Includes `reason`, `location`, and the formatted `args` in the diagnostic, then requests
+/// platform shutdown as described in the [module documentation](self).
+///
+/// # Panics
+///
+/// With `host-test`, panics with the diagnostic so tests can catch it.
 #[expanic::terminate_handler]
 #[inline(never)]
 pub fn terminate(
@@ -67,8 +88,8 @@ pub fn terminate(
 
 /// Routes Rust panics through the shared termination path.
 ///
-/// Calls the local backend directly so an absent EII replacement cannot recurse through the
-/// default panic exit. Records the panic location when available and shuts down the kernel.
+/// Calls the local backend directly to avoid accidentally calling the default
+/// [`expanic::terminate`] implementation, which would start another Rust panic.
 #[cfg(not(feature = "host-test"))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -79,11 +100,12 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     )
 }
 
-/// Host termination regression tests.
-///
-/// Runs termination in a bounded subprocess so hardware access cannot kill the test harness.
 #[cfg(test)]
 mod tests {
+    //! Host termination regression tests.
+    //!
+    //! Runs termination in a bounded subprocess so hardware access cannot kill the test harness.
+
     use std::{
         panic::{UnwindSafe, catch_unwind},
         process::{Command, Stdio},
