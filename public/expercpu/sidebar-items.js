@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["def_percpu"],"fn":["early_slot_start","init","init_from_early_slot","init_in_early_slot","percpu_area_base_for","percpu_area_layout","percpu_area_size","read_percpu_reg","write_percpu_reg"],"trait":["PerCPUAreaIf"]};

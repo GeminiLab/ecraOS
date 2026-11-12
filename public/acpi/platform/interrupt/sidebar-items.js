@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["InterruptModel","LocalInterruptLine","NmiProcessor"],"struct":["Apic","InterruptSourceOverride","IoApic","NmiLine","NmiSource"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["disable_local","enable_local","handle_external","init_external_controller","local_enabled","prepare_irq","set_irq_enabled"],"struct":["PlicSourceId","RiscvExternalIrqConfig","RiscvPlicContext"],"type":["ArchIrq"]};

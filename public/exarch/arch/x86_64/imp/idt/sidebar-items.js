@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init_idt","reload_idt"],"struct":["IdtStruct"]};

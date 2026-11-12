@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["monotonic_ticks","monotonic_time","nanos_to_ticks","set_oneshot_timer","spin_wait_for","spin_wait_until","ticks_to_nanos"],"struct":["Duration","Nanos","Ticks"],"type":["TimeValue"]};

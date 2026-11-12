@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Low level access to processors using the AArch64 execution state."><title>aarch64_cpu - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="aarch64_cpu" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate aarch64_cpu</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../aarch64_cpu/index.html">aarch64_<wbr>cpu</a><span class="version">11.2.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#usage" title="Usage">Usage</a><ul><li><a href="#example" title="Example">Example</a></li></ul></li><li><a href="#disclaimer" title="Disclaimer">Disclaimer</a></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>aarch64_<wbr>cpu</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/aarch64_cpu/lib.rs.html#8-59">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Low level access to processors using the AArch64 execution state.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Please note that for using this crate’s <a href="src/registers">register definitions</a> (as provided by
+<code>aarch64_cpu::registers::*</code>), you need to also import <a href="registers/trait.Readable.html" title="trait aarch64_cpu::registers::Readable"><code>Readable</code></a> and
+<a href="registers/trait.Writeable.html" title="trait aarch64_cpu::registers::Writeable"><code>Writeable</code></a>.</p>
+<h4 id="example"><a class="doc-anchor" href="#example">§</a>Example</h4>
+<p>Check out https://github.com/rust-embedded/rust-raspberrypi-OS-tutorials for usage examples.
+Listed below is a snippet of <code>rust-raspberrypi-OS-tutorials</code>’s early boot code.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>aarch64_cpu::{asm, registers::<span class="kw-2">*</span>};
+
+<span class="comment">// Some parts omitted for brevity.
+
+</span><span class="kw">unsafe fn </span>prepare_el2_to_el1_transition(
+    virt_boot_core_stack_end_exclusive_addr: u64,
+    virt_kernel_init_addr: u64,
+) {
+    <span class="comment">// Enable timer counter registers for EL1.
+    </span>CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
+
+    <span class="comment">// No offset for reading the counters.
+    </span>CNTVOFF_EL2.set(<span class="number">0</span>);
+
+    <span class="comment">// Set EL1 execution state to AArch64.
+    </span>HCR_EL2.write(HCR_EL2::RW::EL1IsAarch64);
+
+    <span class="comment">// Set up a simulated exception return.
+    </span>SPSR_EL2.write(
+        SPSR_EL2::D::Masked
+            + SPSR_EL2::A::Masked
+            + SPSR_EL2::I::Masked
+            + SPSR_EL2::F::Masked
+            + SPSR_EL2::M::EL1h,
+    );
+}</code></pre></div><h3 id="disclaimer"><a class="doc-anchor" href="#disclaimer">§</a>Disclaimer</h3>
+<p>Descriptive comments in the source files are taken from the <a href="https://static.docs.arm.com/ddi0487/ca/DDI0487C_a_armv8_arm.pdf?_ga=2.266626254.1122218691.1534883460-1326731866.1530967873">ARM Architecture Reference Manual
+ARMv8, for ARMv8-A architecture
+profile</a>.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="asm/index.html" title="mod aarch64_cpu::asm">asm</a></dt><dd>Wrappers around ARMv8-A instructions.</dd><dt><a class="mod" href="registers/index.html" title="mod aarch64_cpu::registers">registers</a></dt><dd>Processor core registers</dd></dl></section></div></main></body></html>

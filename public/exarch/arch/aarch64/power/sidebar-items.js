@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["cpu_up","halt","invoke_psci","set_psci_method","shutdown"]};

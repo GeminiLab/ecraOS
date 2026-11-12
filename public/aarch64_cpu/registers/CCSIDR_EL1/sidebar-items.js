@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AssociativityWithCCIDX","AssociativityWithoutCCIDX","LineSize","NumSetsWithCCIDX","NumSetsWithoutCCIDX"],"mod":["AssociativityWithCCIDX","AssociativityWithoutCCIDX","LineSize","NumSetsWithCCIDX","NumSetsWithoutCCIDX"],"struct":["Register"]};

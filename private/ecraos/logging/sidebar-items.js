@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init","is_inited","level_abbr"],"mod":["colors"],"static":["INITED","LOGGER_LOCK"],"struct":["Logger"]};

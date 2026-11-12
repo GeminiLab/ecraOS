@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PhysMemoryRegionsLockError"],"fn":["lock_read_phys_mem_regions","lock_write_phys_mem_regions","try_lock_read_phys_mem_regions","try_lock_write_phys_mem_regions"]};

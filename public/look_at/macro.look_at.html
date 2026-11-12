@@ -1,0 +1,253 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Generates wrappers and re-exports for declarations in an implementation module."><title>look_at in look_at - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="look_at" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc macro"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">look_at</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../look_at/index.html">look_at</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">look_at</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#overview" title="Overview">Overview</a></li><li><a href="#syntax" title="Syntax">Syntax</a><ul><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#type-declarations" title="Type declarations">Type declarations</a></li><li><a href="#constants-and-use-trees" title="Constants and use trees">Constants and use trees</a></li></ul></li><li><a href="#compared-with-conditional-re-exports" title="Compared with conditional re-exports">Compared with conditional re-exports</a><ul><li><a href="#interface-checks" title="Interface checks">Interface checks</a></li><li><a href="#visibility" title="Visibility">Visibility</a></li><li><a href="#costs" title="Costs">Costs</a></li></ul></li><li><a href="#attributes-and-visibility" title="Attributes and visibility">Attributes and visibility</a></li><li><a href="#documentation" title="Documentation">Documentation</a></li><li><a href="#unsupported-items" title="Unsupported items">Unsupported items</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate look_<wbr>at</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">look_at</a></div><h1>Macro <span class="macro">look_at</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/look_at/lib.rs.html#605-610">Source</a> </span></div><pre class="rust item-decl"><code>look_at!() { <span class="comment">/* proc-macro */</span> }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Generates wrappers and re-exports for declarations in an implementation module.</p>
+<p><code>look_at!</code> collects the public interface shared by several architecture-specific modules. The
+invocation names one implementation module, then lists declarations that should be available at
+the invocation site. The declarations are intentionally only signatures or placeholders: the
+implementation remains in the selected module.</p>
+<h2 id="overview"><a class="doc-anchor" href="#overview">§</a>Overview</h2>
+<p>The target path is resolved once and is used for every item in the invocation. Functions are
+emitted as wrappers that call the target function. Types and <code>use</code> trees are re-exported, while
+constants are emitted as typed forwarding constants. The macro does not select the
+implementation module. A conditional import, such as the <code>#[cfg]</code> imports of <code>current</code> below,
+still selects it, and <code>look_at!</code> states and checks the interface that the selected module must
+provide.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>x86_64 {
+    <span class="kw">pub fn </span>halt() {}
+    <span class="kw">pub const </span>PAGE_SIZE: usize = <span class="number">4096</span>;
+}
+
+<span class="kw">mod </span>riscv64 {
+    <span class="kw">pub fn </span>halt() {}
+    <span class="kw">pub const </span>PAGE_SIZE: usize = <span class="number">4096</span>;
+}
+
+<span class="attr">#[cfg(target_arch = <span class="string">"x86_64"</span>)]
+</span><span class="kw">use </span>x86_64 <span class="kw">as </span>current;
+<span class="attr">#[cfg(target_arch = <span class="string">"riscv64"</span>)]
+</span><span class="kw">use </span>riscv64 <span class="kw">as </span>current;
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="kw">pub fn </span>halt();
+    <span class="kw">pub const </span>PAGE_SIZE: usize;
+}</code></pre></div>
+<p>The generated <code>halt</code> function calls <code>x86_64::halt</code> and <code>PAGE_SIZE</code> has the value from
+<code>x86_64::PAGE_SIZE</code> when building for x86_64, and their <code>riscv64</code> counterparts when building for
+riscv64.</p>
+<h2 id="syntax"><a class="doc-anchor" href="#syntax">§</a>Syntax</h2>
+<p>An invocation starts with <code>@</code>, followed by a Rust path and <code>:</code>. Every following declaration
+must end with <code>;</code>. Attributes and visibility precede the declaration just as they do on ordinary
+Rust items.</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="macro">look_at!</span> {
+    @<span class="kw">crate</span>::arch::current:
+    <span class="attr">#[cfg(feature = <span class="string">"debug"</span>)]
+    </span><span class="kw">pub fn </span>initialize();
+    <span class="kw">pub type </span>Context: Send;
+    <span class="kw">pub type </span>Handle;
+    <span class="kw">pub const </span>PAGE_SIZE: usize;
+    <span class="kw">pub use </span>Error <span class="kw">as </span>InitError;
+}</code></pre></div>
+<p>The invocation must contain at least one item. A function declaration has no body, and all
+other declarations are placeholders without a definition or value.</p>
+<h3 id="functions"><a class="doc-anchor" href="#functions">§</a>Functions</h3>
+<p>Function declarations keep their name, visibility, generics, <code>where</code> clause, ABI, and <code>const</code>
+and <code>unsafe</code> qualifiers. Their parameter patterns are replaced with readable local names so the
+generated wrapper can forward each argument positionally. A single binding keeps its name,
+several bindings are joined with <code>_and_</code>, and a pattern without bindings becomes <code>argument_N</code>
+for its one-based position. A repeated name receives an <code>_argument_N</code> suffix. Wrappers are
+marked <code>#[inline(always)]</code>.</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="macro">look_at!</span> {
+    @<span class="kw">crate</span>::arch::current:
+    <span class="kw">pub fn </span>copy_bytes&lt;<span class="lifetime">'a</span>&gt;(source: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8], destination: <span class="kw-2">&amp;mut </span>[u8]);
+    <span class="kw">pub unsafe extern </span><span class="string">"C" </span><span class="kw">fn </span>enter(stack: <span class="kw-2">*mut </span>u8) -&gt; !;
+    <span class="kw">pub fn </span>combine&lt;T&gt;(left: T, right: T) -&gt; T <span class="kw">where </span>T: Add&lt;Output = T&gt;;
+}</code></pre></div>
+<p>Ordinary functions receive a generated function-pointer assignment that checks the declared
+signature against the selected target. Functions containing <code>impl Trait</code> in an input or output
+remain callable wrappers, but skip that generated function-pointer check because opaque types
+cannot appear in it. <code>const</code> functions also skip it, and their wrappers can only call <code>const</code>
+targets. The forwarding call still checks the arguments and the return value of these
+functions, but it permits coercions.</p>
+<p>An <code>unsafe</code> wrapper calls its target in an <code>unsafe</code> block, so callers take on the safety
+requirements of the declaration. <code>async</code> functions, variadic functions, functions with a <code>self</code>
+receiver, and declarations with a body are rejected.</p>
+<h3 id="type-declarations"><a class="doc-anchor" href="#type-declarations">§</a>Type declarations</h3>
+<p>A <code>type</code> declaration is a placeholder for a target type alias, struct, enum, or union. It emits
+a <code>use</code> re-export, so the target’s complete type definition and generic interface remain intact.
+Generic parameters are accepted to describe the intended interface, but are not independently
+checked or redeclared by the macro.</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="macro">look_at!</span> {
+    @<span class="kw">crate</span>::arch::current:
+    <span class="kw">pub type </span>Device;
+    <span class="kw">pub type </span>Buffer&lt;T&gt;;
+    <span class="kw">pub type </span>Context: Send + Sync;
+}</code></pre></div>
+<p>A bound is allowed only on a non-generic placeholder. The macro checks it inside an anonymous
+constant, for example <code>pub type Context: Send;</code> verifies that the selected <code>Context</code> implements
+<code>Send</code> at compile time. Without a bound, the declaration only checks that the target type
+exists.</p>
+<h3 id="constants-and-use-trees"><a class="doc-anchor" href="#constants-and-use-trees">§</a>Constants and use trees</h3>
+<p>A constant placeholder contains the name and expected type, but no value. The expansion reads
+the value from the selected module and assigns it to the declared type. A target constant of
+another type is rejected unless its value coerces to the declared type.</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="macro">look_at!</span> {
+    @<span class="kw">crate</span>::arch::current:
+    <span class="kw">pub const </span>MAX_CPUS: usize;
+    <span class="kw">pub use </span>scheduler::Task <span class="kw">as </span>ArchTask;
+}</code></pre></div>
+<p>A <code>use</code> declaration is resolved below the target path, so aliases and nested use trees can be
+forwarded without repeating the architecture path at each use site. It only checks that the
+named items exist.</p>
+<h2 id="compared-with-conditional-re-exports"><a class="doc-anchor" href="#compared-with-conditional-re-exports">§</a>Compared with conditional re-exports</h2>
+<p>The conditional import in the overview example already keeps target selection in one place, so
+the selected items could also be re-exported directly:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[cfg(target_arch = <span class="string">"x86_64"</span>)]
+</span><span class="kw">use </span>x86_64 <span class="kw">as </span>current;
+<span class="attr">#[cfg(target_arch = <span class="string">"riscv64"</span>)]
+</span><span class="kw">use </span>riscv64 <span class="kw">as </span>current;
+
+<span class="kw">pub use </span>current::halt;</code></pre></div>
+<p>Both forms give callers one set of names without their own <code>#[cfg]</code> attributes, and both
+forward only the listed items. <code>look_at!</code> differs in how the interface is checked, which
+visibility its items can have, and what it generates. The remaining examples in this section
+define <code>current</code> directly and omit the <code>#[cfg]</code> selection.</p>
+<h3 id="interface-checks"><a class="doc-anchor" href="#interface-checks">§</a>Interface checks</h3>
+<p>A re-export exposes whatever the selected module defines. When one implementation diverges from
+the intended interface, the crate that owns the interface still compiles. The mismatch surfaces
+only where a caller uses the item on that target, or not at all when nothing uses it. If the
+interface requires <code>page_shift</code> to return <code>u32</code>, this re-export of an implementation that
+returns <code>u64</code> still compiles:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>current {
+    <span class="kw">pub fn </span>page_shift() -&gt; u64 {
+        <span class="number">12
+    </span>}
+}
+
+<span class="kw">pub use </span>current::page_shift;</code></pre></div>
+<p><code>look_at!</code> checks each declaration against the selected module at the invocation site.</p>
+<ul>
+<li>An ordinary function is assigned to a function pointer with the declared signature, so its
+parameter types, return type, and ABI must match exactly.</li>
+<li>A constant is assigned to the declared type.</li>
+<li>A type placeholder with bounds asserts that the target type implements them.</li>
+</ul>
+<p>Declaring the same interface with <code>look_at!</code> rejects that implementation with a type mismatch:</p>
+
+<div class="example-wrap compile_fail"><a href="#" class="tooltip" title="This example deliberately fails to compile">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>current {
+    <span class="kw">pub fn </span>page_shift() -&gt; u64 {
+        <span class="number">12
+    </span>}
+}
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="kw">pub fn </span>page_shift() -&gt; u32;
+}</code></pre></div>
+<p>As with a re-export, a declaration also fails to compile when the selected module lacks the
+item. The checks cover only the module selected for the current build, so each implementation
+is checked when building for its own target.</p>
+<h3 id="visibility"><a class="doc-anchor" href="#visibility">§</a>Visibility</h3>
+<p>A re-export cannot be more visible than its target, so <code>pub use</code> rejects a crate-private
+function:</p>
+
+<div class="example-wrap compile_fail"><a href="#" class="tooltip" title="This example deliberately fails to compile">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>current {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>halt() {}
+}
+
+<span class="kw">pub use </span>current::halt;</code></pre></div>
+<p>Function wrappers and forwarding constants are new items, and their targets only need to be
+accessible from the invocation site. An implementation module can therefore keep its items
+crate-private while the declarations form the public interface:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>current {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>halt() {}
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>PAGE_SIZE: usize = <span class="number">4096</span>;
+}
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="kw">pub fn </span>halt();
+    <span class="kw">pub const </span>PAGE_SIZE: usize;
+}</code></pre></div>
+<p>Type and <code>use</code> declarations expand to re-exports and follow the ordinary re-export rules.</p>
+<h3 id="costs"><a class="doc-anchor" href="#costs">§</a>Costs</h3>
+<ul>
+<li>A function wrapper is a distinct function. Its address differs from the target’s, and
+attributes on the target, such as <code>#[must_use]</code> or <code>#[track_caller]</code>, do not apply to the
+wrapper unless the declaration repeats them.</li>
+<li>Each signature is written once more in the declaration and changes together with the
+implementations.</li>
+<li>Some declarations are checked only partially. Type placeholders without bounds and <code>use</code>
+declarations only check that the item exists, and generic parameters on type placeholders
+are not checked. <code>const</code> functions and functions with <code>impl Trait</code> skip the function-pointer
+check and rely on the forwarding call, which permits coercions.</li>
+<li>Some items cannot be declared, as listed in <a href="#unsupported-items">Unsupported items</a>.</li>
+</ul>
+<p>An attribute that callers of the wrapper should observe is therefore written on the declaration
+as well as on the implementation:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>current {
+    <span class="attr">#[must_use]
+    </span><span class="kw">pub fn </span>read_counter() -&gt; u64 {
+        <span class="number">0
+    </span>}
+}
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="attr">#[must_use]
+    </span><span class="kw">pub fn </span>read_counter() -&gt; u64;
+}</code></pre></div>
+<p>A conditional re-export remains the simpler choice when callers need the target item itself,
+such as its function address or its attributes, when the items cannot be declared here, or when
+the interface needs no checks beyond those its callers already perform.</p>
+<h2 id="attributes-and-visibility"><a class="doc-anchor" href="#attributes-and-visibility">§</a>Attributes and visibility</h2>
+<p>Outer attributes attached to an item, including doc comments, are copied to its generated
+wrapper, re-export, or constant. In particular, <code>#[cfg(...)]</code> can remove an item for
+architectures where it is unavailable. A bound check copies only the <code>cfg</code> and <code>cfg_attr</code>
+attributes of its declaration, so it is removed together with its re-export.</p>
+<p>The visibility written in the invocation is used for the generated item and does not increase
+the visibility of the target definition itself. Function wrappers and constants may be more
+visible than their targets, while type and <code>use</code> re-exports may not, as described in
+<a href="#visibility">Visibility</a>.</p>
+<h2 id="documentation"><a class="doc-anchor" href="#documentation">§</a>Documentation</h2>
+<p>Function wrappers and forwarding constants are new items, so their documentation consists only
+of the doc comments on the declaration. Type and <code>use</code> declarations expand to re-exports. When
+rustdoc inlines such a re-export, for example because the target module is private, it shows
+the doc comments on the declaration followed by those on the target item. That part of the page
+therefore depends on the target selected for the documentation build.</p>
+<p>Doc comments on a declaration are shared by every implementation. They describe one interface
+regardless of the target, but they must hold for every architecture and cannot document the
+details of one implementation. A practical split is to describe the architecture-neutral
+contract on the declaration and to keep architecture-specific details on each implementation:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">mod </span>x86_64 {
+    <span class="doccomment">/// Returns 12 because x86-64 uses 4 KiB base pages.
+    </span><span class="kw">pub fn </span>page_shift() -&gt; u32 {
+        <span class="number">12
+    </span>}
+}
+
+<span class="kw">use </span>x86_64 <span class="kw">as </span>current;
+
+<span class="macro">look_at!</span> {
+    @current:
+    <span class="doccomment">/// Returns the base-2 logarithm of the base page size.
+    </span><span class="kw">pub fn </span>page_shift() -&gt; u32;
+}</code></pre></div>
+<p>The documentation of the generated <code>page_shift</code> contains only the declaration’s sentence, while
+the x86-64 detail stays with the implementation.</p>
+<h2 id="unsupported-items"><a class="doc-anchor" href="#unsupported-items">§</a>Unsupported items</h2>
+<p>The current syntax supports functions, <code>type</code> placeholders, <code>const</code> placeholders, and <code>use</code>
+trees. Trait declarations, structs with inline fields, enum definitions, union definitions, and
+constants with values must remain in the selected implementation module and are not accepted as
+declarations here. Their definitions can still be forwarded with a <code>type</code>, <code>const</code>, or <code>use</code>
+declaration. Among functions, <code>async</code> functions, variadic functions, and functions with a
+<code>self</code> receiver are rejected, as described in <a href="#functions">Functions</a>.</p>
+</div></details></section></div></main></body></html>

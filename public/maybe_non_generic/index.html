@@ -1,0 +1,76 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`maybe_non_generic`"><title>maybe_non_generic - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="maybe_non_generic" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate maybe_non_generic</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../maybe_non_generic/index.html">maybe_<wbr>non_<wbr>generic</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#maybe_non_generic" title="`maybe_non_generic`"><code>maybe_non_generic</code></a><ul><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#replacing-type-parameters" title="Replacing type parameters">Replacing type parameters</a></li><li><a href="#arguments" title="Arguments">Arguments</a></li><li><a href="#limitations" title="Limitations">Limitations</a></li></ul></li></ul><h3><a href="#attributes">Crate Items</a></h3><ul class="block"><li><a href="#attributes" title="Attribute Macros">Attribute Macros</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>maybe_<wbr>non_<wbr>generic</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/maybe_non_generic/lib.rs.html#1-1940">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="maybe_non_generic"><a class="doc-anchor" href="#maybe_non_generic">§</a><code>maybe_non_generic</code></h2>
+<p><code>maybe_non_generic</code> provides the <code>#[maybe_non_generic]</code> attribute macro. It generates  a copy of a
+generic function in which selected generic parameters become ordinary trailing parameters. A
+const generic becomes a runtime value, and a type generic becomes a value such as a table of
+function pointers. The copy accepts values that are only known at runtime and is compiled once
+instead of once per generic argument.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Add the crate as a dependency:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[dependencies]
+maybe_non_generic = &quot;0.1&quot;</code></pre></div>
+<p>Then annotate a generic function, passing the name of the copy and the parameters to replace:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>maybe_non_generic::maybe_non_generic;
+
+<span class="kw">const </span>LEVEL_BITS: [u32; <span class="number">3</span>] = [<span class="number">9</span>, <span class="number">9</span>, <span class="number">10</span>];
+
+<span class="attr">#[maybe_non_generic(table_size_dyn, <span class="kw">const</span>(LEVEL =&gt; level: usize))]
+</span><span class="kw">const fn </span>table_size&lt;<span class="kw">const </span>LEVEL: usize&gt;() -&gt; usize {
+    <span class="number">8 </span>&lt;&lt; LEVEL_BITS[LEVEL]
+}
+
+<span class="macro">assert_eq!</span>(table_size::&lt;<span class="number">2</span>&gt;(), <span class="number">8192</span>);
+<span class="macro">assert_eq!</span>(table_size_dyn(<span class="number">2</span>), <span class="number">8192</span>);</code></pre></div>
+<p>The original function is emitted unchanged, so <code>table_size::&lt;2&gt;()</code> still uses a compile-time level,
+while <code>table_size_dyn</code> takes the level as its last argument. The copy keeps the visibility,
+qualifiers, and body of the original, apart from the rewrites of replaced parameters, and copies
+its attributes by default.</p>
+<h3 id="replacing-type-parameters"><a class="doc-anchor" href="#replacing-type-parameters">§</a>Replacing type parameters</h3>
+<p>A replaced type parameter is passed as a value, and calls such as <code>C::now()</code> become calls through
+its fields, such as <code>(clock.now)()</code>. The function-pointer tables generated by
+<a href="https://docs.rs/dyn_static_traits"><code>dyn_static_traits</code></a> have this shape, as the following example
+shows:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>dyn_static_traits::dyn_static_traits;
+<span class="kw">use </span>maybe_non_generic::maybe_non_generic;
+
+<span class="attr">#[dyn_static_traits(DynClock)]
+</span><span class="kw">trait </span>Clock {
+    <span class="kw">fn </span>now() -&gt; u64;
+}
+
+<span class="kw">struct </span>BootClock;
+
+<span class="kw">impl </span>Clock <span class="kw">for </span>BootClock {
+    <span class="kw">fn </span>now() -&gt; u64 {
+        <span class="number">100
+    </span>}
+}
+
+<span class="attr">#[maybe_non_generic(elapsed_dyn, <span class="kw">type</span>(C =&gt; clock: <span class="kw-2">&amp;</span>DynClock))]
+</span><span class="kw">fn </span>elapsed&lt;C: Clock&gt;(start: u64) -&gt; u64 {
+    C::now() - start
+}
+
+<span class="kw">let </span>clock = DynClock::new::&lt;BootClock&gt;();
+<span class="macro">assert_eq!</span>(elapsed::&lt;BootClock&gt;(<span class="number">40</span>), <span class="number">60</span>);
+<span class="macro">assert_eq!</span>(elapsed_dyn(<span class="number">40</span>, <span class="kw-2">&amp;</span>clock), <span class="number">60</span>);</code></pre></div><h3 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h3>
+<p>The name of the copy can be followed by any number of comma-separated arguments:</p>
+<div><table><thead><tr><th>Argument</th><th>Effect on the copy</th></tr></thead><tbody>
+<tr><td><code>const(N =&gt; n: T)</code></td><td>Replaces the const generic <code>N</code> with the trailing parameter <code>n: T</code></td></tr>
+<tr><td><code>type(H =&gt; h: T)</code></td><td>Replaces the type generic <code>H</code> with the trailing parameter <code>h: T</code></td></tr>
+<tr><td><code>fn(path::f =&gt; path::g)</code></td><td>Renames calls to the function path <code>path::f</code></td></tr>
+<tr><td><code>fn(receiver.f =&gt; receiver.g)</code></td><td>Renames method calls <code>receiver.f(...)</code></td></tr>
+<tr><td><code>attr(...)</code></td><td>Adds the attribute <code>#[...]</code></td></tr>
+<tr><td><code>dont_copy_attr</code></td><td>Stops copying the attributes of the original function</td></tr>
+</tbody></table>
+</div>
+<p>A call that passes replaced generic arguments, such as <code>f::&lt;N&gt;()</code>, usually needs a <code>fn(...)</code> rename
+to the copy of the callee, which then receives the replaced values as trailing arguments.</p>
+<h3 id="limitations"><a class="doc-anchor" href="#limitations">§</a>Limitations</h3>
+<p>The macro reports a compile error instead of generating a copy that might still depend on a
+replaced parameter. For example, replaced parameters cannot remain in type annotations or in
+generic argument expressions, and the body cannot contain macro invocations or patterns with
+literals, ranges, or paths. The <a href="attr.maybe_non_generic.html" title="attr maybe_non_generic::maybe_non_generic">attribute documentation</a> describes the
+rewrites, call renaming, attribute copying, and every limitation in detail.</p>
+</div></details><h2 id="attributes" class="section-header">Attribute Macros<a href="#attributes" class="anchor">§</a></h2><dl class="item-table"><dt><a class="attr" href="attr.maybe_non_generic.html" title="attr maybe_non_generic::maybe_non_generic">maybe_<wbr>non_<wbr>generic</a></dt><dd>Generates a copy of a generic function with selected generic parameters replaced.</dd></dl></section></div></main></body></html>

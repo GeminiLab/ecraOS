@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="lazyinit"><title>lazyinit - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="lazyinit" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate lazyinit</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../lazyinit/index.html">lazyinit</a><span class="version">0.2.2</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#lazyinit" title="lazyinit">lazyinit</a><ul><li><a href="#features" title="Features">Features</a></li><li><a href="#examples" title="Examples">Examples</a></li></ul></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>lazyinit</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/lazyinit/lib.rs.html#1-280">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="lazyinit"><a class="doc-anchor" href="#lazyinit">§</a>lazyinit</h2>
+<p><a href="https://crates.io/crates/lazyinit"><img src="https://img.shields.io/crates/v/lazyinit" alt="Crates.io" /></a>
+<a href="https://docs.rs/lazyinit"><img src="https://docs.rs/lazyinit/badge.svg" alt="Docs.rs" /></a>
+<a href="https://github.com/arceos-org/lazyinit/actions/workflows/ci.yml"><img src="https://github.com/arceos-org/lazyinit/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a></p>
+<p>Initialize a static value lazily.</p>
+<p>The crate provides a type for initializing static values lazily in a thread-safe manner.<br />
+Unlike compile-time initialization or macro-based solutions like <a href="https://docs.rs/lazy_static"><code>lazy_static</code></a>, this type allows runtime initialization with arbitrary logic while guaranteeing that initialization occurs exactly once across all threads.</p>
+<p>The core abstraction is a struct that wraps a value and manages its initialization state through atomic operations. The value remains uninitialized until the first call to <code>init_once</code> or <code>call_once</code>, at which point it becomes permanently initialized and accessible.</p>
+<h3 id="features"><a class="doc-anchor" href="#features">§</a>Features</h3>
+<ul>
+<li>Thread-Safe Initialization: Guarantees exactly one initialization across multiple threads</li>
+<li>Flexible Initialization: Supports both direct value initialization and closure-based initialization</li>
+<li>Safe Access Patterns: Provides both safe and unsafe access methods</li>
+<li>State Inspection: Allows checking initialization status without accessing the value</li>
+<li>Direct Access: Implements <code>Deref</code> and <code>DerefMut</code> for transparent access after initialization</li>
+<li>No-std Compatibility: Works in embedded and kernel environments without the standard library. No external dependencies.</li>
+</ul>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>lazyinit::LazyInit;
+
+<span class="kw">static </span>VALUE: LazyInit&lt;u32&gt; = LazyInit::new();
+<span class="macro">assert!</span>(!VALUE.is_inited());
+<span class="comment">// println!("{}", *VALUE); // panic: use uninitialized value
+</span><span class="macro">assert_eq!</span>(VALUE.get(), <span class="prelude-val">None</span>);
+
+VALUE.init_once(<span class="number">233</span>);
+<span class="comment">// VALUE.init_once(666); // panic: already initialized
+</span><span class="macro">assert!</span>(VALUE.is_inited());
+<span class="macro">assert_eq!</span>(<span class="kw-2">*</span>VALUE, <span class="number">233</span>);
+<span class="macro">assert_eq!</span>(VALUE.get(), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="number">233</span>));</code></pre></div>
+<p>Only one of the multiple initializations can succeed:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>lazyinit::LazyInit;
+<span class="kw">use </span>std::time::Duration;
+
+<span class="kw">const </span>N: usize = <span class="number">16</span>;
+<span class="kw">static </span>VALUE: LazyInit&lt;usize&gt; = LazyInit::new();
+
+<span class="kw">let </span>threads = (<span class="number">0</span>..N)
+    .map(|i| {
+        std::thread::spawn(<span class="kw">move </span>|| {
+            std::thread::sleep(Duration::from_millis(<span class="number">10</span>));
+            VALUE.call_once(|| i)
+        })
+    })
+    .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+<span class="kw">let </span><span class="kw-2">mut </span>ok = <span class="number">0</span>;
+<span class="kw">for </span>(i, thread) <span class="kw">in </span>threads.into_iter().enumerate() {
+    <span class="kw">if </span>thread.join().unwrap().is_some() {
+        ok += <span class="number">1</span>;
+        <span class="macro">assert_eq!</span>(<span class="kw-2">*</span>VALUE, i);
+    }
+}
+
+<span class="macro">assert_eq!</span>(ok, <span class="number">1</span>);</code></pre></div></div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.LazyInit.html" title="struct lazyinit::LazyInit">Lazy<wbr>Init</a></dt><dd>A wrapper of a lazy initialized value.</dd></dl></section></div></main></body></html>

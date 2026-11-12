@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Virtual memory management."><title>ecraos::mem::vmm - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="ecraos" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module vmm</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../ecraos/index.html">ecraos</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module vmm</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#virtual-address-space-layout" title="Virtual address space layout">Virtual address space layout</a><ul><li><a href="#direct-mapping-area" title="Direct mapping area">Direct mapping area</a></li><li><a href="#vmalloc-area" title="Vmalloc area">Vmalloc area</a></li></ul></li><li><a href="#page-table" title="Page table">Page table</a><ul><li><a href="#mapping-transactions" title="Mapping transactions">Mapping transactions</a></li></ul></li><li><a href="#identity-mapping" title="Identity mapping">Identity mapping</a></li><li><a href="#lifecycle-of-the-virtual-address-space-and-page-table" title="Lifecycle of the virtual address space and page table">Lifecycle of the virtual address space and page table</a><ul><li><a href="#when-the-kernel-starts" title="When the kernel starts">When the kernel starts</a></li><li><a href="#selection-of-the-virtual-address-space-mode" title="Selection of the virtual address space mode">Selection of the virtual address space mode</a></li><li><a href="#early-page-table" title="Early page table">Early page table</a></li><li><a href="#formal-page-table" title="Formal page table">Formal page table</a></li><li><a href="#removal-of-the-identity-mapping" title="Removal of the identity mapping">Removal of the identity mapping</a></li></ul></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In ecraos::<wbr>mem</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">ecraos</a>::<wbr><a href="../index.html">mem</a></div><h1>Module <span>vmm</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/ecraos/mem/vmm.rs.html#1-646">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Virtual memory management.</p>
+<p>This module manages the kernel’s <a href="#virtual-address-space-layout">virtual address space layout</a>
+and <a href="#page-table">page table</a>.</p>
+<h2 id="virtual-address-space-layout"><a class="doc-anchor" href="#virtual-address-space-layout">§</a>Virtual address space layout</h2>
+<p>ecraOS currently uses a single shared virtual address space across all CPUs and tasks. Only the
+upper half of the virtual address space is used (after the
+<a href="#identity-mapping">temporary identity mappings</a> are removed). It is divided into three areas:</p>
+<div><table><thead><tr><th>Area</th><th>Portion of the upper half</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><a href="#direct-mapping-area">Direct mapping</a></td><td>Lower half</td><td>Physical memory access.</td></tr>
+<tr><td><a href="#vmalloc-area">Vmalloc</a></td><td>Next quarter</td><td><a href="../allocs/vmalloc/index.html" title="mod ecraos::mem::allocs::vmalloc"><code>vmalloc</code></a> allocations.</td></tr>
+<tr><td>Reserved</td><td>Final quarter</td><td>Not used.</td></tr>
+</tbody></table>
+</div>
+<p>The kernel
+<a href="#selection-of-the-virtual-address-space-mode">selects the virtual address space mode</a>
+and calculates the layout during early boot.</p>
+<h3 id="direct-mapping-area"><a class="doc-anchor" href="#direct-mapping-area">§</a>Direct mapping area</h3>
+<p>The direct mapping area provides access to physical memory at a fixed virtual address offset,
+returned by <a href="fn.direct_mapping_offset.html" title="fn ecraos::mem::vmm::direct_mapping_offset"><code>direct_mapping_offset</code></a>. Adding this offset to a physical address gives its
+direct mapping address, provided the physical address fits in the area.</p>
+<p>Use <a href="fn.direct_mapping_phys_to_virt.html" title="fn ecraos::mem::vmm::direct_mapping_phys_to_virt"><code>direct_mapping_phys_to_virt</code></a> and <a href="fn.direct_mapping_virt_to_phys.html" title="fn ecraos::mem::vmm::direct_mapping_virt_to_phys"><code>direct_mapping_virt_to_phys</code></a> to convert addresses
+within the direct mapping area once <a href="fn.is_page_table_active.html" title="fn ecraos::mem::vmm::is_page_table_active"><code>is_page_table_active</code></a> returns <code>true</code>. These functions
+check address bounds, but do not look up page-table entries. A successful conversion does not
+guarantee that the resulting address is mapped.</p>
+<h4 id="physical-region-mappings"><a class="doc-anchor" href="#physical-region-mappings">§</a>Physical region mappings</h4>
+<p><a href="../pmm/index.html" title="mod ecraos::mem::pmm"><code>super::pmm</code></a> maintains physical memory regions with byte-precise boundaries. Direct mappings
+round these regions outwards to base-page boundaries (the original physical memory regions table
+from <a href="../pmm/index.html" title="mod ecraos::mem::pmm"><code>super::pmm</code></a> is not modified). Regions that share a page must satisfy the following
+rules:</p>
+<ul>
+<li>Regions without any <code>READ</code>, <code>WRITE</code>, or <code>EXECUTE</code> bits are ignored unless marked <code>NO_MAP</code>.</li>
+<li>A <code>NO_MAP</code> region excludes its entire rounded pages from mapping. A region marked <code>KERNEL</code>,
+<code>BOOT_SERVICE</code>, <code>DEVICE</code>, or <code>EXECUTE</code> must not share a page with a <code>NO_MAP</code> region.</li>
+<li>Other mapped regions sharing a page must agree on their <code>READ</code>, <code>WRITE</code>, <code>EXECUTE</code>, <code>DEVICE</code>,
+and <code>UNCACHED</code> bits. Compatible regions share one mapping for each overlapping page.</li>
+</ul>
+<p>Use <a href="fn.add_and_map_phys_regions.html" title="fn ecraos::mem::vmm::add_and_map_phys_regions"><code>add_and_map_phys_regions</code></a> to add or overwrite physical regions and update their mappings.
+It also updates identity mappings while they remain active. Adding regions is expensive, so
+prefer adding them in batches.</p>
+<h3 id="vmalloc-area"><a class="doc-anchor" href="#vmalloc-area">§</a>Vmalloc area</h3>
+<p>The vmalloc area is used for kernel allocations whose virtual addresses are chosen
+independently of their physical backing. Neighboring virtual pages can map non-contiguous
+physical pages. Use <a href="../allocs/vmalloc/index.html" title="mod ecraos::mem::allocs::vmalloc"><code>vmalloc</code></a> to allocate and map memory in this area.</p>
+<p><a href="fn.vmalloc_base.html" title="fn ecraos::mem::vmm::vmalloc_base"><code>vmalloc_base</code></a> and <a href="fn.vmalloc_area.html" title="fn ecraos::mem::vmm::vmalloc_area"><code>vmalloc_area</code></a> describe the area reserved for these allocations.
+Querying this reservation does not allocate memory or guarantee that an address is mapped.</p>
+<h2 id="page-table"><a class="doc-anchor" href="#page-table">§</a>Page table</h2>
+<p>The kernel page table defines the mappings and access permissions for the shared address
+space. Its format depends on the selected <a href="../../../exarch/parts/mem/enum.VirtAddrSpaceMode.html" title="enum exarch::parts::mem::VirtAddrSpaceMode"><code>VirtAddrSpaceMode</code></a>. Depending on the architecture,
+it may have a single root or separate roots for the lower and upper halves. All CPUs use the
+same kernel page table.</p>
+<h3 id="mapping-transactions"><a class="doc-anchor" href="#mapping-transactions">§</a>Mapping transactions</h3>
+<p><a href="struct.MappingTransaction.html" title="struct ecraos::mem::vmm::MappingTransaction">Mapping transactions</a> provide exclusive access to the VMM state, allowing
+page-table changes, TLB invalidation, and mapping record updates to be performed safely and
+serially.</p>
+<p>Transactions do not roll back page-table changes if an operation fails. See the documentation
+for each method of <a href="struct.MappingTransaction.html" title="struct ecraos::mem::vmm::MappingTransaction"><code>MappingTransaction</code></a> for details.</p>
+<p>See <a href="fn.add_and_map_phys_regions.html" title="fn ecraos::mem::vmm::add_and_map_phys_regions"><code>add_and_map_phys_regions</code></a> and the <a href="../allocs/vmalloc/index.html" title="mod ecraos::mem::allocs::vmalloc"><code>vmalloc</code></a> interfaces for
+their calling requirements and failure behavior.</p>
+<h2 id="identity-mapping"><a class="doc-anchor" href="#identity-mapping">§</a>Identity mapping</h2>
+<p>An identity mapping maps a virtual address to the physical address with the same numerical
+value. It allows startup code to execute before switching to the kernel’s upper-half addresses.
+Temporary identity mappings are needed by the bootstrap processor (BSP) during early boot and
+by application processors (APs) during secondary CPU startup. Identity mappings are removed
+after APs have finished early startup and no longer need them.</p>
+<h2 id="lifecycle-of-the-virtual-address-space-and-page-table"><a class="doc-anchor" href="#lifecycle-of-the-virtual-address-space-and-page-table">§</a>Lifecycle of the virtual address space and page table</h2><h3 id="when-the-kernel-starts"><a class="doc-anchor" href="#when-the-kernel-starts">§</a>When the kernel starts</h3>
+<p>The bootloader must provide a valid identity mapping for kernel entry, and that mapping must
+cover all physical addresses that the kernel will need to access before the early page table
+can be installed. The kernel initially executes through this mapping. Its own virtual address
+layout and page table have not yet been initialized. Both <a href="fn.is_layout_initialized.html" title="fn ecraos::mem::vmm::is_layout_initialized"><code>is_layout_initialized</code></a> and
+<a href="fn.is_page_table_active.html" title="fn ecraos::mem::vmm::is_page_table_active"><code>is_page_table_active</code></a> return <code>false</code>.</p>
+<h3 id="selection-of-the-virtual-address-space-mode"><a class="doc-anchor" href="#selection-of-the-virtual-address-space-mode">§</a>Selection of the virtual address space mode</h3>
+<p>The platform reports supported virtual address space modes as <a href="../../../exarch/parts/mem/enum.VirtAddrSpaceMode.html" title="enum exarch::parts::mem::VirtAddrSpaceMode"><code>VirtAddrSpaceMode</code></a> values.
+A mode describes which halves are available, their address widths and page sizes, and whether
+they use separate page-table roots. The kernel currently selects its preferred mode as follows:</p>
+<ol>
+<li>Remove all modes that do not cover both halves of the virtual address space.</li>
+<li>Remove modes whose two halves have different address widths or base-page sizes.</li>
+<li>Choose the mode with the largest address width per half.</li>
+<li>If multiple modes remain, choose the one with the largest base-page size.</li>
+</ol>
+<p>The platform then activates the selected mode and must ensure that a valid identity mapping
+remains available. It may preserve the existing identity mapping or install temporary page
+tables. The kernel then calculates its layout. The selected mode and layout remain unchanged
+throughout the rest of the kernel’s lifetime.</p>
+<p>From this point, <a href="fn.is_layout_initialized.html" title="fn ecraos::mem::vmm::is_layout_initialized"><code>is_layout_initialized</code></a> returns <code>true</code> and layout queries are available.
+<a href="fn.is_page_table_active.html" title="fn ecraos::mem::vmm::is_page_table_active"><code>is_page_table_active</code></a> remains <code>false</code>, and both direct-map address conversion functions
+return <code>None</code> until the kernel page table is installed.</p>
+<h3 id="early-page-table"><a class="doc-anchor" href="#early-page-table">§</a>Early page table</h3>
+<p>The kernel initializes its early page allocator and uses it to construct the early page table.
+Physical regions are mapped into the direct map according to the
+<a href="#physical-region-mappings">physical-region mapping rules</a>, with low-address identity mappings.
+The kernel also allocates and maps a BSP stack in the vmalloc area.</p>
+<p>Constructing this table does not activate it. Once the mappings are ready, the BSP installs
+the table, after which <a href="fn.is_page_table_active.html" title="fn ecraos::mem::vmm::is_page_table_active"><code>is_page_table_active</code></a> returns <code>true</code> and direct-map address conversion
+is available in both directions. Execution then moves to the kernel’s direct-map code address
+and the new stack. The identity mappings remain available.</p>
+<h3 id="formal-page-table"><a class="doc-anchor" href="#formal-page-table">§</a>Formal page table</h3>
+<p>After entering the upper half, the kernel initializes the buddy page allocator and the heap.
+The buddy allocator takes over allocation of frames already in use, including early page-table
+frames.</p>
+<p>This begins the formal page-table phase. The existing page-table tree and its mappings are
+preserved. Runtime mapping transactions are now available, including updates through
+<a href="fn.add_and_map_phys_regions.html" title="fn ecraos::mem::vmm::add_and_map_phys_regions"><code>add_and_map_phys_regions</code></a>. The vmalloc allocator is then initialized over its reserved area
+and records the existing BSP stack mapping. Identity mappings remain for AP startup.</p>
+<h3 id="removal-of-the-identity-mapping"><a class="doc-anchor" href="#removal-of-the-identity-mapping">§</a>Removal of the identity mapping</h3>
+<p>Once APs have finished early startup and no longer need identity mappings, the kernel removes
+those mappings and completes the required local and remote TLB invalidation. Direct mappings and
+vmalloc mappings remain in place. Later physical-region updates maintain direct mappings
+without recreating identity mappings.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.MappingTransaction.html" title="struct ecraos::mem::vmm::MappingTransaction">Mapping<wbr>Transaction</a></dt><dd>An exclusive transaction for kernel page-table updates.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.EarlyPhase.html" title="enum ecraos::mem::vmm::EarlyPhase">Early<wbr>Phase</a></dt><dd>A phase of <a href="enum.VmmState.html#variant.Early" title="variant ecraos::mem::vmm::VmmState::Early"><code>VmmState::Early</code></a>.</dd><dt><a class="enum" href="enum.FormalPhase.html" title="enum ecraos::mem::vmm::FormalPhase">Formal<wbr>Phase</a></dt><dd>A phase of <a href="enum.VmmState.html#variant.Formal" title="variant ecraos::mem::vmm::VmmState::Formal"><code>VmmState::Formal</code></a>.</dd><dt><a class="enum" href="enum.StableFormalPhase.html" title="enum ecraos::mem::vmm::StableFormalPhase">Stable<wbr>Formal<wbr>Phase</a></dt><dd>A <a href="enum.FormalPhase.html" title="enum ecraos::mem::vmm::FormalPhase"><code>FormalPhase</code></a> that is stable (not transitioning).</dd><dt><a class="enum" href="enum.VmmState.html" title="enum ecraos::mem::vmm::VmmState">VmmState</a></dt><dd>The current VMM lifecycle state and its page-table data.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.add_and_map_phys_regions.html" title="fn ecraos::mem::vmm::add_and_map_phys_regions">add_<wbr>and_<wbr>map_<wbr>phys_<wbr>regions</a></dt><dd>Adds or overwrites physical regions and updates their direct mappings.</dd><dt><a class="fn" href="fn.direct_mapping_offset.html" title="fn ecraos::mem::vmm::direct_mapping_offset">direct_<wbr>mapping_<wbr>offset</a></dt><dd>Returns the offset between physical addresses and their direct mapping virtual addresses.</dd><dt><a class="fn" href="fn.direct_mapping_phys_to_virt.html" title="fn ecraos::mem::vmm::direct_mapping_phys_to_virt">direct_<wbr>mapping_<wbr>phys_<wbr>to_<wbr>virt</a></dt><dd>Computes the direct mapping virtual address corresponding to a physical address.</dd><dt><a class="fn" href="fn.direct_mapping_virt_to_phys.html" title="fn ecraos::mem::vmm::direct_mapping_virt_to_phys">direct_<wbr>mapping_<wbr>virt_<wbr>to_<wbr>phys</a></dt><dd>Computes the physical address corresponding to a direct mapping virtual address.</dd><dt><a class="fn" href="fn.is_layout_initialized.html" title="fn ecraos::mem::vmm::is_layout_initialized">is_<wbr>layout_<wbr>initialized</a></dt><dd>Returns whether the kernel virtual-address layout has been initialized.</dd><dt><a class="fn" href="fn.is_page_table_active.html" title="fn ecraos::mem::vmm::is_page_table_active">is_<wbr>page_<wbr>table_<wbr>active</a></dt><dd>Returns whether the BSP has activated the kernel page table.</dd><dt><a class="fn" href="fn.mode.html" title="fn ecraos::mem::vmm::mode">mode</a></dt><dd>Returns the selected architecture translation mode.</dd><dt><a class="fn" href="fn.page_count_for_bytes.html" title="fn ecraos::mem::vmm::page_count_for_bytes">page_<wbr>count_<wbr>for_<wbr>bytes</a></dt><dd>Returns the number of base pages needed for a byte count.</dd><dt><a class="fn" href="fn.page_size.html" title="fn ecraos::mem::vmm::page_size">page_<wbr>size</a></dt><dd>Returns the selected base page size in bytes.</dd><dt><a class="fn" href="fn.page_size_shift.html" title="fn ecraos::mem::vmm::page_size_shift">page_<wbr>size_<wbr>shift</a></dt><dd>Returns the base-2 logarithm of the selected base page size in bytes.</dd><dt><a class="fn" href="fn.vmalloc_area.html" title="fn ecraos::mem::vmm::vmalloc_area">vmalloc_<wbr>area</a></dt><dd>Returns the virtual address range reserved for vmalloc.</dd><dt><a class="fn" href="fn.vmalloc_base.html" title="fn ecraos::mem::vmm::vmalloc_base">vmalloc_<wbr>base</a></dt><dd>Returns the first virtual address reserved for vmalloc.</dd></dl></section></div></main></body></html>

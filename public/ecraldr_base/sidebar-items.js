@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["kernel_entry"],"constant":["BOOTSTACK_SIZE"],"enum":["PlatformBootArg"],"macro":["call_kernel_entry"],"struct":["BootArg","PhysAddr"],"type":["KernelEntryType","PhysAddrRange"]};

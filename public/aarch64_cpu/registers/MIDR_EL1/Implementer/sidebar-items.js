@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["Ampere","AppliedMicroCircuits","Arm","Broadcom","CLEAR","Cavium","DigitalEquipment","Fujitsu","Infineon","Intel","Marvell","MotorolaOrFreescale","NVIDIA","Qualcomm","Reserved","SET"],"enum":["Value"]};

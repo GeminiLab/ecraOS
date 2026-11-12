@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["flush_local_tlb"],"struct":["X86Level4PageTableMeta","X86Level5PageTableMeta","X86LocalTlbFlusher"]};

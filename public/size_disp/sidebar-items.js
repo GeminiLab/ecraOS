@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["SizeDisplayCompact","SizeDisplayNatural","SizeDisplayWide"],"trait":["SizeDisplay"]};

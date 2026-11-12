@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["app_main_ap","app_main_bsp"],"enum":["IpiError"],"fn":["app_main_ap","app_main_bsp","kernel_entry_ap"],"macro":[["bug",1],["get_symbol_addr",1],["kpanic",1],["kprintln",1]],"mod":["foundation_test","logging","mem","mp","panic","task","tlb"]};

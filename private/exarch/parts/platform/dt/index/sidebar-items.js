@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["with_index","with_index_in"],"trait":["DeviceTreeIndexExt","DeviceTreeIndexNodeExt"]};

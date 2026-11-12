@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["current_cpu_phys_id","phys_to_virt","virt_to_phys"],"trait":["KernelIf"]};

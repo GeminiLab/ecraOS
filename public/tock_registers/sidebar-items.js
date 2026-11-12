@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["bitmask",1],["register_bitfields",1],["register_bitmasks",1],["register_fields",1],["register_structs",1],["test_fields",1]],"mod":["debug","fields","interfaces","macros","registers"],"struct":["LocalRegisterCopy"],"trait":["RegisterLongName","UIntLike"]};

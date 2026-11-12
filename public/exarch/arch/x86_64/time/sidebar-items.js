@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["calibrate_lapic_timer","init_early","monotonic_ticks","nanos_to_ticks","set_oneshot_timer","ticks_to_nanos"]};

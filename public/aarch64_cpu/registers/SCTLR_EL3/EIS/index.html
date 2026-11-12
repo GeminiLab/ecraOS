@@ -1,0 +1,45 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Exception Entry is Context Synchronizing."><title>aarch64_cpu::registers::SCTLR_EL3::EIS - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="aarch64_cpu" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (14210df0e 2026-05-31)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module EIS</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../aarch64_cpu/index.html">aarch64_<wbr>cpu</a><span class="version">11.2.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module EIS</a></h2><h3><a href="#enums">Module Items</a></h3><ul class="block"><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In aarch64_<wbr>cpu::<wbr>registers::<wbr>SCTLR_<wbr>EL3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">aarch64_cpu</a>::<wbr><a href="../../index.html">registers</a>::<wbr><a href="../index.html">SCTLR_EL3</a></div><h1>Module <span>EIS</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../../src/aarch64_cpu/registers/sctlr_el3.rs.html#17-587">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Exception Entry is Context Synchronizing.</p>
+<p><strong>When FEAT_ExS is implemented:</strong></p>
+<ul>
+<li>
+<p>0b0: The taking of an exception to EL3 is not a context synchronizing event.</p>
+</li>
+<li>
+<p>0b1: The taking of an exception to EL3 is a context synchronizing event.</p>
+</li>
+</ul>
+<p>If SCTLR_EL3.EIS is set to 0b0:</p>
+<ul>
+<li>
+<p>Indirect writes to ESR_EL3, FAR_EL3, SPSR_EL3, ELR_EL3 are synchronized on
+exception entry to EL3, so that a direct read of the register after exception entry sees the
+indirectly written value caused by the exception entry.</p>
+</li>
+<li>
+<p>Memory transactions, including instruction fetches, from an Exception level always use the
+translation resources associated with that translation regime.</p>
+</li>
+<li>
+<p>Exception Catch debug events are synchronous debug events.</p>
+</li>
+<li>
+<p>DCPS* and DRPS instructions are context synchronization events.
+The following are not affected by the value of SCTLR_EL3.EIS:</p>
+</li>
+<li>
+<p>Changes to the PSTATE information on entry to EL3.</p>
+</li>
+<li>
+<p>Behavior of accessing the banked copies of the stack pointer using the SP register name for
+loads, stores and data processing instructions.</p>
+</li>
+<li>
+<p>Debug state exit.</p>
+</li>
+</ul>
+<p>The reset behavior of this field is:</p>
+<ul>
+<li>On a Warm reset, in a system where the PE resets into EL3, this field resets to an
+architecturally UNKNOWN value.</li>
+</ul>
+</div></details><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Value.html" title="enum aarch64_cpu::registers::SCTLR_EL3::EIS::Value">Value</a></dt><dd>Exception Entry is Context Synchronizing.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.CLEAR.html" title="constant aarch64_cpu::registers::SCTLR_EL3::EIS::CLEAR">CLEAR</a></dt><dt><a class="constant" href="constant.Context.html" title="constant aarch64_cpu::registers::SCTLR_EL3::EIS::Context">Context</a></dt><dt><a class="constant" href="constant.NotContextSync.html" title="constant aarch64_cpu::registers::SCTLR_EL3::EIS::NotContextSync">NotContext<wbr>Sync</a></dt><dt><a class="constant" href="constant.SET.html" title="constant aarch64_cpu::registers::SCTLR_EL3::EIS::SET">SET</a></dt></dl></section></div></main></body></html>

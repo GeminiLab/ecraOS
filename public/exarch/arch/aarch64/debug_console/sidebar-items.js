@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init","mmio_region","read_bytes","write_bytes"]};

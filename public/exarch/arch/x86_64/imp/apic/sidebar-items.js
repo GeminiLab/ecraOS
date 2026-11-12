@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["end_of_interrupt","init_ap","init_bsp","program_timer_initial","program_tsc_deadline","send_init_ipi","send_sipi","timer_frequency_khz","tsc_deadline_supported","with_local_apic"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FDT_MAGIC","MAX_NODE_NAME_LEN"],"enum":["FdtTok"],"struct":["fdt_header","fdt_prop_header","fdt_reserve_entry"],"type":["Phandle"]};

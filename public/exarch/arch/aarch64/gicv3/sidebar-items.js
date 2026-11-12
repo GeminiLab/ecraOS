@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init_external_controller","init_percpu","prepare_irq","set_irq_enabled"],"struct":["Aarch64ExternalIrqConfig","ArchIrq"]};

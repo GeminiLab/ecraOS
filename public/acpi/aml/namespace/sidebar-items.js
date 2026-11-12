@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["NameComponent","NamespaceLevelKind"],"fn":["is_lead_name_char","is_name_char"],"struct":["AmlName","NameSeg","Namespace","NamespaceLevel","ObjectFlags"]};

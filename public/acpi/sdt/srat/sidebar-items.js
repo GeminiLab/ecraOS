@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SratEntry"],"struct":["EntryHeader","GicInitiatorAffinity","GicItsAffinity","GiccAffinity","LocalApicAffinity","LocalApicAffinityFlags","LocalApicX2Affinity","MemoryAffinity","MemoryAffinityFlags","Srat","SratEntryIter"]};

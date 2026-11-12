@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["VMAllocError"],"fn":["alloc_range","alloc_range_and_map_alloc","alloc_range_and_map_phys_pages","alloc_range_and_map_phys_range","dealloc_range","init_vmalloc","map_alloc","map_phys_pages","map_phys_range","register_external_pages","register_external_range","unmap","virt_to_phys","with_allocator"],"struct":["CompletionDiagnostic","VMAllocator"]};

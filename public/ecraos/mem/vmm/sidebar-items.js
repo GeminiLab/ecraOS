@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EarlyPhase","FormalPhase","StableFormalPhase","VmmState"],"fn":["add_and_map_phys_regions","direct_mapping_offset","direct_mapping_phys_to_virt","direct_mapping_virt_to_phys","is_layout_initialized","is_page_table_active","mode","page_count_for_bytes","page_size","page_size_shift","vmalloc_area","vmalloc_base"],"struct":["MappingTransaction"]};

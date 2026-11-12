@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLEAR","SET","SoftwareStepDisabled","SoftwareStepEnabled"],"enum":["Value"]};

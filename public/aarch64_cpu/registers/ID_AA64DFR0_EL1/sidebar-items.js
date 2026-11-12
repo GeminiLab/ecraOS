@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BRBE","BRPs","CTX_CMPs","DebugVer","MTPMU","PMSVer","PMUVer","TraceBuffer","TraceFilt","TraceVer","WRPs"],"mod":["BRBE","BRPs","CTX_CMPs","DebugVer","MTPMU","PMSVer","PMUVer","TraceBuffer","TraceFilt","TraceVer","WRPs"],"struct":["Register"]};

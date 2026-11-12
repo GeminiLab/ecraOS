@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SLAB_MAX_SIZE"],"enum":["SizeClass"]};

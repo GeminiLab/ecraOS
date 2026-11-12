@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AddressSpace","StandardAccessSize"],"struct":["GenericAddress","MappedGas","RawGenericAddress"]};

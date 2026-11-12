@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["Architecture","Implementer","PartNum","Revision","Variant"],"mod":["Architecture","Implementer","PartNum","Revision","Variant"],"struct":["Register"]};

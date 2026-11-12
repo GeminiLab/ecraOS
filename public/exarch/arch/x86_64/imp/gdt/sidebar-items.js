@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GDT_STRUCT_ENTRY_COUNT"],"fn":["init_gdt","reload_gdt"],"struct":["GdtStruct"]};

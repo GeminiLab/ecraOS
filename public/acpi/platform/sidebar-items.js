@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AcpiMode","ProcessorState"],"mod":["interrupt","numa","pci"],"struct":["AcpiPlatform","PmTimer","Processor","ProcessorInfo"]};

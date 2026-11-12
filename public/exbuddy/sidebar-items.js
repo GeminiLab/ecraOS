@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ORDER"],"enum":["BuddyError"],"fn":["page_count_to_order_ceiling","page_count_to_order_floor"],"mod":["error","pfn"],"struct":["AllocatorStats","BuddyAllocator","BuddySection","BuddySectionIter","BuddySectionIterMut"],"type":["BuddyResult"]};

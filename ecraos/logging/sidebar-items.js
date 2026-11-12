@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["fixed_width_level","init","is_inited"],"mod":["colors"],"static":["INITED","LOGGER_LOCK"],"struct":["Logger"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["bgrt","facs","fadt","hpet","madt","mcfg","slit","spcr","srat"],"struct":["ExtendedField","SdtHeader","Signature"]};
