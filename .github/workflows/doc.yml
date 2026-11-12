@@ -14,6 +14,10 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+    env:
+      RUSTFLAGS: --cfg ecraos_doc
+      # TODO: Add -D rustdoc::broken_intra_doc_links -D missing-docs to RUSTDOCFLAGS.
+      RUSTDOCFLAGS: -Zunstable-options --enable-index-page --cfg ecraos_doc
 
     steps:
       - name: Check out repository
@@ -26,11 +30,36 @@ jobs:
           components: rust-src
 
       - name: Generate documentation
-        # TODO: Add -D rustdoc::broken_intra_doc_links -D missing-docs to RUSTDOCFLAGS.
+        run: cargo doc --manifest-path Cargo.toml --workspace --target-dir target/doc-public
+
+      - name: Generate documentation including private items
         run: >-
-          RUSTFLAGS="--cfg ecraos_doc"
-          RUSTDOCFLAGS="-Zunstable-options --enable-index-page --cfg ecraos_doc"
-          cargo doc --workspace --document-private-items
+          cargo doc --manifest-path Cargo.toml --workspace --target-dir target/doc-private
+          --document-private-items
+
+      - name: Prepare documentation site
+        run: |
+          mkdir -p target/doc-site/public target/doc-site/private
+          cp -a target/doc-public/doc/. target/doc-site/public/
+          cp -a target/doc-private/doc/. target/doc-site/private/
+          touch target/doc-site/.nojekyll
+          cat > target/doc-site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>ecraOS documentation</title>
+          </head>
+          <body>
+            <h1>ecraOS documentation</h1>
+            <ul>
+              <li><a href="public/">Public items</a></li>
+              <li><a href="private/">Public and private items</a></li>
+            </ul>
+          </body>
+          </html>
+          EOF
 
       - name: Deploy documentation
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
@@ -38,4 +67,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: gh-pages
-          folder: target/doc
+          folder: target/doc-site
