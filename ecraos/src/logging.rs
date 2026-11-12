@@ -8,7 +8,7 @@
 //! # Usage
 //!
 //! Use the [`log`] crate macros, such as [`log::info!`] and [`log::error!`], to log messages.
-//! The kernel calls [`init`] during boot.
+//! The kernel initializes the logging subsystem during boot.
 //!
 //! The default maximum level is Debug and cannot be changed currently, so Trace messages are
 //! disabled. It's planned to allow configuration of the maximum level in the future.
