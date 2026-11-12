@@ -19,6 +19,7 @@ use memory_addr::VirtAddr;
 use crate::{
     mp::{self, LogicalCpuId},
     tlb::{self, TlbShootdownError},
+    trap::ipi::IpiError,
 };
 
 #[cfg(test)]
@@ -106,7 +107,7 @@ impl MappingTransaction {
     ///
     /// Returns [`TlbShootdownError::InvalidRequest`] if VMM has not switched to the formal
     /// page-table allocator. Returns [`TlbShootdownError::Ipi`] with
-    /// [`InterruptsDisabled`](crate::ipi::IpiError::InterruptsDisabled) if the interrupt
+    /// [`InterruptsDisabled`](IpiError::InterruptsDisabled) if the interrupt
     /// requirement above is not met.
     pub fn begin() -> Result<Self, TlbShootdownError> {
         match Self::begin_inner(true)? {
@@ -144,9 +145,7 @@ impl MappingTransaction {
         let targets_and_self = mp::ipi_ready_cpu_ids();
         let no_preempt_guard = kernel_guard::NoPreempt::new();
         if wait && mp::is_ipi_ready(mp::current_cpu_id()) && !exarch::trap::local_enabled() {
-            return Err(TlbShootdownError::Ipi(
-                crate::ipi::IpiError::InterruptsDisabled,
-            ));
+            return Err(TlbShootdownError::Ipi(IpiError::InterruptsDisabled));
         }
         let targets = tlb::remote_targets(targets_and_self, mp::current_cpu_id());
         let transaction_id = NEXT_MAPPING_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed);

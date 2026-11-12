@@ -22,7 +22,6 @@ use log::info;
 mod device;
 #[cfg(any(feature = "foundation-test", doc))]
 pub mod foundation_test;
-mod ipi;
 mod kernel_if;
 pub mod logging;
 pub mod mem;
@@ -35,8 +34,8 @@ mod timer;
 pub mod tlb;
 mod trap;
 
-// Temporary re-export, visibility of `ipi` to be reviewed later.
-pub use ipi::IpiError;
+// Temporary re-export, visibility of `trap::ipi` to be reviewed later.
+pub use trap::ipi::IpiError;
 
 #[doc(hidden)]
 pub mod reexport {
@@ -217,7 +216,6 @@ unsafe fn kernel_entry_with_vmm(hart_id: usize, arg: *const ecraldr_base::BootAr
 
     // Initialize the trap and IPI.
     trap::init();
-    ipi::init();
     tlb::init();
     exarch::ipi::init_percpu();
 

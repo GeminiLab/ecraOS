@@ -7,6 +7,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use expercpu::def_percpu;
 
+use crate::trap::ipi;
+
 /// Per-CPU preemption nesting depth.
 ///
 /// Kernel guards balance this counter around task migration boundaries.
@@ -118,15 +120,13 @@ pub fn request_reschedule() {
 /// Requests scheduling on the queue's selected logical CPU.
 ///
 /// Producers call this after queue publication and after releasing all queue and domain locks.
-pub(crate) fn request_reschedule_on(
-    target: crate::mp::LogicalCpuId,
-) -> Result<(), crate::ipi::IpiError> {
+pub(crate) fn request_reschedule_on(target: crate::mp::LogicalCpuId) -> Result<(), ipi::IpiError> {
     let _guard = kernel_guard::NoPreempt::new();
     if target == crate::mp::current_cpu_id() {
         request_reschedule();
         Ok(())
     } else {
-        crate::ipi::notify(target, crate::ipi::IpiReason::Reschedule)
+        ipi::notify(target, ipi::IpiReason::Reschedule)
     }
 }
 

@@ -22,6 +22,7 @@ use crate::{
     },
     mp,
     tlb::TlbShootdownError,
+    trap::ipi::IpiError,
 };
 
 /// Per-page mapping and completion state.
@@ -963,7 +964,7 @@ fn complete_unmap(
 ) -> Result<(), VMAllocError> {
     if !transaction.targets().is_empty() && !exarch::trap::local_enabled() {
         with_allocator(|allocator| allocator.restore_unmutated(&token))??;
-        return Err(TlbShootdownError::Ipi(crate::ipi::IpiError::InterruptsDisabled).into());
+        return Err(TlbShootdownError::Ipi(IpiError::InterruptsDisabled).into());
     }
     let mutation =
         transaction.apply_actions(token.pages.iter().map(|page| PageTableAction::Unmap {

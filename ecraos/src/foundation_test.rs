@@ -11,7 +11,6 @@ use expt::{pt::cleanup::TlbFlusher, pte::MappingFlags};
 use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange};
 
 use crate::{
-    ipi,
     mem::{
         allocs::{palloc, vmalloc},
         vmm,
@@ -19,6 +18,7 @@ use crate::{
     mp::LogicalCpuId,
     task,
     tlb::{self, TlbShootdownError},
+    trap::ipi,
 };
 
 pub use ipi::{IpiDiagnostic, IpiError};

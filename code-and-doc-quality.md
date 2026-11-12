@@ -68,7 +68,6 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
 
 - [ ] ecraos
   - [ ] device
-  - [ ] ipi
   - [ ] kernel_if
   - [x] logging
   - [ ] mem
@@ -90,4 +89,6 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
   - [ ] timer
   - [ ] tlb
   - [ ] trap
+    - [ ] ipi
+    - [ ] irq
 - [ ] exarch

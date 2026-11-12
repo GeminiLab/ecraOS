@@ -13,9 +13,9 @@ use expt::pt::cleanup::{DynTlbFlusher, SMALL_FLUSH_THRESHOLD, TlbFlush, TlbFlush
 use memory_addr::{MemoryAddr, VirtAddr, va};
 
 use crate::{
-    ipi,
     mem::vmm,
     mp::{self, LogicalCpuId},
+    trap::ipi,
 };
 
 /// A rejected request or incomplete remote invalidation.
