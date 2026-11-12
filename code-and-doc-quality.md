@@ -84,7 +84,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
   - [ ] mp
     - [ ] state
   - [x] panic
-  - [ ] percpu
+  - [x] percpu
   - [ ] task
   - [ ] test_guard
   - [ ] timer
