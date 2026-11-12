@@ -24,7 +24,7 @@ mod device;
 pub mod foundation_test;
 mod ipi;
 mod kernel_if;
-mod logging;
+pub mod logging;
 pub mod mem;
 pub mod mp;
 pub mod panic;

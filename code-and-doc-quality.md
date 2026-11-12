@@ -70,7 +70,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
   - [ ] device
   - [ ] ipi
   - [ ] kernel_if
-  - [ ] logging
+  - [x] logging
   - [ ] mem
     - [ ] allocs
       - [ ] malloc
