@@ -18,7 +18,7 @@
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">pub mod </span>sections;
 <a href=#19 id=19 data-nosnippet>19</a><span class="kw">pub mod </span>vmm;
 <a href=#20 id=20 data-nosnippet>20</a>
-<a href=#21 id=21 data-nosnippet>21</a><span class="kw">pub use </span>early::BSP_STACK_SIZE;
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>early::BSP_STACK_SIZE;
 <a href=#22 id=22 data-nosnippet>22</a>
 <a href=#23 id=23 data-nosnippet>23</a><span class="doccomment">/// Returns the usable BSP startup stack range after VMM initialization.
 <a href=#24 id=24 data-nosnippet>24</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bsp_stack_range() -&gt; VirtAddrRange {
@@ -79,7 +79,7 @@
 <a href=#79 id=79 data-nosnippet>79</a>/// `entry_with_vmm` must be the identity-mapped address of an entry function with the
 <a href=#80 id=80 data-nosnippet>80</a>/// [`ecraldr_base::KernelEntryType`] signature. The entry and boot argument must be covered by
 <a href=#81 id=81 data-nosnippet>81</a>/// the physical regions mapped during this call.
-<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">pub unsafe fn </span>init_and_enable_vmm(
+<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">unsafe fn </span>init_and_enable_vmm(
 <a href=#83 id=83 data-nosnippet>83</a>    entry_with_vmm: <span class="kw-2">*const </span>ecraldr_base::KernelEntryType,
 <a href=#84 id=84 data-nosnippet>84</a>    hart_id: usize,
 <a href=#85 id=85 data-nosnippet>85</a>    arg: <span class="kw-2">*const </span>ecraldr_base::BootArg,
@@ -163,7 +163,7 @@
 <a href=#163 id=163 data-nosnippet>163</a>/// The physical allocator first records early allocations as allocated pages, including the active
 <a href=#164 id=164 data-nosnippet>164</a>/// page-table tree. Its owner then transfers to the formal allocator before later initialization
 <a href=#165 id=165 data-nosnippet>165</a>/// can create virtual mappings, while the identity map remains available for secondary CPU startup.
-<a href=#166 id=166 data-nosnippet>166</a></span><span class="kw">pub fn </span>init_after_enable_vmm() {
+<a href=#166 id=166 data-nosnippet>166</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_after_enable_vmm() {
 <a href=#167 id=167 data-nosnippet>167</a>    print_kernel_location(<span class="string">"Kernel location:"</span>);
 <a href=#168 id=168 data-nosnippet>168</a>
 <a href=#169 id=169 data-nosnippet>169</a>    <span class="macro">info!</span>(<span class="string">"Performing later memory initialization after enabling VMM..."</span>);
@@ -197,7 +197,7 @@
 <a href=#197 id=197 data-nosnippet>197</a>    <span class="macro">info!</span>(<span class="string">"Later memory initialization completed"</span>);
 <a href=#198 id=198 data-nosnippet>198</a>}
 <a href=#199 id=199 data-nosnippet>199</a>
-<a href=#200 id=200 data-nosnippet>200</a><span class="kw">pub fn </span>init_ap() {
+<a href=#200 id=200 data-nosnippet>200</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_ap() {
 <a href=#201 id=201 data-nosnippet>201</a>    allocs::malloc::init_malloc_current_cpu();
 <a href=#202 id=202 data-nosnippet>202</a>}
 <a href=#203 id=203 data-nosnippet>203</a>
@@ -205,7 +205,7 @@
 <a href=#205 id=205 data-nosnippet>205</a>///
 <a href=#206 id=206 data-nosnippet>206</a>/// Runs after secondary CPUs finish early startup. Page-table operations use the formal allocator
 <a href=#207 id=207 data-nosnippet>207</a>/// captured by the owner during post-relocation memory initialization.
-<a href=#208 id=208 data-nosnippet>208</a></span><span class="kw">pub fn </span>remove_identity_mappings() {
+<a href=#208 id=208 data-nosnippet>208</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove_identity_mappings() {
 <a href=#209 id=209 data-nosnippet>209</a>    vmm::remove_identity_mapping();
 <a href=#210 id=210 data-nosnippet>210</a>}
 <a href=#211 id=211 data-nosnippet>211</a>
@@ -289,7 +289,7 @@
 <a href=#289 id=289 data-nosnippet>289</a>    <span class="macro">kprintln!</span>();
 <a href=#290 id=290 data-nosnippet>290</a>}
 <a href=#291 id=291 data-nosnippet>291</a>
-<a href=#292 id=292 data-nosnippet>292</a><span class="kw">pub fn </span>print_kernel_location(heading: <span class="kw-2">&amp;</span>str) {
+<a href=#292 id=292 data-nosnippet>292</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>print_kernel_location(heading: <span class="kw-2">&amp;</span>str) {
 <a href=#293 id=293 data-nosnippet>293</a>    <span class="macro">kprintln!</span>(<span class="string">"{}"</span>, heading);
 <a href=#294 id=294 data-nosnippet>294</a>    <span class="macro">kprintln!</span>(<span class="string">"  Kernel range: {:#x}"</span>, sections::kernel_range());
 <a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">for </span>section <span class="kw">in </span>sections::all_sections() {

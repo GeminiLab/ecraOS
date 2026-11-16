@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["BSP_STACK_SIZE"],"fn":["init_after_enable_vmm","init_and_enable_vmm","init_ap","phys_to_virt","print_kernel_location","remove_identity_mappings","virt_to_phys"],"mod":["allocs","pmm","sections","vmm"]};
+window.SIDEBAR_ITEMS = {"fn":["phys_to_virt","virt_to_phys"],"mod":["allocs","pmm","sections","vmm"]};
