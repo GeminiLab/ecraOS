@@ -5,7 +5,7 @@
 <a href=#5 id=5 data-nosnippet>5</a>//
 <a href=#6 id=6 data-nosnippet>6</a>// TODO: find a better and "promised to work" solution. Maybe make `relocate_me` a macro?
 <a href=#7 id=7 data-nosnippet>7</a>
-<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span><span class="kw">crate</span>::kernel_entry;
+<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span><span class="kw">crate</span>::boot::kernel_entry;
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a><span class="doccomment">/// Gets the runtime (and current) address of a symbol, with
 <a href=#11 id=11 data-nosnippet>11</a>/// architecture-specific PC-relative addressing instructions.
@@ -105,7 +105,7 @@
 <a href=#105 id=105 data-nosnippet>105</a>///
 <a href=#106 id=106 data-nosnippet>106</a>///     // The kernel entry is at VMA 0, so the load bias is the actual address of
 <a href=#107 id=107 data-nosnippet>107</a>///     // the kernel entry.
-<a href=#108 id=108 data-nosnippet>108</a>///     let load_bias = unsafe { get_symbol_addr!(crate::kernel_entry) };
+<a href=#108 id=108 data-nosnippet>108</a>///     let load_bias = unsafe { get_symbol_addr!(crate::boot::kernel_entry) };
 <a href=#109 id=109 data-nosnippet>109</a>///     let srela_dyn_addr = unsafe { get_symbol_addr!(_srela_dyn) };
 <a href=#110 id=110 data-nosnippet>110</a>///     let erela_dyn_addr = unsafe { get_symbol_addr!(_erela_dyn) };
 <a href=#111 id=111 data-nosnippet>111</a>///

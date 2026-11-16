@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["alloc_percpu_area_for_ap","init_ap","init_bsp_after_reloc","init_bsp_early","section_size"],"static":["PERCPU_AREAS"],"struct":["PerCpuAreaIfImpl"]};
+window.SIDEBAR_ITEMS = {"fn":["alloc_percpu_area_for_ap","area_base_for","init_ap","init_bsp_after_reloc","init_bsp_early","section_size"],"static":["PERCPU_AREAS"],"struct":["PerCpuAreaIfImpl"]};

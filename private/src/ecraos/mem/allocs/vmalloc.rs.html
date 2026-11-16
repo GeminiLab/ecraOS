@@ -18,10 +18,10 @@
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use crate</span>::{
 <a href=#19 id=19 data-nosnippet>19</a>    mem::{
 <a href=#20 id=20 data-nosnippet>20</a>        allocs::palloc,
-<a href=#21 id=21 data-nosnippet>21</a>        vmm::{<span class="self">self</span>, MappingTransaction},
+<a href=#21 id=21 data-nosnippet>21</a>        vmm::{<span class="self">self</span>, MappingTransaction, TlbShootdownError},
 <a href=#22 id=22 data-nosnippet>22</a>    },
 <a href=#23 id=23 data-nosnippet>23</a>    mp,
-<a href=#24 id=24 data-nosnippet>24</a>    tlb::TlbShootdownError,
+<a href=#24 id=24 data-nosnippet>24</a>    trap::ipi::IpiError,
 <a href=#25 id=25 data-nosnippet>25</a>};
 <a href=#26 id=26 data-nosnippet>26</a>
 <a href=#27 id=27 data-nosnippet>27</a><span class="doccomment">/// Per-page mapping and completion state.
@@ -963,7 +963,7 @@
 <a href=#963 id=963 data-nosnippet>963</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), VMAllocError&gt; {
 <a href=#964 id=964 data-nosnippet>964</a>    <span class="kw">if </span>!transaction.targets().is_empty() &amp;&amp; !exarch::trap::local_enabled() {
 <a href=#965 id=965 data-nosnippet>965</a>        with_allocator(|allocator| allocator.restore_unmutated(<span class="kw-2">&amp;</span>token))<span class="question-mark">??</span>;
-<a href=#966 id=966 data-nosnippet>966</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(TlbShootdownError::Ipi(<span class="kw">crate</span>::ipi::IpiError::InterruptsDisabled).into());
+<a href=#966 id=966 data-nosnippet>966</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(TlbShootdownError::Ipi(IpiError::InterruptsDisabled).into());
 <a href=#967 id=967 data-nosnippet>967</a>    }
 <a href=#968 id=968 data-nosnippet>968</a>    <span class="kw">let </span>mutation =
 <a href=#969 id=969 data-nosnippet>969</a>        transaction.apply_actions(token.pages.iter().map(|page| PageTableAction::Unmap {
@@ -1041,7 +1041,7 @@
 <a href=#1041 id=1041 data-nosnippet>1041</a>) -&gt; <span class="prelude-ty">Result</span>&lt;u64, VMAllocError&gt; {
 <a href=#1042 id=1042 data-nosnippet>1042</a>    <span class="kw">let </span><span class="kw-2">mut </span>transaction = MappingTransaction::begin()<span class="question-mark">?</span>;
 <a href=#1043 id=1043 data-nosnippet>1043</a>    <span class="kw">let </span>size = vmm::page_size();
-<a href=#1044 id=1044 data-nosnippet>1044</a>    <span class="kw">crate</span>::tlb::validate(<span class="kw-2">&amp;</span>requests, size)<span class="question-mark">?</span>;
+<a href=#1044 id=1044 data-nosnippet>1044</a>    vmm::tlb::validate(<span class="kw-2">&amp;</span>requests, size)<span class="question-mark">?</span>;
 <a href=#1045 id=1045 data-nosnippet>1045</a>    VMAllocator::validate_range(range, size)<span class="question-mark">?</span>;
 <a href=#1046 id=1046 data-nosnippet>1046</a>    <span class="kw">if </span>values.len() != range.size() / size
 <a href=#1047 id=1047 data-nosnippet>1047</a>        || !<span class="kw">match </span><span class="kw-2">&amp;</span>requests {
@@ -1139,7 +1139,7 @@
 <a href=#1139 id=1139 data-nosnippet>1139</a>        })<span class="question-mark">?</span>;
 <a href=#1140 id=1140 data-nosnippet>1140</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(error);
 <a href=#1141 id=1141 data-nosnippet>1141</a>    }
-<a href=#1142 id=1142 data-nosnippet>1142</a>    <span class="kw">let </span>generation = <span class="kw">crate</span>::tlb::published_generation();
+<a href=#1142 id=1142 data-nosnippet>1142</a>    <span class="kw">let </span>generation = vmm::tlb::published_generation();
 <a href=#1143 id=1143 data-nosnippet>1143</a>    with_allocator(|allocator| {
 <a href=#1144 id=1144 data-nosnippet>1144</a>        <span class="kw">let </span>(<span class="kw">_</span>, allocation) = allocator
 <a href=#1145 id=1145 data-nosnippet>1145</a>            .ranges
