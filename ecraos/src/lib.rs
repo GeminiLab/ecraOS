@@ -33,8 +33,6 @@ mod test_guard;
 mod timer;
 mod trap;
 
-pub use boot::kernel_entry_ap;
-
 // Temporary re-export, visibility of `trap::ipi` to be reviewed later.
 pub use trap::ipi::IpiError;
 

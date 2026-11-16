@@ -12,6 +12,7 @@ use crate::boot::kernel_entry;
 ///
 /// It's safe to use this macro even when relocation is not performed.
 #[macro_export]
+#[doc(hidden)]
 macro_rules! get_symbol_addr {
     ($symbol:expr) => {{
         let addr: usize;

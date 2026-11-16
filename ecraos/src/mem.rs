@@ -18,7 +18,7 @@ pub(crate) mod reloc;
 pub mod sections;
 pub mod vmm;
 
-pub use early::BSP_STACK_SIZE;
+pub(crate) use early::BSP_STACK_SIZE;
 
 /// Returns the usable BSP startup stack range after VMM initialization.
 pub(crate) fn bsp_stack_range() -> VirtAddrRange {
@@ -79,7 +79,7 @@ fn phys_addr_is_known(addr: PhysAddr) -> bool {
 /// `entry_with_vmm` must be the identity-mapped address of an entry function with the
 /// [`ecraldr_base::KernelEntryType`] signature. The entry and boot argument must be covered by
 /// the physical regions mapped during this call.
-pub unsafe fn init_and_enable_vmm(
+pub(crate) unsafe fn init_and_enable_vmm(
     entry_with_vmm: *const ecraldr_base::KernelEntryType,
     hart_id: usize,
     arg: *const ecraldr_base::BootArg,
@@ -163,7 +163,7 @@ pub unsafe fn init_and_enable_vmm(
 /// The physical allocator first records early allocations as allocated pages, including the active
 /// page-table tree. Its owner then transfers to the formal allocator before later initialization
 /// can create virtual mappings, while the identity map remains available for secondary CPU startup.
-pub fn init_after_enable_vmm() {
+pub(crate) fn init_after_enable_vmm() {
     print_kernel_location("Kernel location:");
 
     info!("Performing later memory initialization after enabling VMM...");
@@ -197,7 +197,7 @@ pub fn init_after_enable_vmm() {
     info!("Later memory initialization completed");
 }
 
-pub fn init_ap() {
+pub(crate) fn init_ap() {
     allocs::malloc::init_malloc_current_cpu();
 }
 
@@ -205,7 +205,7 @@ pub fn init_ap() {
 ///
 /// Runs after secondary CPUs finish early startup. Page-table operations use the formal allocator
 /// captured by the owner during post-relocation memory initialization.
-pub fn remove_identity_mappings() {
+pub(crate) fn remove_identity_mappings() {
     vmm::remove_identity_mapping();
 }
 
@@ -289,7 +289,7 @@ pub(crate) fn print_mem_regions(heading: &str, mem_regions: &[PhysMemoryRegion])
     kprintln!();
 }
 
-pub fn print_kernel_location(heading: &str) {
+pub(crate) fn print_kernel_location(heading: &str) {
     kprintln!("{}", heading);
     kprintln!("  Kernel range: {:#x}", sections::kernel_range());
     for section in sections::all_sections() {

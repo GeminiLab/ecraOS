@@ -20,7 +20,7 @@ use log::{debug, info, warn};
 use memory_addr::VirtAddrRange;
 use semantic_types::semantic_type;
 
-use crate::{kernel_entry_ap, percpu};
+use crate::{boot::kernel_entry_ap, percpu};
 
 /// CPU startup lifecycle states.
 ///
