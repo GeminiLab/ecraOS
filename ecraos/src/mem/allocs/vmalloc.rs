@@ -18,10 +18,9 @@ use memory_range_set::{RangeSet, TryInsertError};
 use crate::{
     mem::{
         allocs::palloc,
-        vmm::{self, MappingTransaction},
+        vmm::{self, MappingTransaction, TlbShootdownError},
     },
     mp,
-    tlb::TlbShootdownError,
     trap::ipi::IpiError,
 };
 
@@ -1042,7 +1041,7 @@ pub(crate) fn replace_for_foundation(
 ) -> Result<u64, VMAllocError> {
     let mut transaction = MappingTransaction::begin()?;
     let size = vmm::page_size();
-    crate::tlb::validate(&requests, size)?;
+    vmm::tlb::validate(&requests, size)?;
     VMAllocator::validate_range(range, size)?;
     if values.len() != range.size() / size
         || !match &requests {
@@ -1140,7 +1139,7 @@ pub(crate) fn replace_for_foundation(
         })?;
         return Err(error);
     }
-    let generation = crate::tlb::published_generation();
+    let generation = vmm::tlb::published_generation();
     with_allocator(|allocator| {
         let (_, allocation) = allocator
             .ranges

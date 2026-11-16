@@ -5,7 +5,7 @@
 //
 // TODO: find a better and "promised to work" solution. Maybe make `relocate_me` a macro?
 
-use crate::kernel_entry;
+use crate::boot::kernel_entry;
 
 /// Gets the runtime (and current) address of a symbol, with
 /// architecture-specific PC-relative addressing instructions.
@@ -105,7 +105,7 @@ const RELATIVE_TYPE: u32 = {
 ///
 ///     // The kernel entry is at VMA 0, so the load bias is the actual address of
 ///     // the kernel entry.
-///     let load_bias = unsafe { get_symbol_addr!(crate::kernel_entry) };
+///     let load_bias = unsafe { get_symbol_addr!(crate::boot::kernel_entry) };
 ///     let srela_dyn_addr = unsafe { get_symbol_addr!(_srela_dyn) };
 ///     let erela_dyn_addr = unsafe { get_symbol_addr!(_erela_dyn) };
 ///

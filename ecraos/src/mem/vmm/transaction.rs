@@ -18,7 +18,6 @@ use memory_addr::VirtAddr;
 
 use crate::{
     mp::{self, LogicalCpuId},
-    tlb::{self, TlbShootdownError},
     trap::ipi::IpiError,
 };
 
@@ -26,10 +25,11 @@ use crate::{
 mod tests;
 
 use super::{
-    VIRTUAL_ADDRESS_SPACE,
+    TlbShootdownError, VIRTUAL_ADDRESS_SPACE,
     direct_mapping::FinalRegions,
     finish_local_cleanup,
     state::{FormalPhase, StableFormalPhase, VmmState},
+    tlb,
 };
 
 /// The next [`MappingTransaction`] identifier.

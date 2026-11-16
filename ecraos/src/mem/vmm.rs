@@ -161,6 +161,7 @@ use crate::{kprintln, mem::allocs};
 
 mod direct_mapping;
 mod state;
+pub(crate) mod tlb;
 mod transaction;
 
 #[cfg(test)]
@@ -169,6 +170,7 @@ mod tests;
 pub use direct_mapping::add_and_map_phys_regions;
 pub(super) use direct_mapping::{init_vmm_mapping_early, remove_identity_mapping};
 pub use state::{EarlyPhase, FormalPhase, StableFormalPhase, VmmState};
+pub use tlb::TlbShootdownError;
 pub use transaction::MappingTransaction;
 
 /// The layout of the virtual address space.

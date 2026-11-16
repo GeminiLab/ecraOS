@@ -67,6 +67,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
 ### Module list for `ecraos` and `exarch`
 
 - [ ] ecraos
+  - [ ] boot
   - [ ] device
   - [ ] kernel_if
   - [x] logging
@@ -80,6 +81,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
     - [ ] reloc
     - [ ] sections
     - [x] vmm
+      - [ ] tlb
   - [ ] mp
     - [ ] state
   - [x] panic
@@ -87,7 +89,6 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
   - [ ] task
   - [ ] test_guard
   - [ ] timer
-  - [ ] tlb
   - [ ] trap
     - [ ] ipi
     - [ ] irq

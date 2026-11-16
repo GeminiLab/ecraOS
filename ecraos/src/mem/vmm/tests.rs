@@ -5,11 +5,9 @@ use core::cell::RefCell;
 use expt::pt::cleanup::{PendingCleanup, TlbFlush, TlbFlusher, TlbFlushes};
 use memory_addr::{VirtAddr, pa, va};
 
-use crate::tlb::TlbShootdownError;
-
 use super::{
-    MappingTransaction, direct_mapping_phys_to_virt, direct_mapping_virt_to_phys,
-    finish_local_cleanup, is_layout_initialized, is_page_table_active,
+    MappingTransaction, TlbShootdownError, direct_mapping_phys_to_virt,
+    direct_mapping_virt_to_phys, finish_local_cleanup, is_layout_initialized, is_page_table_active,
 };
 
 /// Verifies that an uninitialized VMM returns `false` for readiness and `None` for conversions.

@@ -13,11 +13,10 @@ use memory_addr::{AddrRangeBounds, MemoryAddr, PhysAddr, VirtAddr, VirtAddrRange
 use crate::{
     mem::{
         allocs::{palloc, vmalloc},
-        vmm,
+        vmm::{self, TlbShootdownError, tlb},
     },
     mp::LogicalCpuId,
     task,
-    tlb::{self, TlbShootdownError},
     trap::ipi,
 };
 
