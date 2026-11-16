@@ -95,10 +95,15 @@ pub(crate) unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::Boot
     unsafe { mem::reloc::relocate_me() };
 
     // Clear the BSS.
-    mem::sections::clear_bss();
+    //
+    // SAFETY: Initial relocation is complete, interrupts are disabled, and only the BSP is
+    // executing kernel code. BSS-backed state and the per-CPU early slot are still unused, and
+    // the loader provides writable storage for the kernel BSS.
+    unsafe { mem::sections::clear_bss() };
 
     // Initialize the per-CPU data area using the early slot. We must initialize percpu as early as
     // possible, as it may be used while initializing interrupts and timers.
+    //
     // SAFETY: BSS is cleared, interrupts are disabled, and only the BSP can access the early slot.
     unsafe { percpu::init_bsp_early() };
 
@@ -123,6 +128,7 @@ pub(crate) unsafe fn kernel_entry(hart_id: usize, arg: *const ecraldr_base::Boot
     );
 
     // Enable the VMM, and jump to the upper address space.
+    //
     // SAFETY: Early BSP initialization is complete and interrupts remain disabled. The loader
     // provides the valid boot argument, and the kernel entry and argument lie in mapped regions.
     unsafe { mem::init_and_enable_vmm(kernel_entry_with_vmm as *const _, hart_id, arg) }
@@ -213,6 +219,7 @@ pub unsafe fn kernel_entry_ap(phys_id: usize) -> ! {
     let cpu_id = mp::phys_to_logi_id(phys_id.into());
 
     // Initialize the per-CPU data area for the AP.
+    //
     // SAFETY: This AP starts once, with interrupts disabled and its allocated area unused.
     // The physical-to-logical CPU map selects its own area before any per-CPU access.
     unsafe { percpu::init_ap(cpu_id) };

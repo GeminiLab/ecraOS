@@ -79,7 +79,7 @@ RUSTFLAGS="--cfg ecraos_doc" RUSTDOCFLAGS="-Zunstable-options --enable-index-pag
     - [ ] early
     - [x] pmm
     - [ ] reloc
-    - [ ] sections
+    - [x] sections
     - [x] vmm
       - [ ] tlb
   - [ ] mp
